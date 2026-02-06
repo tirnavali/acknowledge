@@ -1,12 +1,13 @@
-import sys, os  
+import sys, os
 import random
+import logging
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtGui import QAction
 
 from event_card_widget import EventCardWidget
 from gallery_item_model import GalleryItemModel, GalleryItem
 from sqlalchemy import text
-from src.database import SessionLocal, Base, engine
+from src.database import get_db, Base, engine
 import src.models
 from dotenv import load_dotenv
 import add_event_window
@@ -33,12 +34,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def init_db(self):
         print("⏳ Veritabanı tabloları güncelleniyor...")
         
-        with SessionLocal() as db:
-            db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            db.commit()
+        try:
+            with get_db() as db:
+                db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                db.commit()
 
-        Base.metadata.create_all(bind=engine)
-        print("✅ Veritabanı tabloları hazır.")
+            Base.metadata.create_all(bind=engine)
+            print("✅ Veritabanı tabloları hazır.")
+        except Exception as e:
+            error_msg = f"❌ Veritabanı bağlantı hatası: {str(e)}"
+            logging.error(error_msg)
+            print(error_msg)
+            print("💡 İpucu: PostgreSQL çalışıyor mu? 'docker-compose up -d' komutunu deneyin.")
+            QtWidgets.QMessageBox.critical(
+                None,
+                "Veritabanı Hatası",
+                f"Veritabanına bağlanılamadı.\n\n{str(e)}\n\nLütfen PostgreSQL'in çalıştığından emin olun."
+            )
+            sys.exit(1)
     
     def UI(self):
         self.init_toolbar()
