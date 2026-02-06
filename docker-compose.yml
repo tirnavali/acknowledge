@@ -1,0 +1,35 @@
+services:
+  # Ana Veritabanı (Vektör destekli)
+  db:
+    image: ankane/pgvector:latest # Yüz tanıma vektörleri için özel imaj
+    container_name: tirnavali_acknowledge_db
+    environment:
+      POSTGRES_USER: tirnavali
+      POSTGRES_PASSWORD: tbmm1920
+      POSTGRES_DB: tirnavali_acknowledge_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Veritabanı Yönetim Paneli (Web Arayüzü)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: tirnavali_acknowledge_db_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: sercantirnavali@live.com
+      PGADMIN_DEFAULT_PASSWORD: tbmm1920
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  # İleride ElasticSearch gerekirse buradaki yorumu açarsınız
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+  #   ...
+
+volumes:
+  postgres_data:

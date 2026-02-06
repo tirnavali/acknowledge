@@ -1,0 +1,6 @@
+PySide6
+Pillow
+sqlalchemy
+psycopg2-binary
+pgvector
+python-dotenv
