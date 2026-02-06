@@ -6,8 +6,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class AddEvent(QtWidgets.QWidget):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(QtCore.Qt.Window)  # Bağımsız pencere olarak aç
         self.setWindowTitle("Yeni Etkinlik")
         self.setGeometry(100, 100, 800, 600)
         self.setFixedSize(self.size())
@@ -90,6 +91,7 @@ class AddEvent(QtWidgets.QWidget):
                     source_folder=event_folder
                 )
                 QtWidgets.QMessageBox.information(self, "Başarılı", f"Etkinlik oluşturuldu: {event.name}")
+                self.parent().refresh_events()
                 self.close()
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Hata", f"İçe aktarma hatası: {str(e)}")

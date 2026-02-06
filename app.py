@@ -74,7 +74,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toolbar_widget.show()
 
     def add_event_window(self):
-        self.add_event_win = add_event_window.AddEvent()
+        self.add_event_win = add_event_window.AddEvent(parent=self)
 
 
     def tabWidget(self):
@@ -90,6 +90,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def fetch_events(self):
         return EventRepository().get_all()
+    
+    def load_events(self):
+        """Load events from database and populate the list widget"""
+        events = self.fetch_events()
+        for event in events:
+            item = QtWidgets.QListWidgetItem(self.event_card_list_widget)
+            card = EventCardWidget(event.name, event.event_date)
+            item.setSizeHint(card.sizeHint())
+            self.event_card_list_widget.addItem(item)
+            self.event_card_list_widget.setItemWidget(item, card)
+    
+    def refresh_events(self):
+        """Clear and reload the event list"""
+        self.event_card_list_widget.clear()
+        self.load_events()
 
     def fetch_gallery_items(self, folder_path):
         items = []
@@ -114,14 +129,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_card_list_widget = QtWidgets.QListWidget()
         self.event_card_list_widget.setMaximumWidth(200)
         
-        # Add a custom item to the list widget
-        events = self.fetch_events()
-        for i in events:
-            item = QtWidgets.QListWidgetItem(self.event_card_list_widget)
-            card = EventCardWidget(i.name, i.event_date)
-            item.setSizeHint(card.sizeHint())
-            self.event_card_list_widget.addItem(item)
-            self.event_card_list_widget.setItemWidget(item, card)
+        # Load events into the list
+        self.load_events()
+        
         # Gallery search section
         self.event_gallery_search = QtWidgets.QLineEdit()
         self.event_gallery_search.setPlaceholderText("EXIF İçinde Ara...")
