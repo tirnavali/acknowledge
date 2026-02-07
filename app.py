@@ -17,7 +17,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Tirnavali Acknowledge")
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 1200, 800)
         self.init_db()
         self.init_vault()
         self.UI()
@@ -68,6 +68,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.init_toolbar()
         self.tabWidget()
         self.event_widgets()
+        # self.media_details_form_widget()
         self.layouts()
 
     def init_toolbar(self):
@@ -168,20 +169,94 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
         self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
 
+    def media_details_form_widget(self):
+        """Create form fields for media details"""
+        fixed_width = 300
+        # Create input fields and store references
+        self.media_title_input = QtWidgets.QTextEdit()
+        self.media_title_input.setMaximumHeight(50)
+        self.media_title_input.setFixedWidth(fixed_width)
+        self.media_title_input.setPlaceholderText("Title")
+        
+        self.media_date_input = QtWidgets.QDateTimeEdit()
+        self.media_date_input.setFixedWidth(fixed_width)
+        self.media_date_input.setCalendarPopup(True)
+        self.media_date_input.setDisplayFormat("dd.MM.yyyy HH:mm")
+        
+        self.media_location_input = QtWidgets.QLineEdit()
+        self.media_location_input.setFixedWidth(fixed_width)
+        self.media_location_input.setPlaceholderText("Location")
+        
+        self.media_description_input = QtWidgets.QTextEdit()
+        self.media_description_input.setMaximumHeight(100)
+        self.media_description_input.setFixedWidth(fixed_width)
+        
+        self.media_tags_input = QtWidgets.QTextEdit()
+        self.media_tags_input.setFixedWidth(fixed_width)
+        self.media_tags_input.setPlaceholderText("Tags")
+        self.media_tags_input.setMaximumHeight(50)
+  
+        
+        # Create labels with icons only (tooltips on hover)
+        style = self.style()
+        
+        # Title label with icon
+        title_label = QtWidgets.QLabel("📝")
+        title_label.setToolTip("Title - The name or title of the media")
+        
+        # Date label with icon
+        date_label = QtWidgets.QLabel("📅")
+        date_label.setToolTip("Date - When the media was created or captured")
+        
+        # Location label with icon
+        location_label = QtWidgets.QLabel("📍")
+        location_label.setToolTip("Location - Where the media was captured")
+        
+        # Description label with icon
+        description_label = QtWidgets.QLabel("📄")
+        description_label.setToolTip("Description - Detailed description of the media content")
+        
+        # Tags label with icon
+        tags_label = QtWidgets.QLabel("🏷️")
+        tags_label.setToolTip("Tags - Categories or labels for organizing media")
+        
+        # Add rows to form layout (label, input)
+        self.media_details_form.addRow(title_label, self.media_title_input)
+        self.media_details_form.addRow(date_label, self.media_date_input)
+        self.media_details_form.addRow(location_label, self.media_location_input)
+        self.media_details_form.addRow(description_label, self.media_description_input)
+        self.media_details_form.addRow(tags_label, self.media_tags_input)
+        
+        # Optional: Add some styling
+        self.media_details_form.setLabelAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.media_details_form.setFormAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+        self.media_details_form.setHorizontalSpacing(5)  # Reduce horizontal space between label and input
+        self.media_details_form.setVerticalSpacing(2)    # Compact vertical spacing
+
         
     def layouts(self):
         self.events_layout = QtWidgets.QHBoxLayout()
         self.events_column = QtWidgets.QVBoxLayout()
         self.events_gallery = QtWidgets.QVBoxLayout()
         
+        # Create a container widget for the form with max height
+        self.media_details_container = QtWidgets.QWidget()
+        self.media_details_container.setMaximumHeight(300)  # Set max height
+        self.media_details_container.setMaximumWidth(500)
+        self.media_details_form = QtWidgets.QFormLayout()
+        self.media_details_container.setLayout(self.media_details_form)
+        
         self.events_layout.addLayout(self.events_column)
         self.events_layout.addLayout(self.events_gallery)
+        self.events_layout.addWidget(self.media_details_container, alignment=QtCore.Qt.AlignTop)  # Align to top
         # event column
         self.events_column.addWidget(self.event_search)
         self.events_column.addWidget(self.event_card_list_widget)
         # event gallery
         self.events_gallery.addWidget(self.event_gallery_search)
-        self.events_gallery.addWidget(self.event_gallery_list_widget)       
+        self.events_gallery.addWidget(self.event_gallery_list_widget)  
+        # media details
+        self.media_details_form_widget()     
        
        
         
