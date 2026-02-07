@@ -140,6 +140,24 @@ class MainWindow(QtWidgets.QMainWindow):
         items = self.load_gallery_items(event.id)
         self.gallery_item_model = GalleryItemModel(items)
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
+    
+    def on_gallery_item_clicked(self, index):
+        """Handle gallery item click - print EXIF data to console"""
+        item = self.gallery_item_model.itemFromIndex(index)
+        if item:
+            print("\n" + "="*60)
+            print(f"📷 Image: {item.img_path}")
+            print("="*60)
+            
+            if item.exif_data:
+                print("\n📋 EXIF Data:")
+                for key, value in item.exif_data.items():
+                    print(f"  {key}: {value}")
+            else:
+                print("  No EXIF data available")
+            
+            print("="*60 + "\n")
+
 
     def event_widgets(self):
         self.event_search = QtWidgets.QLineEdit()
@@ -168,6 +186,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gallery_item_model = GalleryItemModel([])
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
         self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
+        
+        # Connect click event to print EXIF data
+        self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
 
     def media_details_form_widget(self):
         """Create form fields for media details"""
@@ -257,8 +278,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.events_gallery.addWidget(self.event_gallery_list_widget)  
         # media details
         self.media_details_form_widget()     
-       
-       
         
         self.events_tab.setLayout(self.events_layout)
 
