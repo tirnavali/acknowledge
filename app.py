@@ -34,6 +34,33 @@ class MainWindow(QtWidgets.QMainWindow):
     def init_db(self):
         print("⏳ Veritabanı tabloları güncelleniyor...")
         
+        # Check if database engine was successfully created
+        if engine is None:
+            error_msg = """
+╔══════════════════════════════════════════════════════════════╗
+║        VERİTABANI YAPILANDIRMASI GEREKLİ                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+Uygulama çalışmadan önce veritabanı yapılandırması gereklidir.
+
+📝 Yapılması gerekenler:
+
+1️⃣  .env dosyası oluşturun (proje kök dizininde)
+2️⃣  Docker Desktop'ı yükleyin ve başlatın
+3️⃣  Terminal'de: docker-compose up -d
+
+Detaylı bilgi için konsol çıktısına bakın.
+"""
+            print(error_msg)
+            QtWidgets.QMessageBox.critical(
+                None,
+                "Veritabanı Yapılandırması Gerekli",
+                "Veritabanı yapılandırması bulunamadı!\n\n"
+                "Lütfen .env dosyasını oluşturun ve Docker Desktop'ı başlatın.\n\n"
+                "Detaylı talimatlar için terminal çıktısına bakın."
+            )
+            sys.exit(1)
+        
         try:
             with get_db() as db:
                 db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -45,11 +72,17 @@ class MainWindow(QtWidgets.QMainWindow):
             error_msg = f"❌ Veritabanı bağlantı hatası: {str(e)}"
             logging.error(error_msg)
             print(error_msg)
-            print("💡 İpucu: PostgreSQL çalışıyor mu? 'docker-compose up -d' komutunu deneyin.")
+            print("\n💡 Olası çözümler:")
+            print("   • Docker Desktop çalışıyor mu? Kontrol edin.")
+            print("   • Terminal'de şu komutu deneyin: docker-compose up -d")
+            print("   • .env dosyasındaki ayarlar docker-compose.yml ile eşleşiyor mu?")
             QtWidgets.QMessageBox.critical(
                 None,
-                "Veritabanı Hatası",
-                f"Veritabanına bağlanılamadı.\n\n{str(e)}\n\nLütfen PostgreSQL'in çalıştığından emin olun."
+                "Veritabanı Bağlantı Hatası",
+                f"Veritabanına bağlanılamadı!\n\n"
+                f"Hata: {str(e)}\n\n"
+                f"Lütfen Docker Desktop'ın çalıştığından ve\n"
+                f".env dosyasının doğru yapılandırıldığından emin olun."
             )
             sys.exit(1)
     
