@@ -130,19 +130,17 @@ Detaylı bilgi için konsol çıktısına bakın.
         for event in events:
             item = QtWidgets.QListWidgetItem(self.event_card_list_widget)
             card = EventCardWidget(event.name, event.event_date)
+            # Connect the click signal to a handler
+            card.clicked.connect(lambda e=event: self.on_event_card_clicked(e))
             item.setSizeHint(card.sizeHint())
             self.event_card_list_widget.addItem(item)
             self.event_card_list_widget.setItemWidget(item, card)
     
-    def refresh_events(self):
-        """Clear and reload the event list"""
-        self.event_card_list_widget.clear()
-        self.load_events()
-
-    def fetch_gallery_items(self, folder_path):
+    def load_gallery_items(self, event_id):
         items = []
+        event = EventRepository().get_by_id(event_id)
         # Use absolute path to avoid issues with current working directory
-        abs_folder_path = os.path.abspath(folder_path)
+        abs_folder_path = os.path.abspath(event.vault_folder_path)
         if not os.path.exists(abs_folder_path):
             return items
             
@@ -152,6 +150,17 @@ Detaylı bilgi için konsol çıktısına bakın.
                 item = GalleryItem(filename, img_path)
                 items.append(item)
         return items
+
+    def refresh_events(self):
+        """Clear and reload the event list"""
+        self.event_card_list_widget.clear()
+        self.load_events()
+    
+    def on_event_card_clicked(self, event):
+        """Handle event card click"""
+        items = self.load_gallery_items(event.id)
+        self.gallery_item_model = GalleryItemModel(items)
+        self.event_gallery_list_widget.setModel(self.gallery_item_model)
 
     def event_widgets(self):
         self.event_search = QtWidgets.QLineEdit()
@@ -177,7 +186,7 @@ Detaylı bilgi için konsol çıktısına bakın.
         self.event_gallery_list_widget.setGridSize(QtCore.QSize(180, 200))
         self.event_gallery_list_widget.setSpacing(10)
         self.event_gallery_list_widget.setUniformItemSizes(True)
-        self.gallery_item_model = GalleryItemModel(self.fetch_gallery_items(f"{self.media_vault_path}/event_00001/"))
+        self.gallery_item_model = GalleryItemModel([])
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
         self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
 
