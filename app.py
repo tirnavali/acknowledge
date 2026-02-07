@@ -34,24 +34,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def init_db(self):
         print("⏳ Veritabanı tabloları güncelleniyor...")
         
-        # Check if database engine was successfully created
+        # Validate database configuration
         if engine is None:
-            error_msg = """
-╔══════════════════════════════════════════════════════════════╗
-║        VERİTABANI YAPILANDIRMASI GEREKLİ                     ║
-╚══════════════════════════════════════════════════════════════╝
-
-Uygulama çalışmadan önce veritabanı yapılandırması gereklidir.
-
-📝 Yapılması gerekenler:
-
-1️⃣  .env dosyası oluşturun (proje kök dizininde)
-2️⃣  Docker Desktop'ı yükleyin ve başlatın
-3️⃣  Terminal'de: docker-compose up -d
-
-Detaylı bilgi için konsol çıktısına bakın.
-"""
-            print(error_msg)
             QtWidgets.QMessageBox.critical(
                 None,
                 "Veritabanı Yapılandırması Gerekli",
@@ -69,20 +53,14 @@ Detaylı bilgi için konsol çıktısına bakın.
             Base.metadata.create_all(bind=engine)
             print("✅ Veritabanı tabloları hazır.")
         except Exception as e:
-            error_msg = f"❌ Veritabanı bağlantı hatası: {str(e)}"
-            logging.error(error_msg)
-            print(error_msg)
-            print("\n💡 Olası çözümler:")
-            print("   • Docker Desktop çalışıyor mu? Kontrol edin.")
-            print("   • Terminal'de şu komutu deneyin: docker-compose up -d")
-            print("   • .env dosyasındaki ayarlar docker-compose.yml ile eşleşiyor mu?")
+            logging.error(f"❌ Veritabanı bağlantı hatası: {str(e)}")
             QtWidgets.QMessageBox.critical(
                 None,
                 "Veritabanı Bağlantı Hatası",
                 f"Veritabanına bağlanılamadı!\n\n"
                 f"Hata: {str(e)}\n\n"
-                f"Lütfen Docker Desktop'ın çalıştığından ve\n"
-                f".env dosyasının doğru yapılandırıldığından emin olun."
+                f"Docker Desktop çalışıyor mu?\n"
+                f"Terminal'de 'docker-compose up -d' komutunu deneyin."
             )
             sys.exit(1)
     
