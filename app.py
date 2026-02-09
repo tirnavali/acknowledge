@@ -142,17 +142,56 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
     
     def on_gallery_item_clicked(self, index):
-        """Handle gallery item click - print EXIF data to console"""
+        """Handle gallery item click - populate form with EXIF data"""
         item = self.gallery_item_model.itemFromIndex(index)
         if item:
             print("\n" + "="*60)
             print(f"📷 Image: {item.img_path}")
             print("="*60)
             
+            # Clear all fields first to ensure refresh
+            self.media_title_input.clear()
+            self.media_location_input.clear()
+            self.media_description_input.clear()
+            self.media_tags_input.clear()
+            
             if item.exif_data:
                 print("\n📋 EXIF Data:")
                 for key, value in item.exif_data.items():
                     print(f"  {key}: {value}")
+                
+                # Populate form fields from EXIF data
+                # Title (from Windows XP Title tag)
+                if 'Title' in item.exif_data:
+                    title_text = str(item.exif_data['Title'])
+                    print(f"🔧 Setting Title: {title_text}")
+                    self.media_title_input.setPlainText(title_text)
+                elif 'Subject' in item.exif_data:
+                    subject_text = str(item.exif_data['Subject'])
+                    print(f"🔧 Setting Subject as Title: {subject_text}")
+                    self.media_title_input.setPlainText(subject_text)
+                
+                # Date - Note: PIL EXIF doesn't include date fields in the current implementation
+                # You may need to extend __read_exif in gallery_item_model.py to include DateTimeOriginal
+                self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
+                
+                # Description (from Comments)
+                if 'Subject' in item.exif_data:
+                    description_text = str(item.exif_data['Subject'])
+                    print(f"🔧 Setting Description: {description_text}")
+                    self.media_description_input.setPlainText(description_text)
+                
+                # Tags (from Windows XP Keywords)
+                if 'Tags' in item.exif_data:
+                    tags_text = str(item.exif_data['Tags'])
+                    print(f"🔧 Setting Tags: {tags_text}")
+                    self.media_tags_input.setPlainText(tags_text)
+                
+                # Force widget updates
+                self.media_title_input.update()
+                self.media_description_input.update()
+                self.media_tags_input.update()
+                
             else:
                 print("  No EXIF data available")
             
@@ -215,7 +254,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_tags_input = QtWidgets.QTextEdit()
         self.media_tags_input.setFixedWidth(fixed_width)
         self.media_tags_input.setPlaceholderText("Tags")
-        self.media_tags_input.setMaximumHeight(50)
+        self.media_tags_input.setMaximumHeight(100)
   
         
         # Create labels with icons only (tooltips on hover)
