@@ -142,7 +142,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
     
     def on_gallery_item_clicked(self, index):
-        """Handle gallery item click - populate form with EXIF data"""
+        """Handle gallery item click - populate form with EXIF and IPTC data"""
         item = self.gallery_item_model.itemFromIndex(index)
         if item:
             print("\n" + "="*60)
@@ -155,45 +155,90 @@ class MainWindow(QtWidgets.QMainWindow):
             self.media_description_input.clear()
             self.media_tags_input.clear()
             
+            # Print EXIF Data independently
+            print("\n" + "─"*60)
+            print("📋 EXIF DATA:")
+            print("─"*60)
             if item.exif_data:
-                print("\n📋 EXIF Data:")
                 for key, value in item.exif_data.items():
                     print(f"  {key}: {value}")
-                
-                # Populate form fields from EXIF data
-                # Title (from Windows XP Title tag)
-                if 'Title' in item.exif_data:
-                    title_text = str(item.exif_data['Title'])
-                    print(f"🔧 Setting Title: {title_text}")
-                    self.media_title_input.setPlainText(title_text)
-                elif 'Subject' in item.exif_data:
-                    subject_text = str(item.exif_data['Subject'])
-                    print(f"🔧 Setting Subject as Title: {subject_text}")
-                    self.media_title_input.setPlainText(subject_text)
-                
-                # Date - Note: PIL EXIF doesn't include date fields in the current implementation
-                # You may need to extend __read_exif in gallery_item_model.py to include DateTimeOriginal
-                self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
-                
-                # Description (from Comments)
-                if 'Subject' in item.exif_data:
-                    description_text = str(item.exif_data['Subject'])
-                    print(f"🔧 Setting Description: {description_text}")
-                    self.media_description_input.setPlainText(description_text)
-                
-                # Tags (from Windows XP Keywords)
-                if 'Tags' in item.exif_data:
-                    tags_text = str(item.exif_data['Tags'])
-                    print(f"🔧 Setting Tags: {tags_text}")
-                    self.media_tags_input.setPlainText(tags_text)
-                
-                # Force widget updates
-                self.media_title_input.update()
-                self.media_description_input.update()
-                self.media_tags_input.update()
-                
             else:
                 print("  No EXIF data available")
+            
+            # Print IPTC Data independently
+            print("\n" + "─"*60)
+            print("📰 IPTC DATA:")
+            print("─"*60)
+            if item.iptc_data:
+                for key, value in item.iptc_data.items():
+                    print(f"  {key}: {value}")
+            else:
+                print("  No IPTC data available")
+            
+            print("\n" + "─"*60)
+            print("🔧 POPULATING FORM FIELDS:")
+            print("─"*60)
+            
+            # Populate form fields from EXIF data (priority) or IPTC data (fallback)
+            # Title (from Windows XP Title tag or IPTC Headline)
+            if 'Title' in item.exif_data:
+                title_text = str(item.exif_data['Title'])
+                print(f"  Title (from EXIF): {title_text}")
+                self.media_title_input.setPlainText(title_text)
+            elif 'Subject' in item.exif_data:
+                subject_text = str(item.exif_data['Subject'])
+                print(f"  Title (from EXIF Subject): {subject_text}")
+                self.media_title_input.setPlainText(subject_text)
+            elif 'Headline' in item.iptc_data:
+                headline_text = str(item.iptc_data['Headline'])
+                print(f"  Title (from IPTC Headline): {headline_text}")
+                self.media_title_input.setPlainText(headline_text)
+            elif 'Object Name' in item.iptc_data:
+                object_name_text = str(item.iptc_data['Object Name'])
+                print(f"  Title (from IPTC Object Name): {object_name_text}")
+                self.media_title_input.setPlainText(object_name_text)
+            
+            # Date - Note: PIL EXIF doesn't include date fields in the current implementation
+            # You may need to extend __read_exif in gallery_item_model.py to include DateTimeOriginal
+            self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
+            
+            # Location (from IPTC)
+            if 'City' in item.iptc_data or 'State' in item.iptc_data or 'Country' in item.iptc_data:
+                location_parts = []
+                if 'City' in item.iptc_data:
+                    location_parts.append(item.iptc_data['City'])
+                if 'State' in item.iptc_data:
+                    location_parts.append(item.iptc_data['State'])
+                if 'Country' in item.iptc_data:
+                    location_parts.append(item.iptc_data['Country'])
+                location_text = ', '.join(location_parts)
+                print(f"  Location (from IPTC): {location_text}")
+                self.media_location_input.setText(location_text)
+            
+            # Description (from EXIF Subject or IPTC Caption)
+            if 'Subject' in item.exif_data:
+                description_text = str(item.exif_data['Subject'])
+                print(f"  Description (from EXIF Subject): {description_text}")
+                self.media_description_input.setPlainText(description_text)
+            elif 'Caption' in item.iptc_data:
+                caption_text = str(item.iptc_data['Caption'])
+                print(f"  Description (from IPTC Caption): {caption_text}")
+                self.media_description_input.setPlainText(caption_text)
+            
+            # Tags (from EXIF Keywords or IPTC Keywords)
+            if 'Tags' in item.exif_data:
+                tags_text = str(item.exif_data['Tags'])
+                print(f"  Tags (from EXIF): {tags_text}")
+                self.media_tags_input.setPlainText(tags_text)
+            elif 'Keywords' in item.iptc_data:
+                keywords_text = str(item.iptc_data['Keywords'])
+                print(f"  Tags (from IPTC Keywords): {keywords_text}")
+                self.media_tags_input.setPlainText(keywords_text)
+            
+            # Force widget updates
+            self.media_title_input.update()
+            self.media_description_input.update()
+            self.media_tags_input.update()
             
             print("="*60 + "\n")
 
