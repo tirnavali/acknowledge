@@ -212,108 +212,103 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gallery_item_model = GalleryItemModel(items)
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
     
+    def keyPressEvent(self, event):
+        """Global key handler for navigation"""
+        # If in Single View, handle arrow keys for navigation
+        if self.gallery_stack.currentIndex() == 1:
+            if event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+                # Check if focused widget is a text input
+                focused = QtWidgets.QApplication.focusWidget()
+                if not isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QTextEdit)):
+                    if event.key() in (QtCore.Qt.Key_Right, QtCore.Qt.Key_Down):
+                        self.navigate_next()
+                    else:
+                        self.navigate_previous()
+                    event.accept()
+                    return
+        super().keyPressEvent(event)
+
     def on_gallery_item_clicked(self, index):
         """Handle gallery item click - populate form and update single view"""
         item = self.gallery_item_model.itemFromIndex(index)
         if item:
             # Update single view image
             self.single_view_widget.set_image(item.img_path)
-            print("\n" + "="*60)
-            print(f"📷 Image: {item.img_path}")
-            print("="*60)
             
             # Clear all fields first to ensure refresh
             self.media_title_input.clear()
+            self.media_headline_input.clear()
+            self.media_object_name_input.clear()
             self.media_location_input.clear()
             self.media_description_input.clear()
             self.media_tags_input.clear()
-            
-            # Print EXIF Data independently
-            print("\n" + "─"*60)
-            print("📋 EXIF DATA:")
-            print("─"*60)
-            if item.exif_data:
-                for key, value in item.exif_data.items():
-                    print(f"  {key}: {value}")
-            else:
-                print("  No EXIF data available")
-            
-            # Print IPTC Data independently
-            print("\n" + "─"*60)
-            print("📰 IPTC DATA:")
-            print("─"*60)
-            if item.iptc_data:
-                for key, value in item.iptc_data.items():
-                    print(f"  {key}: {value}")
-            else:
-                print("  No IPTC data available")
-            
-            print("\n" + "─"*60)
-            print("🔧 POPULATING FORM FIELDS:")
-            print("─"*60)
+            self.media_credit_input.clear()
+            self.media_source_input.clear()
+            self.media_copyright_input.clear()
+            self.media_writer_input.clear()
+            self.media_byline_input.clear()
+            self.media_byline_title_input.clear()
+            self.media_category_input.clear()
+            self.media_supplemental_categories_input.clear()
             
             # Populate form fields from EXIF data (priority) or IPTC data (fallback)
-            # Title (from Windows XP Title tag or IPTC Headline)
-            if 'Title' in item.exif_data:
-                title_text = str(item.exif_data['Title'])
-                print(f"  Title (from EXIF): {title_text}")
-                self.media_title_input.setPlainText(title_text)
-            elif 'Subject' in item.exif_data:
-                subject_text = str(item.exif_data['Subject'])
-                print(f"  Title (from EXIF Subject): {subject_text}")
-                self.media_title_input.setPlainText(subject_text)
-            elif 'Headline' in item.iptc_data:
-                headline_text = str(item.iptc_data['Headline'])
-                print(f"  Title (from IPTC Headline): {headline_text}")
-                self.media_title_input.setPlainText(headline_text)
-            elif 'Object Name' in item.iptc_data:
-                object_name_text = str(item.iptc_data['Object Name'])
-                print(f"  Title (from IPTC Object Name): {object_name_text}")
-                self.media_title_input.setPlainText(object_name_text)
             
-            # Date - Note: PIL EXIF doesn't include date fields in the current implementation
-            # You may need to extend __read_exif in gallery_item_model.py to include DateTimeOriginal
+            # Title
+            if 'Title' in item.exif_data:
+                self.media_title_input.setPlainText(str(item.exif_data['Title']))
+            elif 'Subject' in item.exif_data:
+                self.media_title_input.setPlainText(str(item.exif_data['Subject']))
+            
+            # Date
             self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
             
+            # IPTC Fields
+            if 'Headline' in item.iptc_data:
+                self.media_headline_input.setText(item.iptc_data['Headline'])
+            if 'Object Name' in item.iptc_data:
+                self.media_object_name_input.setText(item.iptc_data['Object Name'])
+            if 'Caption' in item.iptc_data:
+                self.media_description_input.setPlainText(item.iptc_data['Caption'])
+            if 'Keywords' in item.iptc_data:
+                self.media_tags_input.setPlainText(item.iptc_data['Keywords'])
+            
             # Location (from IPTC)
-            if 'City' in item.iptc_data or 'State' in item.iptc_data or 'Country' in item.iptc_data:
-                location_parts = []
-                if 'City' in item.iptc_data:
-                    location_parts.append(item.iptc_data['City'])
-                if 'State' in item.iptc_data:
-                    location_parts.append(item.iptc_data['State'])
-                if 'Country' in item.iptc_data:
-                    location_parts.append(item.iptc_data['Country'])
-                location_text = ', '.join(location_parts)
-                print(f"  Location (from IPTC): {location_text}")
-                self.media_location_input.setText(location_text)
+            location_parts = []
+            if 'City' in item.iptc_data: location_parts.append(item.iptc_data['City'])
+            if 'State' in item.iptc_data: location_parts.append(item.iptc_data['State'])
+            if 'Country' in item.iptc_data: location_parts.append(item.iptc_data['Country'])
+            if location_parts:
+                self.media_location_input.setText(', '.join(location_parts))
             
-            # Description (from EXIF Subject or IPTC Caption)
-            if 'Subject' in item.exif_data:
-                description_text = str(item.exif_data['Subject'])
-                print(f"  Description (from EXIF Subject): {description_text}")
-                self.media_description_input.setPlainText(description_text)
-            elif 'Caption' in item.iptc_data:
-                caption_text = str(item.iptc_data['Caption'])
-                print(f"  Description (from IPTC Caption): {caption_text}")
-                self.media_description_input.setPlainText(caption_text)
+            # Credit & Source
+            if 'Credit' in item.iptc_data:
+                self.media_credit_input.setText(item.iptc_data['Credit'])
+            if 'Source' in item.iptc_data:
+                self.media_source_input.setText(item.iptc_data['Source'])
+            if 'Copyright' in item.iptc_data:
+                self.media_copyright_input.setText(item.iptc_data['Copyright'])
             
-            # Tags (from EXIF Keywords or IPTC Keywords)
-            if 'Tags' in item.exif_data:
-                tags_text = str(item.exif_data['Tags'])
-                print(f"  Tags (from EXIF): {tags_text}")
-                self.media_tags_input.setPlainText(tags_text)
-            elif 'Keywords' in item.iptc_data:
-                keywords_text = str(item.iptc_data['Keywords'])
-                print(f"  Tags (from IPTC Keywords): {keywords_text}")
-                self.media_tags_input.setPlainText(keywords_text)
+            # People
+            if 'Writer' in item.iptc_data:
+                self.media_writer_input.setText(item.iptc_data['Writer'])
+            if 'By-line' in item.iptc_data:
+                self.media_byline_input.setText(item.iptc_data['By-line'])
+            if 'By-line Title' in item.iptc_data:
+                self.media_byline_title_input.setText(item.iptc_data['By-line Title'])
             
-            # Force widget updates
-            self.media_title_input.update()
-            self.media_description_input.update()
-            self.media_tags_input.update()
+            # Categories
+            if 'Category' in item.iptc_data:
+                self.media_category_input.setText(item.iptc_data['Category'])
+            if 'Supplemental Categories' in item.iptc_data:
+                self.media_supplemental_categories_input.setText(item.iptc_data['Supplemental Categories'])
             
-            print("="*60 + "\n")
+            # Update date if created date is available
+            if 'Date Created' in item.iptc_data:
+                # Format is usually YYYYMMDD
+                date_str = item.iptc_data['Date Created']
+                if len(date_str) == 8:
+                    qdate = QtCore.QDate.fromString(date_str, "yyyyMMdd")
+                    self.media_date_input.setDate(qdate)
 
 
     def event_widgets(self):
@@ -369,6 +364,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_title_input.setFixedWidth(fixed_width)
         self.media_title_input.setPlaceholderText("Title")
         
+        self.media_headline_input = QtWidgets.QLineEdit()
+        self.media_headline_input.setFixedWidth(fixed_width)
+        self.media_headline_input.setPlaceholderText("Headline")
+
+        self.media_object_name_input = QtWidgets.QLineEdit()
+        self.media_object_name_input.setFixedWidth(fixed_width)
+        self.media_object_name_input.setPlaceholderText("Object Name")
+
         self.media_date_input = QtWidgets.QDateTimeEdit()
         self.media_date_input.setFixedWidth(fixed_width)
         self.media_date_input.setCalendarPopup(True)
@@ -381,48 +384,71 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_description_input = QtWidgets.QTextEdit()
         self.media_description_input.setMaximumHeight(100)
         self.media_description_input.setFixedWidth(fixed_width)
+        self.media_description_input.setPlaceholderText("Description")
         
         self.media_tags_input = QtWidgets.QTextEdit()
         self.media_tags_input.setFixedWidth(fixed_width)
         self.media_tags_input.setPlaceholderText("Tags")
         self.media_tags_input.setMaximumHeight(100)
-  
+
+        # New IPTC Fields
+        self.media_credit_input = QtWidgets.QLineEdit()
+        self.media_credit_input.setFixedWidth(fixed_width)
+        self.media_credit_input.setPlaceholderText("Credit")
+
+        self.media_source_input = QtWidgets.QLineEdit()
+        self.media_source_input.setFixedWidth(fixed_width)
+        self.media_source_input.setPlaceholderText("Source")
+
+        self.media_copyright_input = QtWidgets.QLineEdit()
+        self.media_copyright_input.setFixedWidth(fixed_width)
+        self.media_copyright_input.setPlaceholderText("Copyright")
+
+        self.media_writer_input = QtWidgets.QLineEdit()
+        self.media_writer_input.setFixedWidth(fixed_width)
+        self.media_writer_input.setPlaceholderText("Writer/Editor")
+
+        self.media_byline_input = QtWidgets.QLineEdit()
+        self.media_byline_input.setFixedWidth(fixed_width)
+        self.media_byline_input.setPlaceholderText("By-line")
+
+        self.media_byline_title_input = QtWidgets.QLineEdit()
+        self.media_byline_title_input.setFixedWidth(fixed_width)
+        self.media_byline_title_input.setPlaceholderText("By-line Title")
+
+        self.media_category_input = QtWidgets.QLineEdit()
+        self.media_category_input.setFixedWidth(fixed_width)
+        self.media_category_input.setPlaceholderText("Category")
+
+        self.media_supplemental_categories_input = QtWidgets.QLineEdit()
+        self.media_supplemental_categories_input.setFixedWidth(fixed_width)
+        self.media_supplemental_categories_input.setPlaceholderText("Supplemental Categories")
+
+        # Create labels and add rows
+        self.media_details_form.addRow(QtWidgets.QLabel("📝 Title:"), self.media_title_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("� Headline:"), self.media_headline_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("🆔 Object Name:"), self.media_object_name_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("📅 Date:"), self.media_date_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("📍 Location:"), self.media_location_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("📄 Description:"), self.media_description_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("🏷️ Tags:"), self.media_tags_input)
         
-        # Create labels with icons only (tooltips on hover)
-        style = self.style()
+        self.media_details_form.addRow(QtWidgets.QLabel("💳 Credit:"), self.media_credit_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("🏗️ Source:"), self.media_source_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("©️ Copyright:"), self.media_copyright_input)
         
-        # Title label with icon
-        title_label = QtWidgets.QLabel("📝")
-        title_label.setToolTip("Title - The name or title of the media")
+        self.media_details_form.addRow(QtWidgets.QLabel("✍️ Writer:"), self.media_writer_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("👤 By-line:"), self.media_byline_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("🎓 By-line Title:"), self.media_byline_title_input)
         
-        # Date label with icon
-        date_label = QtWidgets.QLabel("📅")
-        date_label.setToolTip("Date - When the media was created or captured")
-        
-        # Location label with icon
-        location_label = QtWidgets.QLabel("📍")
-        location_label.setToolTip("Location - Where the media was captured")
-        
-        # Description label with icon
-        description_label = QtWidgets.QLabel("📄")
-        description_label.setToolTip("Description - Detailed description of the media content")
-        
-        # Tags label with icon
-        tags_label = QtWidgets.QLabel("🏷️")
-        tags_label.setToolTip("Tags - Categories or labels for organizing media")
-        
-        # Add rows to form layout (label, input)
-        self.media_details_form.addRow(title_label, self.media_title_input)
-        self.media_details_form.addRow(date_label, self.media_date_input)
-        self.media_details_form.addRow(location_label, self.media_location_input)
-        self.media_details_form.addRow(description_label, self.media_description_input)
-        self.media_details_form.addRow(tags_label, self.media_tags_input)
-        
-        # Optional: Add some styling
+        self.media_details_form.addRow(QtWidgets.QLabel("🗂️ Category:"), self.media_category_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("➕ Sup. Categories:"), self.media_supplemental_categories_input)
+
+        # Styling
         self.media_details_form.setLabelAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         self.media_details_form.setFormAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
-        self.media_details_form.setHorizontalSpacing(5)  # Reduce horizontal space between label and input
-        self.media_details_form.setVerticalSpacing(2)    # Compact vertical spacing
+        self.media_details_form.setHorizontalSpacing(10)
+        self.media_details_form.setVerticalSpacing(8)
 
         
     def layouts(self):
@@ -430,16 +456,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.events_column = QtWidgets.QVBoxLayout()
         self.events_gallery = QtWidgets.QVBoxLayout()
         
-        # Create a container widget for the form with max height
+        # Right side: Details Scroll Area
+        self.media_details_scroll = QtWidgets.QScrollArea()
+        self.media_details_scroll.setWidgetResizable(True)
+        self.media_details_scroll.setFixedWidth(450)
+        self.media_details_scroll.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px;")
+        
         self.media_details_container = QtWidgets.QWidget()
-        self.media_details_container.setMaximumHeight(300)  # Set max height
-        self.media_details_container.setMaximumWidth(500)
         self.media_details_form = QtWidgets.QFormLayout()
         self.media_details_container.setLayout(self.media_details_form)
+        self.media_details_scroll.setWidget(self.media_details_container)
         
-        self.events_layout.addLayout(self.events_column)
-        self.events_layout.addLayout(self.events_gallery)
-        self.events_layout.addWidget(self.media_details_container, alignment=QtCore.Qt.AlignTop)  # Align to top
+        self.events_layout.addLayout(self.events_column, 1)
+        self.events_layout.addLayout(self.events_gallery, 3)
+        self.events_layout.addWidget(self.media_details_scroll, 1)
+        
         # event column
         self.events_column.addWidget(self.event_search)
         self.events_column.addWidget(self.event_card_list_widget)

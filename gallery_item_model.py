@@ -159,15 +159,23 @@ class GalleryItem(QtGui.QStandardItem):
                     # IPTCInfo uses dictionary-style access, not .get()
                     value = info[iptc_key]
                     if value:
+                        def decode_bytes(v):
+                            if isinstance(v, bytes):
+                                try:
+                                    return v.decode('utf-8')
+                                except:
+                                    try:
+                                        return v.decode('latin-1')
+                                    except:
+                                        return str(v)
+                            return str(v)
+
                         # Handle list values (like keywords)
                         if isinstance(value, list):
-                            value = ', '.join([str(v) for v in value])
-                        # Handle bytes
+                            value = ', '.join([decode_bytes(v) for v in value])
+                        # Handle single bytes
                         elif isinstance(value, bytes):
-                            try:
-                                value = value.decode('utf-8')
-                            except:
-                                value = str(value)
+                            value = decode_bytes(value)
                         
                         if value and str(value).strip():
                             self.iptc_data[display_name] = str(value)

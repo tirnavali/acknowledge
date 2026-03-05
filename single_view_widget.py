@@ -14,6 +14,11 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.initUI()
         self.current_img_path = None
+        
+    def mousePressEvent(self, event):
+        """Ensure widget grabs focus on click"""
+        self.setFocus()
+        super().mousePressEvent(event)
 
     def initUI(self):
         self.layout = QtWidgets.QVBoxLayout(self)
@@ -38,9 +43,11 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(QtCore.Qt.AlignCenter)
         self.scroll_area.setStyleSheet("background-color: #1e1e1e; border: none;")
+        self.scroll_area.setFocusPolicy(QtCore.Qt.NoFocus)
 
         self.image_label = QtWidgets.QLabel()
         self.image_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.image_label.setFocusPolicy(QtCore.Qt.NoFocus)
         self.scroll_area.setWidget(self.image_label)
 
         self.layout.addWidget(self.scroll_area)
