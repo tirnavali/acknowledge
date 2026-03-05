@@ -14,6 +14,8 @@ import add_event_window
 from src.repositories.event_repository import EventRepository
 from src.repositories.media_repository import MediaRepository
 from src.repositories.person_repository import PersonRepository
+from src.repositories.face_repository import FaceRepository
+from src.services.face_service import FaceAnalysisService
 from single_view_widget import SingleViewWidget
 import os
 
@@ -22,10 +24,12 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("Tirnavali Acknowledge")
         self.resize(1400, 900)
-        self.current_event_id = None  # Track the currently selected event
-        self.current_media_id = None  # Track the currently selected media
+        self.current_event_id = None
+        self.current_media_id = None
         self.media_repo = MediaRepository()
         self.person_repo = PersonRepository()
+        self.face_repo = FaceRepository()
+        self.face_service = FaceAnalysisService()  # singleton, lazy model load
         self.init_db()
         self.init_vault()
         self.UI()
@@ -267,6 +271,13 @@ class MainWindow(QtWidgets.QMainWindow):
         """Handle gallery item click - populate form with DB-first, fallback to file IPTC"""
         item = self.gallery_item_model.itemFromIndex(index)
         if item:
+            # Resolve media_id from DB if available
+            media_row = self.media_repo.get_by_file_path(item.img_path)
+            media_id = media_row['id'] if media_row else None
+            self.current_media_id = media_id
+
+            # Provide context to single view BEFORE set_image (so DB-first works)
+            self.single_view_widget.set_context(self.current_event_id, media_id)
             # Update single view image
             self.single_view_widget.set_image(item.img_path)
             
@@ -494,8 +505,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setUniformItemSizes(True)
         self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
         
-        # Single View
-        self.single_view_widget = SingleViewWidget()
+        # Single View — inject face recognition dependencies
+        self.single_view_widget = SingleViewWidget(
+            face_service=self.face_service,
+            face_repository=self.face_repo,
+            person_repository=self.person_repo,
+            media_repository=self.media_repo,
+        )
         self.single_view_widget.doubleClicked.connect(self.switch_to_grid_view)
         self.single_view_widget.nextRequested.connect(self.navigate_next)
         self.single_view_widget.prevRequested.connect(self.navigate_previous)

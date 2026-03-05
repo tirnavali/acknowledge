@@ -7,6 +7,9 @@ from pgvector.sqlalchemy import Vector
 from .database import Base
 import enum
 
+# Import FaceDetection so create_all picks it up
+from .face_detection_model import FaceDetection  # noqa: F401
+
 class MediaType(str, enum.Enum):
     PHOTO = "photo"
     VIDEO = "video"
@@ -82,6 +85,7 @@ class Media(Base):
 
     event = relationship("Event", back_populates="medias")
     persons = relationship("Person", secondary=media_persons, back_populates="medias")
+    face_detections = relationship("FaceDetection", back_populates="media", cascade="all, delete-orphan")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Polimorfizm Ayarları (Değişmedi)

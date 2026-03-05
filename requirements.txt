@@ -6,3 +6,5 @@ pgvector
 python-dotenv
 pyexiftool
 iptcinfo3
+insightface
+onnxruntime

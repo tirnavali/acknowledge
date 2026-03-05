@@ -11,9 +11,7 @@ class PersonRepository:
         name = name.strip()
         if not name:
             return None
-        
         with get_db() as db:
-            # Try to find existing
             result = db.execute(
                 text("SELECT id FROM persons WHERE name = :name"),
                 {"name": name}
@@ -21,17 +19,50 @@ class PersonRepository:
             row = result.fetchone()
             if row:
                 return row.id if isinstance(row.id, UUID) else UUID(str(row.id))
-            
-            # Create new
             new_id = uuid_module.uuid4()
             db.execute(text("""
                 INSERT INTO persons (id, name) VALUES (:id, :name)
-            """), {
-                "id": str(new_id),
-                "name": name,
-            })
+            """), {"id": str(new_id), "name": name})
             db.commit()
             return new_id
+
+    def find_by_name(self, name: str) -> UUID | None:
+        """Look up a person by name. Returns UUID if found, None otherwise. Does NOT create."""
+        name = name.strip()
+        if not name:
+            return None
+        with get_db() as db:
+            result = db.execute(
+                text("SELECT id FROM persons WHERE name = :name"),
+                {"name": name}
+            )
+            row = result.fetchone()
+            return (row.id if isinstance(row.id, UUID) else UUID(str(row.id))) if row else None
+
+
+    def get_by_id(self, person_id: UUID) -> dict | None:
+        """Return person row or None."""
+        with get_db() as db:
+            result = db.execute(
+                text("SELECT id, name FROM persons WHERE id = :pid"),
+                {"pid": str(person_id)}
+            )
+            row = result.fetchone()
+            return dict(row._mapping) if row else None
+
+    def rename(self, person_id: UUID, new_name: str) -> None:
+        """
+        Rename a person in-place.
+        Because face_detections and media_persons reference person.id (not name),
+        all linked photos automatically reflect the new name on next DB read.
+        """
+        with get_db() as db:
+            db.execute(
+                text("UPDATE persons SET name = :name WHERE id = :pid"),
+                {"name": new_name.strip(), "pid": str(person_id)}
+            )
+            db.commit()
+
 
     def get_all(self) -> list[dict]:
         """Get all persons."""
@@ -68,6 +99,15 @@ class PersonRepository:
             db.execute(text("""
                 DELETE FROM media_persons WHERE media_id = :media_id
             """), {"media_id": str(media_id)})
+            db.commit()
+
+    def unlink_from_media(self, person_id: UUID, media_id: UUID) -> None:
+        """Remove a specific person-media link (used on face reassignment)."""
+        with get_db() as db:
+            db.execute(text("""
+                DELETE FROM media_persons
+                WHERE media_id = :media_id AND person_id = :person_id
+            """), {"media_id": str(media_id), "person_id": str(person_id)})
             db.commit()
 
     def get_persons_for_media(self, media_id: UUID) -> list[str]:

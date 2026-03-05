@@ -1,78 +1,464 @@
-import sys
+"""
+SingleViewWidget — full-screen image display with integrated face detection overlay.
+
+Architecture:
+- QThread (FaceDetectionWorker) runs insightface off the UI thread
+- FaceOverlayWidget is layered on top of the image label
+- DB-first: if face_detections exist for this media, skip re-detection
+"""
+from __future__ import annotations
+import os
+import logging
 from PySide6 import QtCore, QtWidgets, QtGui
+
+from face_overlay_widget import FaceOverlayWidget
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Background worker — keeps UI responsive during detection
+# ---------------------------------------------------------------------------
+
+class FaceDetectionWorker(QtCore.QThread):
+    """Runs FaceAnalysisService.detect() in a worker thread."""
+
+    detected = QtCore.Signal(list)   # list[FaceResult]
+    error    = QtCore.Signal(str)
+
+    def __init__(self, face_service, img_path: str, parent=None):
+        super().__init__(parent)
+        self._service = face_service
+        self._img_path = img_path
+
+    def run(self):
+        try:
+            results = self._service.detect(self._img_path)
+            self.detected.emit(results)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+# ---------------------------------------------------------------------------
+# Main widget
+# ---------------------------------------------------------------------------
 
 class SingleViewWidget(QtWidgets.QWidget):
     """
-    A widget to display a single image in a large view with scaling and navigation.
-    """
-    doubleClicked = QtCore.Signal()
-    nextRequested = QtCore.Signal()
-    prevRequested = QtCore.Signal()
+    Displays a single image with:
+    - Filename label
+    - Scrollable, aspect-ratio-correct image
+    - Transparent face bounding-box overlay (face_overlay_widget)
+    - Background face detection via FaceDetectionWorker
 
-    def __init__(self, parent=None):
+    Dependencies injected at construction:
+        face_service    — FaceAnalysisService (optional, can be None to disable)
+        face_repository — FaceRepository      (optional)
+        person_repository — PersonRepository  (optional)
+        media_repository  — MediaRepository   (optional)
+    """
+
+    doubleClicked   = QtCore.Signal()
+    nextRequested   = QtCore.Signal()
+    prevRequested   = QtCore.Signal()
+
+    def __init__(
+        self,
+        face_service=None,
+        face_repository=None,
+        person_repository=None,
+        media_repository=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
-        self.initUI()
-        self.current_img_path = None
-        
-    def mousePressEvent(self, event):
-        """Ensure widget grabs focus on click"""
-        self.setFocus()
-        super().mousePressEvent(event)
 
-    def initUI(self):
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setContentsMargins(10, 10, 10, 10)
-        self.layout.setSpacing(10)
+        self._face_service      = face_service
+        self._face_repo         = face_repository
+        self._person_repo       = person_repository
+        self._media_repo        = media_repository
+
+        self.current_img_path   = None
+        self._current_media_id  = None
+        self._current_event_id  = None
+        self._detection_worker: FaceDetectionWorker | None = None
+        # Raw FaceResult list from last detection (needed to save to DB)
+        self._pending_results: list = []
+        self._skip_similarity = False  # set by reset to skip auto-matching
+
+        self._init_ui()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         # Filename label
         self.filename_label = QtWidgets.QLabel("Dosya adı")
         self.filename_label.setAlignment(QtCore.Qt.AlignCenter)
         self.filename_label.setStyleSheet("""
-            font-weight: bold; 
-            color: #aaa; 
+            font-weight: bold;
+            color: #aaa;
             font-size: 14px;
-            background-color: rgba(0, 0, 0, 100);
+            background-color: rgba(0,0,0,100);
             padding: 5px;
             border-radius: 4px;
         """)
-        self.layout.addWidget(self.filename_label)
+        layout.addWidget(self.filename_label)
 
-        # Image display area
+        # Container that stacks image + overlay
+        self._image_container = QtWidgets.QWidget()
+        self._image_container.setStyleSheet("background-color: #1e1e1e;")
+        container_layout = QtWidgets.QVBoxLayout(self._image_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.image_label = QtWidgets.QLabel()
+        self.image_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.image_label.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.image_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding,
+        )
+        container_layout.addWidget(self.image_label)
+
+        # Overlay lives inside the container, anchored via resizeEvent
+        self.face_overlay = FaceOverlayWidget(self._image_container)
+        self.face_overlay.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
+        self.face_overlay.face_named.connect(self._on_face_named)
+        self.face_overlay.face_reset.connect(self._on_face_reset)
+        self.face_overlay.hide()
+
+        # Scroll area wraps the container
         self.scroll_area = QtWidgets.QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(QtCore.Qt.AlignCenter)
         self.scroll_area.setStyleSheet("background-color: #1e1e1e; border: none;")
         self.scroll_area.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.scroll_area.setWidget(self._image_container)
+        layout.addWidget(self.scroll_area)
 
-        self.image_label = QtWidgets.QLabel()
-        self.image_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.image_label.setFocusPolicy(QtCore.Qt.NoFocus)
-        self.scroll_area.setWidget(self.image_label)
+        # Status bar for detection feedback
+        self._status_label = QtWidgets.QLabel("")
+        self._status_label.setAlignment(QtCore.Qt.AlignCenter)
+        self._status_label.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addWidget(self._status_label)
 
-        self.layout.addWidget(self.scroll_area)
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-    def set_image(self, img_path):
+    def set_context(self, event_id, media_id=None):
+        """Call from MainWindow to provide DB context for this image."""
+        self._current_event_id = event_id
+        self._current_media_id = media_id
+
+    def set_image(self, img_path: str):
+        """Load image, clear overlay, trigger face detection."""
         self.current_img_path = img_path
+        self.face_overlay.clear_faces()
+        self._pending_results = []
+
         if not img_path or not os.path.exists(img_path):
             self.image_label.setText("Resim yüklenemedi.")
             self.filename_label.setText("")
+            self._status_label.setText("")
             return
 
         self.filename_label.setText(os.path.basename(img_path))
+        self._refresh_pixmap()
 
-        pixmap = QtGui.QPixmap(img_path)
+        if self._face_service is None:
+            return  # face detection disabled
+
+        # Try DB-first: if LABELLED detections exist, skip re-running model
+        if self._current_media_id and self._face_repo:
+            db_faces = self._face_repo.get_faces_for_media(self._current_media_id)
+            # Only use DB data if at least one face has a name assigned
+            has_named = any(f.get("person_name") for f in db_faces)
+            if db_faces and has_named:
+                self._show_db_faces(db_faces)
+                self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
+                return
+
+        # No DB data → run detector
+        self._status_label.setText("🔍 Yüzler algılanıyor…")
+        self._start_detection(img_path)
+
+    # ------------------------------------------------------------------
+    # Detection pipeline
+    # ------------------------------------------------------------------
+
+    def _start_detection(self, img_path: str):
+        if self._detection_worker and self._detection_worker.isRunning():
+            self._detection_worker.quit()
+            self._detection_worker.wait(500)
+
+        self._detection_worker = FaceDetectionWorker(self._face_service, img_path, self)
+        self._detection_worker.detected.connect(self._on_detection_finished)
+        self._detection_worker.error.connect(self._on_detection_error)
+        self._detection_worker.start()
+
+    def _on_detection_finished(self, results: list):
+        if not results:
+            self._status_label.setText("Yüz algılanamadı.")
+            return
+
+        self._pending_results = results
+        n = len(results)
+        self._status_label.setText(f"✅ {n} yüz algılandı — isimleri girin ve Enter'a basın")
+
+        # Try auto-matching via similarity search (unless reset was triggered)
+        face_dicts = []
+        skip_sim = self._skip_similarity
+        self._skip_similarity = False  # reset flag
+        for i, face in enumerate(results):
+            person_id, person_name = None, None
+            if not skip_sim and self._face_repo and face.embedding is not None:
+                person_id, person_name = self._face_repo.find_similar_person(face.embedding)
+            face_dicts.append({
+                "bbox"        : {"x1": face.x1, "y1": face.y1, "x2": face.x2, "y2": face.y2},
+                "face_id"     : None,
+                "person_name" : person_name,
+                "face_index"  : i,
+            })
+
+        # Ensure media record exists in DB (create it if needed)
+        if self._face_repo and self._media_repo and self.current_img_path:
+            if not self._current_media_id and self._current_event_id:
+                try:
+                    self._current_media_id = self._media_repo.ensure_media_exists(
+                        self._current_event_id, self.current_img_path, "photo"
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not ensure media exists: {e}")
+
+        # Save detections to DB (skip after reset — save when user names them)
+        if not skip_sim and self._current_media_id and self._face_repo:
+            saved_ids = self._face_repo.save_faces(self._current_media_id, results)
+            for i, fid in enumerate(saved_ids):
+                face_dicts[i]["face_id"] = str(fid)
+                # If auto-matched, assign immediately
+                if face_dicts[i]["person_name"] and self._person_repo:
+                    pid, _ = self._face_repo.find_similar_person(results[i].embedding)
+                    if pid:
+                        self._face_repo.assign_person(fid, pid)
+
+        img_rect = self._get_image_display_rect()
+        self.face_overlay.set_faces(face_dicts, img_rect)
+        self.face_overlay.setGeometry(self._image_container.rect())
+        self.face_overlay.show()
+
+    def _on_detection_error(self, msg: str):
+        logger.error(f"Face detection error: {msg}")
+        self._status_label.setText(f"⚠️ Yüz algılama hatası: {msg[:60]}")
+
+    def _show_db_faces(self, db_faces: list[dict]):
+        """Render faces loaded from the database (skip detection)."""
+        face_dicts = []
+        for i, row in enumerate(db_faces):
+            bbox = row.get("bbox")
+            if isinstance(bbox, str):
+                import json
+                bbox = json.loads(bbox)
+            face_dicts.append({
+                "bbox"        : bbox,
+                "face_id"     : str(row["id"]) if row.get("id") else None,
+                "person_name" : row.get("person_name"),
+                "face_index"  : i,
+            })
+
+        img_rect = self._get_image_display_rect()
+        self.face_overlay.set_faces(face_dicts, img_rect)
+        self.face_overlay.setGeometry(self._image_container.rect())
+        self.face_overlay.show()
+
+    # ------------------------------------------------------------------
+    # Name assignment
+    # ------------------------------------------------------------------
+
+    def _on_face_named(self, face_index: int, name: str):
+        """
+        Called when user presses Enter in a name input.
+
+        Decision tree:
+        1. Face has NO person yet → find_or_create(name), assign
+        2. Face HAS person, new name matches ANOTHER existing person → REASSIGN
+        3. Face HAS person, new name does NOT exist yet → RENAME in place (global)
+        """
+        if not name or not self._person_repo:
+            return
+
+        name = name.strip()
+
+        # Ensure media record exists
+        if not self._current_media_id and self._media_repo and self._current_event_id and self.current_img_path:
+            try:
+                self._current_media_id = self._media_repo.ensure_media_exists(
+                    self._current_event_id, self.current_img_path, "photo"
+                )
+            except Exception as e:
+                logger.warning(f"ensure_media_exists failed: {e}")
+
+        if face_index >= len(self.face_overlay._faces):
+            return
+
+        face_info = self.face_overlay._faces[face_index]
+        face_id = face_info.get("face_id")
+
+        # Ensure face row is in DB
+        if not face_id and self._current_media_id and self._face_repo and face_index < len(self._pending_results):
+            try:
+                saved_ids = self._face_repo.save_faces(
+                    self._current_media_id, [self._pending_results[face_index]]
+                )
+                if saved_ids:
+                    face_id = str(saved_ids[0])
+                    face_info["face_id"] = face_id
+            except Exception as e:
+                logger.warning(f"save_faces fallback failed: {e}")
+
+        from uuid import UUID
+
+        # --- Look up OLD person currently assigned to this face ---
+        old_person_id = None
+        old_person_name = None
+        if face_id and self._face_repo and self._current_media_id:
+            try:
+                all_faces = self._face_repo.get_faces_for_media(self._current_media_id)
+                for f in all_faces:
+                    if str(f.get("id")) == str(face_id) and f.get("person_id"):
+                        old_person_id = UUID(str(f["person_id"]))
+                        old_person_name = f.get("person_name")
+                        break
+            except Exception as e:
+                logger.warning(f"Could not look up old person: {e}")
+
+        # --- Check if new name already exists (WITHOUT creating) ---
+        existing_person_id = self._person_repo.find_by_name(name)
+
+        # Same person, same name → noop
+        if old_person_id and existing_person_id and str(old_person_id) == str(existing_person_id):
+            self._status_label.setText(f"ℹ️ '{name}' zaten atanmış.")
+            return
+
+        # --- Decide: rename vs reassign vs new ---
+        if old_person_id and not existing_person_id:
+            # Name doesn't exist yet → RENAME the existing person in-place
+            # This propagates to ALL photos that reference this person_id
+            self._person_repo.rename(old_person_id, name)
+            final_person_id = old_person_id
+            action = "yeniden adlandırıldı (tüm fotoğraflara yansıdı)"
+
+        elif old_person_id and existing_person_id:
+            # Name belongs to a DIFFERENT existing person → REASSIGN
+            final_person_id = existing_person_id
+            action = "yeniden atandı"
+
+            # Unlink old person from this media if no other face still uses them
+            try:
+                all_faces = self._face_repo.get_faces_for_media(self._current_media_id) if self._face_repo else []
+                still_linked = any(
+                    str(f.get("id")) != str(face_id)
+                    and str(f.get("person_id") or "") == str(old_person_id)
+                    for f in all_faces
+                )
+                if not still_linked:
+                    self._person_repo.unlink_from_media(old_person_id, self._current_media_id)
+            except Exception as e:
+                logger.warning(f"Old person unlink failed: {e}")
+
+        else:
+            # No old person → create/find and assign fresh
+            final_person_id = self._person_repo.find_or_create(name)
+            action = "kaydedildi"
+
+        if not final_person_id:
+            return
+
+        # Assign person to face detection row
+        if face_id and self._face_repo:
+            self._face_repo.assign_person(UUID(str(face_id)), final_person_id)
+
+        # Link person to media
+        if self._current_media_id:
+            self._person_repo.link_to_media(final_person_id, self._current_media_id)
+
+        self.face_overlay.update_person_name(face_index, name)
+        self._status_label.setText(f"✅ '{name}' {action}.")
+
+    def _on_face_reset(self, face_index: int):
+        """Delete all face detections for this media from DB and re-run inference."""
+        if not self.current_img_path:
+            return
+
+        # Delete DB records
+        if self._current_media_id and self._face_repo:
+            try:
+                self._face_repo.delete_faces_for_media(self._current_media_id)
+            except Exception as e:
+                logger.warning(f"delete_faces_for_media failed: {e}")
+
+        # Clear overlay and re-detect WITHOUT similarity matching
+        self.face_overlay.clear_faces()
+        self._pending_results = []
+        self._skip_similarity = True  # skip auto-matching on next detection
+        self._status_label.setText("🔄 Yüzler yeniden algılanıyor…")
+
+        if self._face_service:
+            self._start_detection(self.current_img_path)
+
+    # ------------------------------------------------------------------
+    # Image / layout helpers
+    # ------------------------------------------------------------------
+
+    def _refresh_pixmap(self):
+        if not self.current_img_path:
+            return
+        pixmap = QtGui.QPixmap(self.current_img_path)
         if pixmap.isNull():
             self.image_label.setText("Geçersiz resim dosyası.")
             return
-
-        # Scale pixmap to fit the scroll area while maintaining aspect ratio
-        scaled_pixmap = pixmap.scaled(
-            self.scroll_area.size(), 
-            QtCore.Qt.KeepAspectRatio, 
-            QtCore.Qt.SmoothTransformation
+        # Keep full-res pixmap for zoom crops
+        self._source_pixmap = pixmap
+        self.face_overlay.set_source_pixmap(pixmap)
+        scaled = pixmap.scaled(
+            self._image_container.size(),
+            QtCore.Qt.KeepAspectRatio,
+            QtCore.Qt.SmoothTransformation,
         )
-        self.image_label.setPixmap(scaled_pixmap)
+        self.image_label.setPixmap(scaled)
+
+    def _get_image_display_rect(self) -> QtCore.QRect:
+        """
+        Calculate the pixel rect of the scaled image within the image container.
+        Needed to translate normalised bbox coords to display coords.
+        """
+        pm = self.image_label.pixmap()
+        if pm is None or pm.isNull():
+            return self._image_container.rect()
+
+        label_size = self._image_container.size()
+        pm_size    = pm.size()
+
+        x_off = (label_size.width()  - pm_size.width())  // 2
+        y_off = (label_size.height() - pm_size.height()) // 2
+
+        return QtCore.QRect(
+            QtCore.QPoint(x_off, y_off),
+            pm_size,
+        )
+
+    # ------------------------------------------------------------------
+    # Qt events
+    # ------------------------------------------------------------------
+
+    def mousePressEvent(self, event):
+        self.setFocus()
+        super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         self.doubleClicked.emit()
@@ -89,6 +475,11 @@ class SingleViewWidget(QtWidgets.QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.current_img_path:
-            self.set_image(self.current_img_path)
-
-import os
+            self._refresh_pixmap()
+            # Reposition overlay to match container
+            self.face_overlay.setGeometry(self._image_container.rect())
+            img_rect = self._get_image_display_rect()
+            # Re-layout face inputs for new size
+            self.face_overlay._img_rect = img_rect
+            self.face_overlay._layout_inputs()
+            self.face_overlay.update()
