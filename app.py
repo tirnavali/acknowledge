@@ -12,6 +12,8 @@ import src.models
 from dotenv import load_dotenv
 import add_event_window
 from src.repositories.event_repository import EventRepository
+from src.repositories.media_repository import MediaRepository
+from src.repositories.person_repository import PersonRepository
 from single_view_widget import SingleViewWidget
 import os
 
@@ -19,7 +21,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Tirnavali Acknowledge")
-        self.setGeometry(100, 100, 1200, 800)
+        self.resize(1400, 900)
+        self.current_event_id = None  # Track the currently selected event
+        self.current_media_id = None  # Track the currently selected media
+        self.media_repo = MediaRepository()
+        self.person_repo = PersonRepository()
         self.init_db()
         self.init_vault()
         self.UI()
@@ -53,6 +59,34 @@ class MainWindow(QtWidgets.QMainWindow):
                 db.commit()
 
             Base.metadata.create_all(bind=engine)
+        
+            # Add IPTC columns to existing medias table (create_all doesn't add columns to existing tables)
+            iptc_columns = [
+                ("iptc_headline", "VARCHAR(500)"),
+                ("iptc_caption", "TEXT"),
+                ("iptc_keywords", "TEXT"),
+                ("iptc_object_name", "VARCHAR(500)"),
+                ("iptc_city", "VARCHAR(250)"),
+                ("iptc_state", "VARCHAR(250)"),
+                ("iptc_country", "VARCHAR(250)"),
+                ("iptc_credit", "VARCHAR(500)"),
+                ("iptc_source", "VARCHAR(500)"),
+                ("iptc_copyright", "VARCHAR(500)"),
+                ("iptc_writer", "VARCHAR(250)"),
+                ("iptc_byline", "VARCHAR(250)"),
+                ("iptc_byline_title", "VARCHAR(250)"),
+                ("iptc_date_created", "VARCHAR(50)"),
+                ("iptc_category", "VARCHAR(100)"),
+                ("iptc_supplemental_categories", "VARCHAR(500)"),
+            ]
+            with get_db() as db:
+                for col_name, col_type in iptc_columns:
+                    try:
+                        db.execute(text(f"ALTER TABLE medias ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                    except Exception:
+                        pass  # Column already exists
+                db.commit()
+            
             print("✅ Veritabanı tabloları hazır.")
         except Exception as e:
             logging.error(f"❌ Veritabanı bağlantı hatası: {str(e)}")
@@ -208,6 +242,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_event_card_clicked(self, event):
         """Handle event card click"""
         self.switch_to_grid_view()  # Always switch to grid when a new event is selected
+        self.current_event_id = event.id
         items = self.load_gallery_items(event.id)
         self.gallery_item_model = GalleryItemModel(items)
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
@@ -229,86 +264,206 @@ class MainWindow(QtWidgets.QMainWindow):
         super().keyPressEvent(event)
 
     def on_gallery_item_clicked(self, index):
-        """Handle gallery item click - populate form and update single view"""
+        """Handle gallery item click - populate form with DB-first, fallback to file IPTC"""
         item = self.gallery_item_model.itemFromIndex(index)
         if item:
             # Update single view image
             self.single_view_widget.set_image(item.img_path)
             
-            # Clear all fields first to ensure refresh
-            self.media_title_input.clear()
-            self.media_headline_input.clear()
-            self.media_object_name_input.clear()
-            self.media_location_input.clear()
-            self.media_description_input.clear()
-            self.media_tags_input.clear()
-            self.media_credit_input.clear()
-            self.media_source_input.clear()
-            self.media_copyright_input.clear()
-            self.media_writer_input.clear()
-            self.media_byline_input.clear()
-            self.media_byline_title_input.clear()
-            self.media_category_input.clear()
-            self.media_supplemental_categories_input.clear()
+            # Clear all fields first
+            for w in [self.media_headline_input, self.media_object_name_input,
+                      self.media_location_input, self.media_credit_input,
+                      self.media_source_input, self.media_copyright_input,
+                      self.media_writer_input, self.media_byline_input,
+                      self.media_byline_title_input, self.media_category_input,
+                      self.media_supplemental_categories_input, self.media_people_input]:
+                w.clear()
+            for w in [self.media_title_input, self.media_description_input, self.media_tags_input]:
+                w.clear()
             
-            # Populate form fields from EXIF data (priority) or IPTC data (fallback)
-            
-            # Title
+            # Title from EXIF
             if 'Title' in item.exif_data:
                 self.media_title_input.setPlainText(str(item.exif_data['Title']))
             elif 'Subject' in item.exif_data:
                 self.media_title_input.setPlainText(str(item.exif_data['Subject']))
-            
-            # Date
-            self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
-            
-            # IPTC Fields
-            if 'Headline' in item.iptc_data:
-                self.media_headline_input.setText(item.iptc_data['Headline'])
-            if 'Object Name' in item.iptc_data:
-                self.media_object_name_input.setText(item.iptc_data['Object Name'])
-            if 'Caption' in item.iptc_data:
-                self.media_description_input.setPlainText(item.iptc_data['Caption'])
-            if 'Keywords' in item.iptc_data:
-                self.media_tags_input.setPlainText(item.iptc_data['Keywords'])
-            
-            # Location (from IPTC)
-            location_parts = []
-            if 'City' in item.iptc_data: location_parts.append(item.iptc_data['City'])
-            if 'State' in item.iptc_data: location_parts.append(item.iptc_data['State'])
-            if 'Country' in item.iptc_data: location_parts.append(item.iptc_data['Country'])
-            if location_parts:
-                self.media_location_input.setText(', '.join(location_parts))
-            
-            # Credit & Source
-            if 'Credit' in item.iptc_data:
-                self.media_credit_input.setText(item.iptc_data['Credit'])
-            if 'Source' in item.iptc_data:
-                self.media_source_input.setText(item.iptc_data['Source'])
-            if 'Copyright' in item.iptc_data:
-                self.media_copyright_input.setText(item.iptc_data['Copyright'])
-            
-            # People
-            if 'Writer' in item.iptc_data:
-                self.media_writer_input.setText(item.iptc_data['Writer'])
-            if 'By-line' in item.iptc_data:
-                self.media_byline_input.setText(item.iptc_data['By-line'])
-            if 'By-line Title' in item.iptc_data:
-                self.media_byline_title_input.setText(item.iptc_data['By-line Title'])
-            
-            # Categories
-            if 'Category' in item.iptc_data:
-                self.media_category_input.setText(item.iptc_data['Category'])
-            if 'Supplemental Categories' in item.iptc_data:
-                self.media_supplemental_categories_input.setText(item.iptc_data['Supplemental Categories'])
-            
-            # Update date if created date is available
-            if 'Date Created' in item.iptc_data:
-                # Format is usually YYYYMMDD
-                date_str = item.iptc_data['Date Created']
+
+            # --- DB-first loading: prefer DB over file IPTC ---
+            db_iptc = None
+            self.current_media_id = None
+            if self.current_event_id:
+                db_iptc = self.media_repo.get_iptc_data(item.img_path)
+                if db_iptc:
+                    media_row = self.media_repo.get_by_file_path(item.img_path)
+                    if media_row:
+                        self.current_media_id = media_row['id']
+
+            if db_iptc:
+                # Populate from database
+                self.media_headline_input.setText(db_iptc.get('iptc_headline') or '')
+                self.media_object_name_input.setText(db_iptc.get('iptc_object_name') or '')
+                self.media_description_input.setPlainText(db_iptc.get('iptc_caption') or '')
+                self.media_tags_input.setPlainText(db_iptc.get('iptc_keywords') or '')
+                self.media_credit_input.setText(db_iptc.get('iptc_credit') or '')
+                self.media_source_input.setText(db_iptc.get('iptc_source') or '')
+                self.media_copyright_input.setText(db_iptc.get('iptc_copyright') or '')
+                self.media_writer_input.setText(db_iptc.get('iptc_writer') or '')
+                self.media_byline_input.setText(db_iptc.get('iptc_byline') or '')
+                self.media_byline_title_input.setText(db_iptc.get('iptc_byline_title') or '')
+                self.media_category_input.setText(db_iptc.get('iptc_category') or '')
+                self.media_supplemental_categories_input.setText(db_iptc.get('iptc_supplemental_categories') or '')
+                
+                # Location
+                loc = ', '.join(filter(None, [
+                    db_iptc.get('iptc_city'), db_iptc.get('iptc_state'), db_iptc.get('iptc_country')
+                ]))
+                self.media_location_input.setText(loc)
+                
+                # Date
+                date_str = db_iptc.get('iptc_date_created') or ''
                 if len(date_str) == 8:
                     qdate = QtCore.QDate.fromString(date_str, "yyyyMMdd")
                     self.media_date_input.setDate(qdate)
+                else:
+                    self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
+                
+                # Persons from DB
+                if self.current_media_id:
+                    persons = self.person_repo.get_persons_for_media(self.current_media_id)
+                    self.media_people_input.setText(', '.join(persons))
+            else:
+                # Fallback: populate from file IPTC
+                self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
+                if 'Headline' in item.iptc_data: self.media_headline_input.setText(item.iptc_data['Headline'])
+                if 'Object Name' in item.iptc_data: self.media_object_name_input.setText(item.iptc_data['Object Name'])
+                if 'Caption' in item.iptc_data: self.media_description_input.setPlainText(item.iptc_data['Caption'])
+                if 'Keywords' in item.iptc_data: self.media_tags_input.setPlainText(item.iptc_data['Keywords'])
+                if 'Credit' in item.iptc_data: self.media_credit_input.setText(item.iptc_data['Credit'])
+                if 'Source' in item.iptc_data: self.media_source_input.setText(item.iptc_data['Source'])
+                if 'Copyright' in item.iptc_data: self.media_copyright_input.setText(item.iptc_data['Copyright'])
+                if 'Writer' in item.iptc_data: self.media_writer_input.setText(item.iptc_data['Writer'])
+                if 'By-line' in item.iptc_data: self.media_byline_input.setText(item.iptc_data['By-line'])
+                if 'By-line Title' in item.iptc_data: self.media_byline_title_input.setText(item.iptc_data['By-line Title'])
+                if 'Category' in item.iptc_data: self.media_category_input.setText(item.iptc_data['Category'])
+                if 'Supplemental Categories' in item.iptc_data: self.media_supplemental_categories_input.setText(item.iptc_data['Supplemental Categories'])
+                if 'People' in item.iptc_data: self.media_people_input.setText(item.iptc_data['People'])
+                loc_parts = [item.iptc_data.get(k, '') for k in ('City', 'State', 'Country') if k in item.iptc_data]
+                if loc_parts: self.media_location_input.setText(', '.join(loc_parts))
+                if 'Date Created' in item.iptc_data:
+                    date_str = item.iptc_data['Date Created']
+                    if len(date_str) == 8:
+                        qdate = QtCore.QDate.fromString(date_str, "yyyyMMdd")
+                        self.media_date_input.setDate(qdate)
+
+
+    def save_media_iptc(self):
+        """Save IPTC data to both the image file and the database."""
+        index = self.event_gallery_list_widget.currentIndex()
+        if not index.isValid():
+            QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen önce bir fotoğraf seçin.")
+            return
+        
+        item = self.gallery_item_model.itemFromIndex(index)
+        if not item or not self.current_event_id:
+            QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen bir etkinlik ve fotoğraf seçin.")
+            return
+        
+        try:
+            # Collect IPTC data from form
+            location = self.media_location_input.text()
+            loc_parts = [p.strip() for p in location.split(',')]
+            city  = loc_parts[0] if len(loc_parts) >= 1 else ''
+            state = loc_parts[1] if len(loc_parts) >= 2 else ''
+            country = loc_parts[2] if len(loc_parts) >= 3 else ''
+
+            iptc_data = {
+                "Headline": self.media_headline_input.text(),
+                "Caption": self.media_description_input.toPlainText(),
+                "Keywords": self.media_tags_input.toPlainText(),
+                "Object Name": self.media_object_name_input.text(),
+                "City": city, "State": state, "Country": country,
+                "Credit": self.media_credit_input.text(),
+                "Source": self.media_source_input.text(),
+                "Copyright": self.media_copyright_input.text(),
+                "Writer": self.media_writer_input.text(),
+                "By-line": self.media_byline_input.text(),
+                "By-line Title": self.media_byline_title_input.text(),
+                "Date Created": "",
+                "Category": self.media_category_input.text(),
+                "Supplemental Categories": self.media_supplemental_categories_input.text(),
+            }
+            
+            # 1. Write IPTC metadata to the image file
+            self._write_iptc_to_file(item.img_path, iptc_data)
+            
+            # 2. Save to database (ensure media record exists)
+            media_id = self.media_repo.ensure_media_exists(
+                self.current_event_id, item.img_path, "photo"
+            )
+            self.current_media_id = media_id
+            self.media_repo.save_iptc(media_id, iptc_data)
+            
+            # 3. Handle persons
+            self.person_repo.unlink_all_from_media(media_id)
+            people_text = self.media_people_input.text()
+            if people_text:
+                for name in people_text.split(','):
+                    name = name.strip()
+                    if name:
+                        person_id = self.person_repo.find_or_create(name)
+                        if person_id:
+                            self.person_repo.link_to_media(person_id, media_id)
+            
+            QtWidgets.QMessageBox.information(self, "Başarılı", "✅ IPTC verileri dosyaya ve veritabanına kaydedildi.")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Hata", f"❌ Kaydetme hatası: {str(e)}")
+
+    def _write_iptc_to_file(self, img_path: str, iptc_data: dict):
+        """Write IPTC metadata directly into the image file using iptcinfo3."""
+        from iptcinfo3 import IPTCInfo
+        
+        def clean(val):
+            return val.replace('\x00', '').strip() if val else ''
+        
+        def to_list(val):
+            """Convert a non-empty string to a single-item list, empty string to []."""
+            v = clean(val)
+            return [v.encode('utf-8')] if v else []
+        
+        try:
+            info = IPTCInfo(img_path, force=True)
+        except Exception:
+            info = IPTCInfo(img_path, force=True)
+        
+        # String fields (single value)
+        string_fields = {
+            'headline':                          clean(iptc_data.get('Headline', '')),
+            'caption/abstract':                  clean(iptc_data.get('Caption', '')),
+            'object name':                       clean(iptc_data.get('Object Name', '')),
+            'city':                              clean(iptc_data.get('City', '')),
+            'province/state':                    clean(iptc_data.get('State', '')),
+            'country/primary location name':     clean(iptc_data.get('Country', '')),
+            'credit':                            clean(iptc_data.get('Credit', '')),
+            'source':                            clean(iptc_data.get('Source', '')),
+            'copyright notice':                  clean(iptc_data.get('Copyright', '')),
+            'writer/editor':                     clean(iptc_data.get('Writer', '')),
+            'by-line title':                     clean(iptc_data.get('By-line Title', '')),
+        }
+        for field, value in string_fields.items():
+            info[field] = value
+        
+        # List fields (iptcinfo3 requires iterable for these)
+        info['by-line'] = to_list(iptc_data.get('By-line', ''))
+        info['category'] = to_list(iptc_data.get('Category', ''))
+        info['supplemental category'] = to_list(iptc_data.get('Supplemental Categories', ''))
+        
+        # Keywords as list
+        keywords_raw = clean(iptc_data.get('Keywords', ''))
+        if keywords_raw:
+            info['keywords'] = [k.strip().encode('utf-8') for k in keywords_raw.split(',') if k.strip()]
+        else:
+            info['keywords'] = []
+        
+        info.save_as(img_path)
 
 
     def event_widgets(self):
@@ -424,6 +579,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_supplemental_categories_input.setFixedWidth(fixed_width)
         self.media_supplemental_categories_input.setPlaceholderText("Supplemental Categories")
 
+        self.media_people_input = QtWidgets.QLineEdit()
+        self.media_people_input.setFixedWidth(fixed_width)
+        self.media_people_input.setPlaceholderText("Kişiler (Virgülle ayırın)")
+
         # Create labels and add rows
         self.media_details_form.addRow(QtWidgets.QLabel("📝 Title:"), self.media_title_input)
         self.media_details_form.addRow(QtWidgets.QLabel("� Headline:"), self.media_headline_input)
@@ -432,6 +591,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_form.addRow(QtWidgets.QLabel("📍 Location:"), self.media_location_input)
         self.media_details_form.addRow(QtWidgets.QLabel("📄 Description:"), self.media_description_input)
         self.media_details_form.addRow(QtWidgets.QLabel("🏷️ Tags:"), self.media_tags_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("👥 Kişiler:"), self.media_people_input)
         
         self.media_details_form.addRow(QtWidgets.QLabel("💳 Credit:"), self.media_credit_input)
         self.media_details_form.addRow(QtWidgets.QLabel("🏗️ Source:"), self.media_source_input)
@@ -466,6 +626,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_form = QtWidgets.QFormLayout()
         self.media_details_container.setLayout(self.media_details_form)
         self.media_details_scroll.setWidget(self.media_details_container)
+        
+        # Single Save button at the top of the details panel
+        self.save_media_btn = QtWidgets.QPushButton("💾 Kaydet")
+        self.save_media_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d7d46; color: white; padding: 10px;
+                border: none; border-radius: 4px; font-weight: bold; font-size: 14px;
+            }
+            QPushButton:hover { background-color: #3a9d5a; }
+        """)
+        self.save_media_btn.clicked.connect(self.save_media_iptc)
+        self.media_details_form.addRow(self.save_media_btn)
         
         self.events_layout.addLayout(self.events_column, 1)
         self.events_layout.addLayout(self.events_gallery, 3)

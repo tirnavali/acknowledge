@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Enum, Boolean
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Enum, Boolean, Table
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -12,6 +12,14 @@ class MediaType(str, enum.Enum):
     VIDEO = "video"
     PDF = "pdf"
     TRANSCRIPT = "transcript"
+
+# Junction table for N-to-N: Media <-> Person
+media_persons = Table(
+    "media_persons",
+    Base.metadata,
+    Column("media_id", UUID(as_uuid=True), ForeignKey("medias.id", ondelete="CASCADE"), primary_key=True),
+    Column("person_id", UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), primary_key=True),
+)
 
 class Event(Base):
     __tablename__ = "events"
@@ -54,7 +62,26 @@ class Media(Base):
     text_content = Column(Text, nullable=True)
     face_encoding = Column(Vector(128), nullable=True)
 
+    # IPTC Metadata Columns
+    iptc_headline = Column(String(500), nullable=True)
+    iptc_caption = Column(Text, nullable=True)
+    iptc_keywords = Column(Text, nullable=True)
+    iptc_object_name = Column(String(500), nullable=True)
+    iptc_city = Column(String(250), nullable=True)
+    iptc_state = Column(String(250), nullable=True)
+    iptc_country = Column(String(250), nullable=True)
+    iptc_credit = Column(String(500), nullable=True)
+    iptc_source = Column(String(500), nullable=True)
+    iptc_copyright = Column(String(500), nullable=True)
+    iptc_writer = Column(String(250), nullable=True)
+    iptc_byline = Column(String(250), nullable=True)
+    iptc_byline_title = Column(String(250), nullable=True)
+    iptc_date_created = Column(String(50), nullable=True)
+    iptc_category = Column(String(100), nullable=True)
+    iptc_supplemental_categories = Column(String(500), nullable=True)
+
     event = relationship("Event", back_populates="medias")
+    persons = relationship("Person", secondary=media_persons, back_populates="medias")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Polimorfizm Ayarları (Değişmedi)
@@ -75,3 +102,16 @@ class Pdf(Media):
 
 class Transcript(Media):
     __mapper_args__ = {'polymorphic_identity': 'transcript'}
+
+
+class Person(Base):
+    __tablename__ = "persons"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(250), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    medias = relationship("Media", secondary=media_persons, back_populates="persons")
+
+    def __repr__(self):
+        return f"<Person(name='{self.name}')>"

@@ -151,7 +151,8 @@ class GalleryItem(QtGui.QStandardItem):
                 'by-line title': 'By-line Title',
                 'date created': 'Date Created',
                 'category': 'Category',
-                'supplemental category': 'Supplemental Categories'
+                'supplemental category': 'Supplemental Categories',
+                'contact': 'People'
             }
             
             for iptc_key, display_name in iptc_fields.items():
@@ -178,7 +179,7 @@ class GalleryItem(QtGui.QStandardItem):
                             value = decode_bytes(value)
                         
                         if value and str(value).strip():
-                            self.iptc_data[display_name] = str(value)
+                            self.iptc_data[display_name] = str(value).replace('\x00', '')
                 except (KeyError, AttributeError):
                     # Field doesn't exist in this image
                     continue
