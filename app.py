@@ -12,6 +12,8 @@ import src.models
 from dotenv import load_dotenv
 import add_event_window
 from src.repositories.event_repository import EventRepository
+from single_view_widget import SingleViewWidget
+import os
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -65,11 +67,79 @@ class MainWindow(QtWidgets.QMainWindow):
             sys.exit(1)
     
     def UI(self):
+        self.init_menubar()
         self.init_toolbar()
         self.tabWidget()
         self.event_widgets()
         # self.media_details_form_widget()
         self.layouts()
+        self.apply_style()
+
+    def init_menubar(self):
+        menubar = self.menuBar()
+        
+        file_menu = menubar.addMenu("Dosya")
+        
+        open_action = QAction("Aç", self)
+        file_menu.addAction(open_action)
+        
+        save_action = QAction("Kaydet", self)
+        file_menu.addAction(save_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("Çıkış", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        view_menu = menubar.addMenu("Görünüm")
+        
+        grid_view_action = QAction("Izgara Görünümü", self)
+        grid_view_action.triggered.connect(self.switch_to_grid_view)
+        view_menu.addAction(grid_view_action)
+        
+        single_view_action = QAction("Tekli Görünüm", self)
+        single_view_action.triggered.connect(self.switch_to_single_view)
+        view_menu.addAction(single_view_action)
+
+    def switch_to_grid_view(self):
+        self.gallery_stack.setCurrentIndex(0)
+
+    def switch_to_single_view(self):
+        self.gallery_stack.setCurrentIndex(1)
+        self.single_view_widget.setFocus()
+        # If an item is selected, update single view
+        index = self.event_gallery_list_widget.currentIndex()
+        if index.isValid():
+            self.on_gallery_item_clicked(index)
+
+    def navigate_next(self):
+        index = self.event_gallery_list_widget.currentIndex()
+        if not index.isValid():
+            next_index = self.gallery_item_model.index(0, 0)
+        else:
+            row = index.row()
+            if row < self.gallery_item_model.rowCount() - 1:
+                next_index = self.gallery_item_model.index(row + 1, 0)
+            else:
+                return # End of list
+        
+        self.event_gallery_list_widget.setCurrentIndex(next_index)
+        self.on_gallery_item_clicked(next_index)
+
+    def navigate_previous(self):
+        index = self.event_gallery_list_widget.currentIndex()
+        if not index.isValid():
+            return
+        
+        row = index.row()
+        if row > 0:
+            prev_index = self.gallery_item_model.index(row - 1, 0)
+        else:
+            return # Start of list
+            
+        self.event_gallery_list_widget.setCurrentIndex(prev_index)
+        self.on_gallery_item_clicked(prev_index)
 
     def init_toolbar(self):
         self.toolbar_widget = self.addToolBar("Toolbar")
@@ -137,14 +207,17 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def on_event_card_clicked(self, event):
         """Handle event card click"""
+        self.switch_to_grid_view()  # Always switch to grid when a new event is selected
         items = self.load_gallery_items(event.id)
         self.gallery_item_model = GalleryItemModel(items)
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
     
     def on_gallery_item_clicked(self, index):
-        """Handle gallery item click - populate form with EXIF and IPTC data"""
+        """Handle gallery item click - populate form and update single view"""
         item = self.gallery_item_model.itemFromIndex(index)
         if item:
+            # Update single view image
+            self.single_view_widget.set_image(item.img_path)
             print("\n" + "="*60)
             print(f"📷 Image: {item.img_path}")
             print("="*60)
@@ -260,19 +333,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_search.setPlaceholderText("EXIF İçinde Ara...")
         self.event_gallery_search.setFixedHeight(30)
         self.event_gallery_search.setFixedWidth(600)
-        # Gallery list section
+        # Gallery Stack section (Grid + Single)
+        self.gallery_stack = QtWidgets.QStackedWidget()
+        
+        # Grid View
         self.event_gallery_list_widget = QtWidgets.QListView()
-        self.event_gallery_list_widget.setMaximumWidth(600)
         self.event_gallery_list_widget.setViewMode(QtWidgets.QListView.IconMode)
         self.event_gallery_list_widget.setGridSize(QtCore.QSize(180, 200))
         self.event_gallery_list_widget.setSpacing(10)
         self.event_gallery_list_widget.setUniformItemSizes(True)
+        self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
+        
+        # Single View
+        self.single_view_widget = SingleViewWidget()
+        self.single_view_widget.doubleClicked.connect(self.switch_to_grid_view)
+        self.single_view_widget.nextRequested.connect(self.navigate_next)
+        self.single_view_widget.prevRequested.connect(self.navigate_previous)
+        
+        self.gallery_stack.addWidget(self.event_gallery_list_widget)
+        self.gallery_stack.addWidget(self.single_view_widget)
+
         self.gallery_item_model = GalleryItemModel([])
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
-        self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
         
         # Connect click event to print EXIF data
         self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
+        self.event_gallery_list_widget.doubleClicked.connect(self.switch_to_single_view)
 
     def media_details_form_widget(self):
         """Create form fields for media details"""
@@ -359,7 +445,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.events_column.addWidget(self.event_card_list_widget)
         # event gallery
         self.events_gallery.addWidget(self.event_gallery_search)
-        self.events_gallery.addWidget(self.event_gallery_list_widget)  
+        self.events_gallery.addWidget(self.gallery_stack)  
         # media details
         self.media_details_form_widget()     
         
@@ -367,6 +453,63 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.settings_layout = QtWidgets.QVBoxLayout()
         self.settings_tab.setLayout(self.settings_layout)
+
+    def apply_style(self):
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #121212;
+            }
+            QTabWidget::pane {
+                border: 1px solid #333;
+                background-color: #121212;
+            }
+            QTabBar::tab {
+                background: #2a2a2a;
+                color: #888;
+                padding: 10px 20px;
+                border: 1px solid #333;
+                border-bottom: none;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #3a3a3a;
+                color: white;
+            }
+            QListView, QListWidget {
+                background-color: #1e1e1e;
+                border: 1px solid #333;
+                color: #e0e0e0;
+                border-radius: 4px;
+            }
+            QLineEdit {
+                background-color: #2a2a2a;
+                border: 1px solid #444;
+                color: white;
+                padding: 5px;
+                border-radius: 4px;
+            }
+            QTextEdit {
+                background-color: #2a2a2a;
+                border: 1px solid #444;
+                color: #e0e0e0;
+                border-radius: 4px;
+            }
+            QMenuBar {
+                background-color: #1e1e1e;
+                color: #ccc;
+            }
+            QMenuBar::item:selected {
+                background-color: #333;
+            }
+            QMenu {
+                background-color: #1e1e1e;
+                color: #ccc;
+                border: 1px solid #333;
+            }
+            QMenu::item:selected {
+                background-color: #333;
+            }
+        """)
 
 
 

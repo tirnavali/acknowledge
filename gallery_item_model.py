@@ -124,17 +124,7 @@ class GalleryItem(QtGui.QStandardItem):
                             display_name = tag_mapping[tag_name]
                             self.exif_data[display_name] = str(value)
                     
-                    # Create display string for requested fields
-                    display_fields = ['Title', 'Subject', 'Rating', 'Tags', 'Comments']
-                    desc_parts = []
-                    for field in display_fields:
-                        if field in self.exif_data:
-                            desc_parts.append(f"{field}: {self.exif_data[field]}")
-                    
-                    if desc_parts:
-                        self.setText("\n".join(desc_parts))
-                    else:
-                        self.setText(os.path.basename(self.img_path))
+                    self.setText(os.path.basename(self.img_path))
         except Exception as e:
             print(f"Error reading EXIF for {self.img_path}: {e}")
             self.setText(os.path.basename(self.img_path))
