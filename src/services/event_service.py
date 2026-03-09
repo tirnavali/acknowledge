@@ -9,12 +9,8 @@ class EventService:
         self.event_repo = EventRepository()
     
     def create_and_import_event(self, name: str, event_date, source_folder: str) -> Event:
-        # 1. Entity oluştur
-        event = Event(
-            name=name,
-            event_date=event_date,
-            imported_folder_path=source_folder
-        )
+        # 1. Entity oluştur (Class Method Factory)
+        event = Event.create(name, event_date, source_folder)
         
         # 2. Vault'a kopyala
         dest_path = os.path.join(self.vault_base_path, str(event.id))

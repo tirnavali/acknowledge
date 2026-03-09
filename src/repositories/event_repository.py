@@ -27,12 +27,12 @@ class EventRepository:
             row = result.fetchone()
             if row:
                 return Event(
-                    id=row.id if isinstance(row.id, UUID) else UUID(row.id),
-                    name=row.name,
-                    event_date=row.event_date,
-                    imported_folder_path=row.imported_folder_path,
-                    vault_folder_path=row.vault_folder_path,
-                    import_success=row.import_success
+                    _id=row.id if isinstance(row.id, UUID) else UUID(row.id),
+                    _name=row.name,
+                    _event_date=row.event_date,
+                    _imported_folder_path=row.imported_folder_path,
+                    _vault_folder_path=row.vault_folder_path,
+                    _import_success=row.import_success
                 )
             return None
 
@@ -41,10 +41,10 @@ class EventRepository:
             result = db.execute(text("SELECT * FROM events ORDER BY event_date DESC LIMIT 100"))
             rows = result.fetchall()
             return [Event(
-                id=row.id if isinstance(row.id, UUID) else UUID(row.id),
-                name=row.name,
-                event_date=row.event_date,
-                imported_folder_path=row.imported_folder_path,
-                vault_folder_path=row.vault_folder_path,
-                import_success=row.import_success
+                _id=row.id if isinstance(row.id, UUID) else UUID(row.id),
+                _name=row.name,
+                _event_date=row.event_date,
+                _imported_folder_path=row.imported_folder_path,
+                _vault_folder_path=row.vault_folder_path,
+                _import_success=row.import_success
             ) for row in rows]
