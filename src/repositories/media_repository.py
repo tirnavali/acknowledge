@@ -130,3 +130,14 @@ class MediaRepository:
             })
             db.commit()
             return new_id
+
+    def get_file_paths_for_event(self, event_id: UUID) -> set:
+        """Return a set of normalised file_paths stored in DB for the given event."""
+        import os
+        with get_db() as db:
+            result = db.execute(
+                text("SELECT file_path FROM medias WHERE event_id = :event_id"),
+                {"event_id": str(event_id)}
+            )
+            return {os.path.normpath(row.file_path) for row in result.fetchall()}
+

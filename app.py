@@ -226,19 +226,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def load_gallery_items(self, event_id):
         items = []
         event = EventRepository().get_by_id(event_id)
-        # Use absolute path to avoid issues with current working directory
         if not event.vault_folder_path:
             return items
         abs_folder_path = os.path.abspath(event.vault_folder_path)
         if not os.path.exists(abs_folder_path):
             return items
-            
+
+        # Fetch all file_paths already in DB for this event in one query
+        db_paths = self.media_repo.get_file_paths_for_event(event_id)
+
         for filename in os.listdir(abs_folder_path):
             if filename.lower().endswith((".jpg", ".png", ".jpeg")):
                 img_path = os.path.join(abs_folder_path, filename)
-                item = GalleryItem(filename, img_path)
+                in_db = os.path.normpath(img_path) in db_paths
+                item = GalleryItem(filename, img_path, in_db=in_db)
                 items.append(item)
         return items
+
 
     def refresh_events(self):
         """Clear and reload the event list"""
@@ -427,8 +431,24 @@ class MainWindow(QtWidgets.QMainWindow):
                             self.person_repo.link_to_media(person_id, media_id)
             
             QtWidgets.QMessageBox.information(self, "Başarılı", "✅ IPTC verileri dosyaya ve veritabanına kaydedildi.")
+            self.refresh_gallery_badges()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Hata", f"❌ Kaydetme hatası: {str(e)}")
+
+    def refresh_gallery_badges(self):
+        """Refresh the in_db badge on all gallery items for the current event."""
+        if not self.current_event_id:
+            return
+        db_paths = self.media_repo.get_file_paths_for_event(self.current_event_id)
+        for row in range(self.gallery_item_model.rowCount()):
+            item = self.gallery_item_model.item(row)
+            if item:
+                in_db = os.path.normpath(item.img_path) in db_paths
+                if item.in_db != in_db:
+                    item.in_db = in_db
+                new_icon = QtGui.QIcon(self.gallery_item_model._make_icon(item))
+                item.setIcon(new_icon)
+
 
     def _write_iptc_to_file(self, img_path: str, iptc_data: dict):
         """Write IPTC metadata directly into the image file using iptcinfo3."""

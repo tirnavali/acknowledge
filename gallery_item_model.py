@@ -5,9 +5,10 @@ from iptcinfo3 import IPTCInfo
 import os
 
 class GalleryItem(QtGui.QStandardItem):
-    def __init__(self, title, img_path):
+    def __init__(self, title, img_path, in_db: bool = False):
         super().__init__(title)
         self.img_path = img_path
+        self.in_db = in_db
         self.exif_data = {}
         self.iptc_data = {}
         self.setTextAlignment(QtCore.Qt.AlignCenter)
@@ -195,8 +196,41 @@ class GalleryItemModel(QtGui.QStandardItemModel):
 
     def setup_model(self):
         for item in self.items:
-            icon = QtGui.QIcon(item.img_path)
+            icon = QtGui.QIcon(self._make_icon(item))
             item.setIcon(icon)
             self.appendRow(item)
+
+    def _make_icon(self, item: GalleryItem) -> QtGui.QPixmap:
+        """Return thumbnail pixmap, with a green badge if the item is in DB."""
+        pixmap = QtGui.QPixmap(item.img_path)
+        if pixmap.isNull():
+            pixmap = QtGui.QPixmap(150, 150)
+            pixmap.fill(QtGui.QColor("#e0e0e0"))
+        else:
+            pixmap = pixmap.scaled(150, 150, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+
+        if item.in_db:
+            # Draw a small green circle badge in the top-right corner
+            badge_size = 22
+            painter = QtGui.QPainter(pixmap)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing)
+            cx = pixmap.width() - badge_size // 2 - 4
+            cy = badge_size // 2 + 4
+            painter.setBrush(QtGui.QColor("#2d7d46"))
+            painter.setPen(QtGui.QColor("white"))
+            painter.drawEllipse(QtCore.QPoint(cx, cy), badge_size // 2, badge_size // 2)
+            painter.setPen(QtGui.QColor("white"))
+            font = painter.font()
+            font.setBold(True)
+            font.setPixelSize(13)
+            painter.setFont(font)
+            painter.drawText(
+                QtCore.QRect(cx - badge_size // 2, cy - badge_size // 2, badge_size, badge_size),
+                QtCore.Qt.AlignCenter,
+                "\u2713"
+            )
+            painter.end()
+
+        return pixmap
 
 
