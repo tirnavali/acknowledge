@@ -44,8 +44,19 @@ class EventCardWidget(QtWidgets.QWidget):
     
     def mousePressEvent(self, event):
         """Handle mouse click events"""
-        self.clicked.emit()
-        super().mousePressEvent(event)
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+            super().mousePressEvent(event)
+        elif event.button() == QtCore.Qt.RightButton:
+            # Accept but don't call super() to prevent QListWidget from selecting the item
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        """Consume right-click release to be safe"""
+        if event.button() == QtCore.Qt.RightButton:
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
     
     def keyPressEvent(self, event):
         """Handle keyboard events - emit clicked signal on Enter/Return"""
