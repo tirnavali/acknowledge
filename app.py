@@ -636,7 +636,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_scroll = QtWidgets.QScrollArea()
         self.media_details_scroll.setWidgetResizable(True)
         self.media_details_scroll.setFixedWidth(450)
-        self.media_details_scroll.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px;")
+        self.media_details_scroll.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ccc; border-radius: 4px;")
         
         self.media_details_container = QtWidgets.QWidget()
         self.media_details_form = QtWidgets.QFormLayout()
@@ -676,57 +676,67 @@ class MainWindow(QtWidgets.QMainWindow):
     def apply_style(self):
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #121212;
+                background-color: #f0f0f0;
             }
             QTabWidget::pane {
-                border: 1px solid #333;
-                background-color: #121212;
+                border: 1px solid #ccc;
+                background-color: #ffffff;
             }
             QTabBar::tab {
-                background: #2a2a2a;
-                color: #888;
+                background: #e0e0e0;
+                color: #333;
                 padding: 10px 20px;
-                border: 1px solid #333;
+                border: 1px solid #ccc;
                 border-bottom: none;
                 margin-right: 2px;
             }
             QTabBar::tab:selected {
-                background: #3a3a3a;
-                color: white;
+                background: #ffffff;
+                color: #000;
             }
             QListView, QListWidget {
-                background-color: #1e1e1e;
-                border: 1px solid #333;
-                color: #e0e0e0;
+                background-color: #ffffff;
+                border: 1px solid #ccc;
+                color: #222;
                 border-radius: 4px;
             }
             QLineEdit {
-                background-color: #2a2a2a;
-                border: 1px solid #444;
-                color: white;
+                background-color: #ffffff;
+                border: 1px solid #bbb;
+                color: #222;
                 padding: 5px;
                 border-radius: 4px;
             }
             QTextEdit {
-                background-color: #2a2a2a;
-                border: 1px solid #444;
-                color: #e0e0e0;
+                background-color: #ffffff;
+                border: 1px solid #bbb;
+                color: #222;
                 border-radius: 4px;
             }
+            QLabel {
+                color: #222;
+            }
             QMenuBar {
-                background-color: #1e1e1e;
-                color: #ccc;
+                background-color: #f0f0f0;
+                color: #222;
             }
             QMenuBar::item:selected {
-                background-color: #333;
+                background-color: #ddd;
             }
             QMenu {
-                background-color: #1e1e1e;
-                color: #ccc;
-                border: 1px solid #333;
+                background-color: #ffffff;
+                color: #222;
+                border: 1px solid #ccc;
             }
             QMenu::item:selected {
-                background-color: #333;
+                background-color: #e0e0e0;
+            }
+            QScrollArea {
+                background-color: #f5f5f5;
+            }
+            QWidget {
+                background-color: #f5f5f5;
+                color: #222;
             }
         """)
 
