@@ -5,9 +5,12 @@ Design decisions:
 - Model is loaded lazily on first call (heavy ~200 MB, downloaded once by insightface)
 - Returns a list of FaceResult dataclasses with normalised bbox and numpy embedding
 - Runs synchronously; callers should use QThread to avoid UI blocking
+- A threading.Lock serialises concurrent detect() calls so rapid event-switching
+  cannot corrupt the singleton insightface model state.
 """
 from __future__ import annotations
 import logging
+import threading
 from dataclasses import dataclass
 import numpy as np
 
@@ -36,6 +39,7 @@ class FaceAnalysisService:
 
     _instance = None
     _app = None  # insightface FaceAnalysis
+    _lock = threading.Lock()  # serialise concurrent detect() calls
 
     def __new__(cls):
         if cls._instance is None:
@@ -61,6 +65,9 @@ class FaceAnalysisService:
         """
         Detect all faces in an image and return normalised results.
 
+        Uses a threading lock so that concurrent calls (e.g. rapid event-switching)
+        are serialised and cannot corrupt the singleton insightface model state.
+
         Args:
             img_path: Absolute path to the image file.
 
@@ -69,33 +76,32 @@ class FaceAnalysisService:
         """
         import cv2
 
-        self._load_model()
-        if self._app is None:
-            return []
+        with self._lock:
+            self._load_model()
+            if self._app is None:
+                return []
 
-        img = cv2.imread(img_path)
-        if img is None:
-            logger.warning(f"Could not read image: {img_path}")
-            return []
+            img = cv2.imread(img_path)
+            if img is None:
+                logger.warning(f"Could not read image: {img_path}")
+                return []
 
-        h, w = img.shape[:2]
-        faces = self._app.get(img)
+            h, w = img.shape[:2]
+            faces = self._app.get(img)
 
         results = []
         for face in faces:
             bbox = face.bbox.astype(float)
             x1, y1, x2, y2 = bbox
-            # Normalise to [0,1]
             results.append(FaceResult(
                 x1=max(0.0, x1 / w),
                 y1=max(0.0, y1 / h),
                 x2=min(1.0, x2 / w),
                 y2=min(1.0, y2 / h),
-                embedding=face.embedding,  # shape (512,)
+                embedding=face.embedding,
                 score=float(face.det_score),
             ))
 
-        # Sort by bbox area descending (largest face first)
         results.sort(key=lambda f: (f.x2 - f.x1) * (f.y2 - f.y1), reverse=True)
         return results
 

@@ -82,6 +82,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._current_media_id  = None
         self._current_event_id  = None
         self._detection_worker: FaceDetectionWorker | None = None
+        self._detection_img_path: str | None = None   # path sent to current worker
         # Raw FaceResult list from last detection (needed to save to DB)
         self._pending_results: list = []
         self._skip_similarity = False  # set by reset to skip auto-matching
@@ -224,12 +225,18 @@ class SingleViewWidget(QtWidgets.QWidget):
             self._detection_worker.quit()
             self._detection_worker.wait(500)
 
+        self._detection_img_path = img_path
         self._detection_worker = FaceDetectionWorker(self._face_service, img_path, self)
         self._detection_worker.detected.connect(self._on_detection_finished)
         self._detection_worker.error.connect(self._on_detection_error)
         self._detection_worker.start()
 
     def _on_detection_finished(self, results: list):
+        # Guard: discard stale results if user switched image/event before detection finished
+        if self.current_img_path != self._detection_img_path:
+            logger.debug("Discarding stale detection results (image changed during detection)")
+            return
+
         if not results:
             self._status_label.setText("Yüz algılanamadı.")
             return
@@ -263,13 +270,13 @@ class SingleViewWidget(QtWidgets.QWidget):
                 except Exception as e:
                     logger.warning(f"Could not ensure media exists: {e}")
 
-        # Save detections to DB (skip after reset — save when user names them)
-        if not skip_sim and self._current_media_id and self._face_repo:
+        # Save detections to DB (always save so we don't wipe them on refresh)
+        if self._current_media_id and self._face_repo:
             saved_ids = self._face_repo.save_faces(self._current_media_id, results)
             for i, fid in enumerate(saved_ids):
                 face_dicts[i]["face_id"] = str(fid)
                 # If auto-matched, assign immediately
-                if face_dicts[i]["person_name"] and self._person_repo:
+                if not skip_sim and face_dicts[i]["person_name"] and self._person_repo:
                     pid, _ = self._face_repo.find_similar_person(results[i].embedding)
                     if pid:
                         self._face_repo.assign_person(fid, pid)
@@ -339,12 +346,16 @@ class SingleViewWidget(QtWidgets.QWidget):
         # Ensure face row is in DB
         if not face_id and self._current_media_id and self._face_repo and face_index < len(self._pending_results):
             try:
+                # Save ALL pending results, not just this one, to avoid wiping other faces
                 saved_ids = self._face_repo.save_faces(
-                    self._current_media_id, [self._pending_results[face_index]]
+                    self._current_media_id, self._pending_results
                 )
                 if saved_ids:
-                    face_id = str(saved_ids[0])
-                    face_info["face_id"] = face_id
+                    # Update ALL face_ids in the overlay
+                    for i, sid in enumerate(saved_ids):
+                        if i < len(self.face_overlay._faces):
+                            self.face_overlay._faces[i]["face_id"] = str(sid)
+                    face_id = str(saved_ids[face_index])
             except Exception as e:
                 logger.warning(f"save_faces fallback failed: {e}")
 

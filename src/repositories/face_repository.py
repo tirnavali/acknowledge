@@ -104,8 +104,10 @@ class FaceRepository:
         threshold: float = 0.5,
     ) -> tuple[UUID | None, str | None]:
         """
-        Search existing labelled face embeddings for the closest match.
+        Search ALL labelled face embeddings for the closest match (global).
         Uses pgvector cosine distance (lower = more similar).
+        Cross-event recognition is intentional: the same physical person should
+        be auto-identified across different events.
 
         Returns:
             (person_id, person_name) if a match is found under threshold,
