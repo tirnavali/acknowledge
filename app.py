@@ -219,9 +219,12 @@ class MainWindow(QtWidgets.QMainWindow):
         for event in events:
             item = QtWidgets.QListWidgetItem(self.event_card_list_widget)
             card = EventCardWidget(event.name, event.event_date)
-            # Connect the click signal to a handler
+            # Force width so sizeHint() calculates the correct height for wrapped text
+            card.setFixedWidth(184)
             card.clicked.connect(lambda e=event: self.on_event_card_clicked(e))
-            item.setSizeHint(card.sizeHint())
+            # Get size hint and add a tiny bit of vertical padding to be safe against cropping
+            size = card.sizeHint()
+            item.setSizeHint(QtCore.QSize(size.width(), size.height() + 4))
             self.event_card_list_widget.addItem(item)
             self.event_card_list_widget.setItemWidget(item, card)
     
@@ -531,7 +534,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_search.setFixedWidth(200)
 
         self.event_card_list_widget = QtWidgets.QListWidget()
-        self.event_card_list_widget.setMaximumWidth(200)
+        self.event_card_list_widget.setFixedWidth(200)
+        self.event_card_list_widget.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.event_card_list_widget.setResizeMode(QtWidgets.QListView.Adjust)
+        self.event_card_list_widget.setWordWrap(True)
         
         # Load events into the list
         self.load_events()

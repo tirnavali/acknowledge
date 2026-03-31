@@ -6,11 +6,20 @@ class EventCardWidget(QtWidgets.QWidget):
     
     def __init__(self, event_name, event_date):
         super().__init__()
-        self.layout = QtWidgets.QVBoxLayout()
-        self.setLayout(self.layout)
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setSpacing(4)
+        
         self.event_name = QtWidgets.QLabel(event_name)
+        self.event_name.setWordWrap(True)
+        # Set tooltip so user can see full name on hover
+        self.event_name.setToolTip(event_name)
+        self.event_name.setStyleSheet("font-weight: bold; font-size: 13px; color: #333;")
+        self.event_name.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
         self.layout.addWidget(self.event_name)
+        
         self.event_date = QtWidgets.QLabel(event_date.strftime("%Y-%m-%d %H:%M:%S"))
+        self.event_date.setStyleSheet("color: #666; font-size: 11px;")
         self.layout.addWidget(self.event_date)
         
         # Optional: Add visual feedback for hover
