@@ -251,11 +251,27 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def on_event_card_clicked(self, event):
         """Handle event card click"""
-        self.switch_to_grid_view()  # Always switch to grid when a new event is selected
+        self.switch_to_grid_view()
         self.current_event_id = event.id
+
+        # Show loading state
+        self.gallery_stack.setCurrentIndex(2)  # loading widget
+        self.media_details_scroll.setEnabled(False)
+        self.media_details_scroll.setStyleSheet(
+            "background-color: #ebebeb; border: 1px solid #ccc; border-radius: 4px; opacity: 0.5;"
+        )
+        QtWidgets.QApplication.processEvents()
+
         items = self.load_gallery_items(event.id)
         self.gallery_item_model = GalleryItemModel(items)
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
+
+        # Restore state
+        self.gallery_stack.setCurrentIndex(0)  # grid view
+        self.media_details_scroll.setEnabled(True)
+        self.media_details_scroll.setStyleSheet(
+            "background-color: #f5f5f5; border: 1px solid #ccc; border-radius: 4px;"
+        )
     
     def keyPressEvent(self, event):
         """Global key handler for navigation"""
@@ -540,6 +556,16 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.gallery_stack.addWidget(self.event_gallery_list_widget)
         self.gallery_stack.addWidget(self.single_view_widget)
+
+        # Loading widget (index=2)
+        self._loading_widget = QtWidgets.QWidget()
+        _loading_layout = QtWidgets.QVBoxLayout(self._loading_widget)
+        _loading_layout.setAlignment(QtCore.Qt.AlignCenter)
+        _loading_label = QtWidgets.QLabel("⏳ Yükleniyor...")
+        _loading_label.setAlignment(QtCore.Qt.AlignCenter)
+        _loading_label.setStyleSheet("font-size: 22px; color: #555; font-weight: bold;")
+        _loading_layout.addWidget(_loading_label)
+        self.gallery_stack.addWidget(self._loading_widget)
 
         self.gallery_item_model = GalleryItemModel([])
         self.event_gallery_list_widget.setModel(self.gallery_item_model)
