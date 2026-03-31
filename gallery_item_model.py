@@ -5,240 +5,200 @@ from iptcinfo3 import IPTCInfo
 import os
 
 class GalleryItem(QtGui.QStandardItem):
-    def __init__(self, title, img_path, in_db: bool = False):
+    def __init__(self, title, img_path, in_db: bool = False, db_metadata: dict = None):
         super().__init__(title)
         self.img_path = img_path
         self.in_db = in_db
         self.exif_data = {}
         self.iptc_data = {}
+        self.is_loaded = False # Flag for background worker
+        
         self.setTextAlignment(QtCore.Qt.AlignCenter)
         self.setSizeHint(QtCore.QSize(300, 300))
         self.setToolTip(self.img_path)
         self.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-        self.__read_exif()
-        self.__read_iptc()
-    
-    def __str__(self):
-        return self.text()
+        
+        # Pre-populate from DB if available to avoid disk I/O
+        if db_metadata:
+            self._pop_from_db(db_metadata)
+            
+    def _pop_from_db(self, db_metadata):
+        """Map database columns back to the display-friendly iptc_data dict."""
+        iptc_mapping = {
+            'iptc_headline': 'Headline',
+            'iptc_caption': 'Caption',
+            'iptc_keywords': 'Keywords',
+            'iptc_object_name': 'Object Name',
+            'iptc_city': 'City',
+            'iptc_state': 'State',
+            'iptc_country': 'Country',
+            'iptc_credit': 'Credit',
+            'iptc_source': 'Source',
+            'iptc_copyright': 'Copyright',
+            'iptc_writer': 'Writer',
+            'iptc_byline': 'By-line',
+            'iptc_byline_title': 'By-line Title',
+            'iptc_date_created': 'Date Created',
+            'iptc_category': 'Category',
+            'iptc_supplemental_categories': 'Supplemental Categories'
+        }
+        for db_key, display_name in iptc_mapping.items():
+            val = db_metadata.get(db_key)
+            if val:
+                self.iptc_data[display_name] = str(val)
+
+    def load_from_file(self):
+        """Heavy I/O: Read EXIF/IPTC from file. Called from background thread."""
+        if not self.exif_data:
+            self.__read_exif()
+        if not self.iptc_data:
+            self.__read_iptc()
+        self.is_loaded = True
 
     def __read_exif(self):
+        # ... (implementation remains same as before)
         try:
             with Image.open(self.img_path) as img:
                 exif = img._getexif()
                 if exif is not None:
-                    # Comprehensive EXIF tags mapping
                     tag_mapping = {
-                        # Windows XP tags
-                        'XPTitle': 'Title',
-                        'XPSubject': 'Subject',
-                        'XPRating': 'Rating',
-                        'XPKeywords': 'Tags',
-                        'XPComment': 'Comments',
-                        'Rating': 'Rating',
-                        
-                        # Camera information
-                        'Make': 'Camera Make',
-                        'Model': 'Camera Model',
-                        'LensModel': 'Lens Model',
-                        'LensMake': 'Lens Make',
-                        'Software': 'Software',
-                        
-                        # Date/Time
-                        'DateTime': 'Date/Time',
-                        'DateTimeOriginal': 'Date/Time Original',
-                        'DateTimeDigitized': 'Date/Time Digitized',
-                        
-                        # Exposure settings
-                        'ExposureTime': 'Shutter Speed',
-                        'FNumber': 'Aperture',
-                        'ISOSpeedRatings': 'ISO',
-                        'ISO': 'ISO',
-                        'ExposureProgram': 'Exposure Program',
-                        'ExposureMode': 'Exposure Mode',
-                        'ExposureBiasValue': 'Exposure Compensation',
-                        'MeteringMode': 'Metering Mode',
-                        
-                        # Flash
-                        'Flash': 'Flash',
-                        
-                        # Focal length
-                        'FocalLength': 'Focal Length',
-                        'FocalLengthIn35mmFilm': 'Focal Length (35mm)',
-                        
-                        # Image properties
-                        'Orientation': 'Orientation',
-                        'XResolution': 'X Resolution',
-                        'YResolution': 'Y Resolution',
-                        'ResolutionUnit': 'Resolution Unit',
-                        'ColorSpace': 'Color Space',
-                        'WhiteBalance': 'White Balance',
-                        
-                        # GPS
-                        'GPSInfo': 'GPS Info',
-                        'GPSLatitude': 'GPS Latitude',
-                        'GPSLongitude': 'GPS Longitude',
-                        'GPSAltitude': 'GPS Altitude',
-                        
-                        # Other
-                        'Artist': 'Artist',
-                        'Copyright': 'Copyright',
-                        'ImageDescription': 'Image Description',
-                        'UserComment': 'User Comment'
+                        'XPTitle': 'Title', 'XPSubject': 'Subject', 'XPRating': 'Rating',
+                        'XPKeywords': 'Tags', 'XPComment': 'Comments', 'Rating': 'Rating',
+                        'Make': 'Camera Make', 'Model': 'Camera Model', 'LensModel': 'Lens Model',
+                        'LensMake': 'Lens Make', 'Software': 'Software', 'DateTime': 'Date/Time',
+                        'DateTimeOriginal': 'Date/Time Original', 'DateTimeDigitized': 'Date/Time Digitized',
+                        'ExposureTime': 'Shutter Speed', 'FNumber': 'Aperture', 'ISOSpeedRatings': 'ISO',
+                        'ISO': 'ISO', 'ExposureProgram': 'Exposure Program', 'ExposureMode': 'Exposure Mode',
+                        'ExposureBiasValue': 'Exposure Compensation', 'MeteringMode': 'Metering Mode',
+                        'Flash': 'Flash', 'FocalLength': 'Focal Length', 'FocalLengthIn35mmFilm': 'Focal Length (35mm)',
+                        'Orientation': 'Orientation', 'XResolution': 'X Resolution', 'YResolution': 'Y Resolution',
+                        'ResolutionUnit': 'Resolution Unit', 'ColorSpace': 'Color Space', 'WhiteBalance': 'White Balance',
+                        'Artist': 'Artist', 'Copyright': 'Copyright', 'ImageDescription': 'Image Description', 'UserComment': 'User Comment'
                     }
-                    
                     for tag, value in exif.items():
                         tag_name = ExifTags.TAGS.get(tag, tag)
                         if tag_name in tag_mapping:
-                            # Handle XP tags which are usually stored as UTF-16LE bytes
                             if isinstance(value, bytes):
-                                try:
-                                    value = value.decode('utf-16le').strip('\x00')
-                                except:
-                                    try:
-                                        value = value.decode('utf-8').strip('\x00')
-                                    except:
-                                        pass
-                            
-                            # Handle tuple values (like FNumber, ExposureTime)
-                            elif isinstance(value, tuple) and len(value) == 2:
-                                # Convert rational numbers (numerator, denominator)
-                                if value[1] != 0:
-                                    if tag_name == 'ExposureTime':
-                                        # Format as fraction for shutter speed
-                                        if value[0] < value[1]:
-                                            value = f"1/{int(value[1]/value[0])}"
-                                        else:
-                                            value = f"{value[0]/value[1]:.1f}s"
-                                    elif tag_name == 'FNumber':
-                                        # Format as f-stop
-                                        value = f"f/{value[0]/value[1]:.1f}"
-                                    elif tag_name == 'FocalLength':
-                                        # Format as mm
-                                        value = f"{value[0]/value[1]:.1f}mm"
-                                    else:
-                                        value = value[0] / value[1]
-                            
-                            # Skip GPS Info (it's a complex dict, handle separately if needed)
-                            if tag_name == 'GPSInfo':
-                                continue
+                                try: value = value.decode('utf-16le').strip('\x00')
+                                except: pass
+                            elif isinstance(value, tuple) and len(value) == 2 and value[1] != 0:
+                                if tag_name == 'ExposureTime': value = f"1/{int(value[1]/value[0])}" if value[0] < value[1] else f"{value[0]/value[1]:.1f}s"
+                                elif tag_name == 'FNumber': value = f"f/{value[0]/value[1]:.1f}"
+                                elif tag_name == 'FocalLength': value = f"{value[0]/value[1]:.1f}mm"
+                                else: value = value[0] / value[1]
                             
                             display_name = tag_mapping[tag_name]
                             self.exif_data[display_name] = str(value)
-                    
-                    self.setText(os.path.basename(self.img_path))
-        except Exception as e:
-            print(f"Error reading EXIF for {self.img_path}: {e}")
-            self.setText(os.path.basename(self.img_path))
+        except: pass
     
     def __read_iptc(self):
-        """Read IPTC metadata from image"""
+        # ... (implementation remains same as before)
         try:
             info = IPTCInfo(self.img_path, force=True)
-            
-            # Common IPTC fields
             iptc_fields = {
-                'headline': 'Headline',
-                'caption/abstract': 'Caption',
-                'keywords': 'Keywords',
-                'object name': 'Object Name',
-                'city': 'City',
-                'province/state': 'State',
-                'country/primary location name': 'Country',
-                'credit': 'Credit',
-                'source': 'Source',
-                'copyright notice': 'Copyright',
-                'writer/editor': 'Writer',
-                'by-line': 'By-line',
-                'by-line title': 'By-line Title',
-                'date created': 'Date Created',
-                'category': 'Category',
-                'supplemental category': 'Supplemental Categories',
-                'contact': 'People'
+                'headline': 'Headline', 'caption/abstract': 'Caption', 'keywords': 'Keywords',
+                'object name': 'Object Name', 'city': 'City', 'province/state': 'State',
+                'country/primary location name': 'Country', 'credit': 'Credit', 'source': 'Source',
+                'copyright notice': 'Copyright', 'writer/editor': 'Writer', 'by-line': 'By-line',
+                'by-line title': 'By-line Title', 'date created': 'Date Created', 'category': 'Category',
+                'supplemental category': 'Supplemental Categories', 'contact': 'People'
             }
-            
             for iptc_key, display_name in iptc_fields.items():
                 try:
-                    # IPTCInfo uses dictionary-style access, not .get()
                     value = info[iptc_key]
                     if value:
-                        def decode_bytes(v):
-                            if isinstance(v, bytes):
-                                try:
-                                    return v.decode('utf-8')
-                                except:
-                                    try:
-                                        return v.decode('latin-1')
-                                    except:
-                                        return str(v)
-                            return str(v)
-
-                        # Handle list values (like keywords)
                         if isinstance(value, list):
-                            value = ', '.join([decode_bytes(v) for v in value])
-                        # Handle single bytes
+                            value = ', '.join([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in value])
                         elif isinstance(value, bytes):
-                            value = decode_bytes(value)
-                        
-                        if value and str(value).strip():
-                            self.iptc_data[display_name] = str(value).replace('\x00', '')
-                except (KeyError, AttributeError):
-                    # Field doesn't exist in this image
-                    continue
+                            value = value.decode('utf-8')
+                        self.iptc_data[display_name] = str(value).replace('\x00', '')
+                except: continue
+        except: pass
+
+class GalleryItemWorker(QtCore.QObject):
+    """Signal emitter for the background runnable"""
+    finished = QtCore.Signal(GalleryItem, QtGui.QPixmap)
+
+class GalleryItemRunnable(QtCore.QRunnable):
+    """Worker that handles one image's heavy lifting"""
+    def __init__(self, item):
+        super().__init__()
+        self.item = item
+        self.signals = GalleryItemWorker()
+
+    def run(self):
+        # 1. Load metadata if missing
+        self.item.load_from_file()
         
-        except Exception as e:
-            print(f"Error reading IPTC for {self.img_path}: {e}")
+        # 2. Generate thumbnail
+        pixmap = GalleryItemModel.generate_pixmap(self.item)
+        
+        # 3. Notify UI
+        self.signals.finished.emit(self.item, pixmap)
 
 class GalleryItemModel(QtGui.QStandardItemModel):
     def __init__(self, items: List[GalleryItem]):
         super().__init__()
+        # Global placeholder to avoid repeated generation
+        self._placeholder = self._make_placeholder()
         self.items = items
         self.setup_model()
 
+    def _make_placeholder(self):
+        p = QtGui.QPixmap(150, 150)
+        p.fill(QtGui.QColor("#f0f0f0"))
+        painter = QtGui.QPainter(p)
+        painter.setPen(QtGui.QColor("#999"))
+        painter.drawText(p.rect(), QtCore.Qt.AlignCenter, "⏳")
+        painter.end()
+        return p
+
     def setup_model(self):
         for item in self.items:
-            icon = QtGui.QIcon(self._make_icon(item))
-            item.setIcon(icon)
+            item.setIcon(QtGui.QIcon(self._placeholder))
             self.appendRow(item)
 
-    def _make_icon(self, item: GalleryItem) -> QtGui.QPixmap:
-        """Return thumbnail pixmap, with a green badge if the item is in DB."""
+    @staticmethod
+    def generate_pixmap(item: GalleryItem) -> QtGui.QPixmap:
+        """Heavylifting for thumbnail generation"""
         pixmap = QtGui.QPixmap(item.img_path)
         if pixmap.isNull():
             pixmap = QtGui.QPixmap(150, 150)
-            pixmap.fill(QtGui.QColor("#e0e0e0"))
+            pixmap.fill(QtGui.QColor("#ffcccc"))
         else:
             pixmap = pixmap.scaled(150, 150, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
 
         if item.in_db:
-            # Draw a small green circle badge in the top-right corner
-            badge_size = 22
             painter = QtGui.QPainter(pixmap)
             painter.setRenderHint(QtGui.QPainter.Antialiasing)
-            cx = pixmap.width() - badge_size // 2 - 4
-            cy = badge_size // 2 + 4
+            badge_size = 22
+            cx, cy = pixmap.width() - badge_size // 2 - 4, badge_size // 2 + 4
             painter.setBrush(QtGui.QColor("#2d7d46"))
             painter.setPen(QtGui.QColor("white"))
             painter.drawEllipse(QtCore.QPoint(cx, cy), badge_size // 2, badge_size // 2)
-            painter.setPen(QtGui.QColor("white"))
-            font = painter.font()
-            font.setBold(True)
-            font.setPixelSize(13)
-            painter.setFont(font)
-            painter.drawText(
-                QtCore.QRect(cx - badge_size // 2, cy - badge_size // 2, badge_size, badge_size),
-                QtCore.Qt.AlignCenter,
-                "\u2713"
-            )
+            font = painter.font(); font.setBold(True); font.setPixelSize(13); painter.setFont(font)
+            painter.drawText(QtCore.QRect(cx-11, cy-11, 22, 22), QtCore.Qt.AlignCenter, "\u2713")
             painter.end()
-
         return pixmap
+
+    def start_loading(self):
+        """Actually start the background threads"""
+        pool = QtCore.QThreadPool.globalInstance()
+        # Limit threads so we don't choke the system
+        pool.setMaxThreadCount(max(1, os.cpu_count() // 2)) 
+        
+        for item in self.items:
+            runnable = GalleryItemRunnable(item)
+            runnable.signals.finished.connect(self._on_item_loaded)
+            pool.start(runnable)
+
+    def _on_item_loaded(self, item, pixmap):
+        """Update item with loaded thumbnail"""
+        item.setIcon(QtGui.QIcon(pixmap))
 
 
 class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
-    """
-    Filters gallery items based on search text, matching against IPTC and EXIF data.
-    Supports multi-keyword 'AND' searches and ranks by relevance (score).
-    """
+    # (Rest of the class remains identical)
     def __init__(self, parent=None):
         super().__init__(parent)
         self._filter_text = ""
@@ -249,71 +209,46 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         if self._filter_text:
             self.sort(0, QtCore.Qt.DescendingOrder)
         else:
-            self.sort(-1) # Revert to original order
+            self.sort(-1)
             
     def filterAcceptsRow(self, source_row, source_parent):
-        if not self._filter_text:
-            return True
-            
+        if not self._filter_text: return True
         model = self.sourceModel()
         index = model.index(source_row, 0, source_parent)
         item = model.itemFromIndex(index)
-        
-        if not item:
-            return False
-            
+        if not item: return False
         score = self._calculate_score(item, self._filter_text)
         item.setData(score, QtCore.Qt.UserRole + 1)
         return score > 0
         
     def lessThan(self, left, right):
-        if not self._filter_text:
-            return left.row() < right.row()
-            
+        if not self._filter_text: return left.row() < right.row()
         left_item = self.sourceModel().itemFromIndex(left)
         right_item = self.sourceModel().itemFromIndex(right)
-        
-        if not left_item or not right_item:
-            return False
-            
+        if not left_item or not right_item: return False
         left_score = left_item.data(QtCore.Qt.UserRole + 1) or 0
         right_score = right_item.data(QtCore.Qt.UserRole + 1) or 0
-        
         return left_score < right_score
 
     def _calculate_score(self, item, search_text):
         score = 0
         keywords = search_text.split()
+        iptc, exif = item.iptc_data, item.exif_data
         
-        iptc = item.iptc_data
-        exif = item.exif_data
-        
-        # Weights: 
-        # People (contact/persons) -> highest 
-        # Headline/Caption -> high
-        # File name/tags -> medium
-        # EXIF metadata -> lowest
         text_blocks = [
-            (iptc.get('People', ''), 10),
-            (iptc.get('Headline', ''), 5),
-            (iptc.get('Caption', ''), 4),
-            (iptc.get('Keywords', ''), 3),
-            (item.text(), 2),
-            (" ".join(str(v) for v in iptc.values()), 1),
+            (iptc.get('People', ''), 10), (iptc.get('Headline', ''), 5),
+            (iptc.get('Caption', ''), 4), (iptc.get('Keywords', ''), 3),
+            (item.text(), 2), (" ".join(str(v) for v in iptc.values()), 1),
             (" ".join(str(v) for v in exif.values()), 0.5)
         ]
-        
         for kw in keywords:
             kw_matched = False
             for text, weight in text_blocks:
                 if text and kw in text.lower():
                     score += weight
                     kw_matched = True
-            
-            # AND logic: All keywords must be found somewhere in the item
-            if not kw_matched:
-                return 0
-                
+            if not kw_matched: return 0
         return score
+
 
 

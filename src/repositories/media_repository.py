@@ -131,6 +131,15 @@ class MediaRepository:
             db.commit()
             return new_id
 
+    def get_all_for_event(self, event_id: UUID) -> list[dict]:
+        """Return all media records and their metadata for a given event."""
+        with get_db() as db:
+            result = db.execute(
+                text("SELECT * FROM medias WHERE event_id = :event_id"),
+                {"event_id": str(event_id)}
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""
         import os

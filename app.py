@@ -233,20 +233,30 @@ class MainWindow(QtWidgets.QMainWindow):
     def load_gallery_items(self, event_id):
         items = []
         event = EventRepository().get_by_id(event_id)
-        if not event.vault_folder_path:
+        if not event or not event.vault_folder_path:
             return items
         abs_folder_path = os.path.abspath(event.vault_folder_path)
         if not os.path.exists(abs_folder_path):
             return items
 
-        # Fetch all file_paths already in DB for this event in one query
-        db_paths = self.media_repo.get_file_paths_for_event(event_id)
+        # Fetch ALL metadata from DB in one query for this event
+        db_records = self.media_repo.get_all_for_event(event_id)
+        # Create a lookup map: normalized path -> record dict
+        db_map = {os.path.normpath(r['file_path']): r for r in db_records}
 
         for filename in os.listdir(abs_folder_path):
             if filename.lower().endswith((".jpg", ".png", ".jpeg")):
                 img_path = os.path.join(abs_folder_path, filename)
-                in_db = os.path.normpath(img_path) in db_paths
-                item = GalleryItem(filename, img_path, in_db=in_db)
+                norm_path = os.path.normpath(img_path)
+                db_record = db_map.get(norm_path)
+                
+                # Create lazy item (metadata from DB if available)
+                item = GalleryItem(
+                    filename, 
+                    img_path, 
+                    in_db=(db_record is not None),
+                    db_metadata=db_record
+                )
                 items.append(item)
         return items
 
@@ -278,6 +288,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.gallery_search_proxy.setFilterText(self.event_gallery_search.text())
         else:
             self.event_gallery_list_widget.setModel(self.gallery_item_model)
+
+        # Trigger background loading (icons & file metadata fallback)
+        self.gallery_item_model.start_loading()
 
         # Restore state
         self.gallery_stack.setCurrentIndex(0)  # grid view
