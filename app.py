@@ -219,6 +219,8 @@ class MainWindow(QtWidgets.QMainWindow):
         for event in events:
             item = QtWidgets.QListWidgetItem(self.event_card_list_widget)
             card = EventCardWidget(event.name, event.event_date)
+            # Store event in card so we can retrieve it in menu
+            card.event = event
             # Force width so sizeHint() calculates the correct height for wrapped text
             card.setFixedWidth(184)
             card.clicked.connect(lambda e=event: self.on_event_card_clicked(e))
@@ -283,6 +285,62 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_scroll.setStyleSheet(
             "background-color: #f5f5f5; border: 1px solid #ccc; border-radius: 4px;"
         )
+
+    def show_event_context_menu(self, pos):
+        """Show context menu for event card"""
+        item = self.event_card_list_widget.itemAt(pos)
+        if not item:
+            return
+        
+        card = self.event_card_list_widget.itemWidget(item)
+        if not card or not hasattr(card, 'event'):
+            return
+            
+        event = card.event
+        
+        menu = QtWidgets.QMenu(self)
+        details_action = menu.addAction("🔍 Detaylar")
+        delete_action = menu.addAction("🗑️ Sil")
+        
+        action = menu.exec(self.event_card_list_widget.mapToGlobal(pos))
+        
+        if action == details_action:
+            self.on_event_details(event)
+        elif action == delete_action:
+            self.on_event_delete(event)
+
+    def on_event_details(self, event):
+        """Show event details in a popup"""
+        msg = f"Etkinlik Adı: {event.name}\n"
+        msg += f"Tarih: {event.event_date.strftime('%Y-%m-%d %H:%M:%S') if event.event_date else 'Yok'}\n"
+        msg += f"Vault Yolu: {event.vault_folder_path}\n"
+        msg += f"İçe Aktarma Yolu: {event.imported_folder_path}\n"
+        QtWidgets.QMessageBox.information(self, "Etkinlik Detayları", msg)
+
+    def on_event_delete(self, event):
+        """Confirm and delete event"""
+        reply = QtWidgets.QMessageBox.question(
+            self, "Silme Onayı",
+            f"'{event.name}' etkinliğini ve tüm medya kayıtlarını silmek istediğinize emin misiniz?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                # Delete from repository
+                EventRepository().delete(event.id)
+                # If this was currently open, reset view
+                if self.current_event_id == event.id:
+                    self.current_event_id = None
+                    self.gallery_item_model = GalleryItemModel([])
+                    self.event_gallery_list_widget.setModel(self.gallery_item_model)
+                
+                # Reload list
+                self.refresh_events()
+                QtWidgets.QMessageBox.information(self, "Başarılı", "Etkinlik silindi.")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Hata", f"Silme işlemi başarısız: {e}")
     
     def keyPressEvent(self, event):
         """Global key handler for navigation"""
@@ -538,6 +596,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_card_list_widget.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.event_card_list_widget.setResizeMode(QtWidgets.QListView.Adjust)
         self.event_card_list_widget.setWordWrap(True)
+        
+        # Context menu setup
+        self.event_card_list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.event_card_list_widget.customContextMenuRequested.connect(self.show_event_context_menu)
         
         # Load events into the list
         self.load_events()

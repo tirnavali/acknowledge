@@ -54,7 +54,7 @@ class Media(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     
     # Foreign Key tipi de UUID olmalı
-    event_id = Column(UUID(as_uuid=True), ForeignKey("events.id"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     
     media_type = Column(String, nullable=False) # Polimorfik ayrıştırıcı
     file_path = Column(String, unique=True, nullable=False)

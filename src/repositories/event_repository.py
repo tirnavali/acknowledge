@@ -36,6 +36,12 @@ class EventRepository:
                 )
             return None
 
+    def delete(self, event_id: UUID) -> None:
+        """Delete an event and all its associated data via cascade."""
+        with get_db() as db:
+            db.execute(text("DELETE FROM events WHERE id = :id"), {"id": str(event_id)})
+            db.commit()
+
     def get_all(self) -> list[Event]:
         with get_db() as db:
             result = db.execute(text("SELECT * FROM events ORDER BY event_date DESC LIMIT 100"))
