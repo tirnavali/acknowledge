@@ -388,7 +388,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.media_date_input.setDate(qdate)
 
 
-    def save_media_iptc(self):
+    def save_media_iptc(self, silent=False):
         """Save IPTC data to both the image file and the database."""
         index = self.event_gallery_list_widget.currentIndex()
         if not index.isValid():
@@ -446,7 +446,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         if person_id:
                             self.person_repo.link_to_media(person_id, media_id)
             
-            QtWidgets.QMessageBox.information(self, "Başarılı", "✅ IPTC verileri dosyaya ve veritabanına kaydedildi.")
+            if not silent:
+                QtWidgets.QMessageBox.information(self, "Başarılı", "✅ IPTC verileri dosyaya ve veritabanına kaydedildi.")
             self.refresh_gallery_badges()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Hata", f"❌ Kaydetme hatası: {str(e)}")
@@ -553,6 +554,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.single_view_widget.doubleClicked.connect(self.switch_to_grid_view)
         self.single_view_widget.nextRequested.connect(self.navigate_next)
         self.single_view_widget.prevRequested.connect(self.navigate_previous)
+        self.single_view_widget.facesChanged.connect(self._on_faces_changed)
         
         self.gallery_stack.addWidget(self.event_gallery_list_widget)
         self.gallery_stack.addWidget(self.single_view_widget)
@@ -573,6 +575,27 @@ class MainWindow(QtWidgets.QMainWindow):
         # Connect click event to print EXIF data
         self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
         self.event_gallery_list_widget.doubleClicked.connect(self.switch_to_single_view)
+
+    def _on_faces_changed(self):
+        """Update the UI people input and auto-save IPTC when face labels change."""
+        index = self.event_gallery_list_widget.currentIndex()
+        if not index.isValid():
+            return
+        item = self.gallery_item_model.itemFromIndex(index)
+        if not item or not self.current_event_id:
+            return
+
+        try:
+            self.current_media_id = self.media_repo.ensure_media_exists(
+                self.current_event_id, item.img_path, "photo"
+            )
+            persons = self.person_repo.get_persons_for_media(self.current_media_id)
+            self.media_people_input.setText(', '.join(persons))
+            # Auto-save changes without showing a confirmation popup
+            self.save_media_iptc(silent=True)
+        except Exception as e:
+            import logging
+            logging.warning(f"Error updating faces: {e}")
 
     def media_details_form_widget(self):
         """Create form fields for media details"""

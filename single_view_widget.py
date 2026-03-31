@@ -61,6 +61,7 @@ class SingleViewWidget(QtWidgets.QWidget):
     doubleClicked   = QtCore.Signal()
     nextRequested   = QtCore.Signal()
     prevRequested   = QtCore.Signal()
+    facesChanged    = QtCore.Signal()
 
     def __init__(
         self,
@@ -280,11 +281,16 @@ class SingleViewWidget(QtWidgets.QWidget):
                     pid, _ = self._face_repo.find_similar_person(results[i].embedding)
                     if pid:
                         self._face_repo.assign_person(fid, pid)
+                        self._person_repo.link_to_media(pid, self._current_media_id)
 
         img_rect = self._get_image_display_rect()
         self.face_overlay.set_faces(face_dicts, img_rect)
         self.face_overlay.setGeometry(self._image_container.rect())
         self.face_overlay.show()
+
+        # Emit signal to inform main app that automatic matches might have updated the persons in this media
+        if any(fd["person_name"] for fd in face_dicts):
+            self.facesChanged.emit()
 
     def _on_detection_error(self, msg: str):
         logger.error(f"Face detection error: {msg}")
@@ -427,6 +433,7 @@ class SingleViewWidget(QtWidgets.QWidget):
 
         self.face_overlay.update_person_name(face_index, name)
         self._status_label.setText(f"✅ '{name}' {action}.")
+        self.facesChanged.emit()
 
     def _on_face_reset(self, face_index: int):
         """Delete all face detections for this media from DB and re-run inference."""
@@ -448,6 +455,8 @@ class SingleViewWidget(QtWidgets.QWidget):
 
         if self._face_service:
             self._start_detection(self.current_img_path)
+            
+        self.facesChanged.emit()
 
     # ------------------------------------------------------------------
     # Image / layout helpers
