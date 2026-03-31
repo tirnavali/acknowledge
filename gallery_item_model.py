@@ -234,3 +234,86 @@ class GalleryItemModel(QtGui.QStandardItemModel):
         return pixmap
 
 
+class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
+    """
+    Filters gallery items based on search text, matching against IPTC and EXIF data.
+    Supports multi-keyword 'AND' searches and ranks by relevance (score).
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._filter_text = ""
+    
+    def setFilterText(self, text):
+        self._filter_text = text.strip().lower()
+        self.invalidateFilter()
+        if self._filter_text:
+            self.sort(0, QtCore.Qt.DescendingOrder)
+        else:
+            self.sort(-1) # Revert to original order
+            
+    def filterAcceptsRow(self, source_row, source_parent):
+        if not self._filter_text:
+            return True
+            
+        model = self.sourceModel()
+        index = model.index(source_row, 0, source_parent)
+        item = model.itemFromIndex(index)
+        
+        if not item:
+            return False
+            
+        score = self._calculate_score(item, self._filter_text)
+        item.setData(score, QtCore.Qt.UserRole + 1)
+        return score > 0
+        
+    def lessThan(self, left, right):
+        if not self._filter_text:
+            return left.row() < right.row()
+            
+        left_item = self.sourceModel().itemFromIndex(left)
+        right_item = self.sourceModel().itemFromIndex(right)
+        
+        if not left_item or not right_item:
+            return False
+            
+        left_score = left_item.data(QtCore.Qt.UserRole + 1) or 0
+        right_score = right_item.data(QtCore.Qt.UserRole + 1) or 0
+        
+        return left_score < right_score
+
+    def _calculate_score(self, item, search_text):
+        score = 0
+        keywords = search_text.split()
+        
+        iptc = item.iptc_data
+        exif = item.exif_data
+        
+        # Weights: 
+        # People (contact/persons) -> highest 
+        # Headline/Caption -> high
+        # File name/tags -> medium
+        # EXIF metadata -> lowest
+        text_blocks = [
+            (iptc.get('People', ''), 10),
+            (iptc.get('Headline', ''), 5),
+            (iptc.get('Caption', ''), 4),
+            (iptc.get('Keywords', ''), 3),
+            (item.text(), 2),
+            (" ".join(str(v) for v in iptc.values()), 1),
+            (" ".join(str(v) for v in exif.values()), 0.5)
+        ]
+        
+        for kw in keywords:
+            kw_matched = False
+            for text, weight in text_blocks:
+                if text and kw in text.lower():
+                    score += weight
+                    kw_matched = True
+            
+            # AND logic: All keywords must be found somewhere in the item
+            if not kw_matched:
+                return 0
+                
+        return score
+
+

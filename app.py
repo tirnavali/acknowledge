@@ -151,33 +151,35 @@ class MainWindow(QtWidgets.QMainWindow):
         if index.isValid():
             self.on_gallery_item_clicked(index)
 
+    def _get_item_from_index(self, index):
+        if not index.isValid():
+            return None
+        if isinstance(index.model(), QtCore.QSortFilterProxyModel):
+            source_index = index.model().mapToSource(index)
+            return self.gallery_item_model.itemFromIndex(source_index)
+        return self.gallery_item_model.itemFromIndex(index)
+
     def navigate_next(self):
         index = self.event_gallery_list_widget.currentIndex()
         if not index.isValid():
-            next_index = self.gallery_item_model.index(0, 0)
-        else:
-            row = index.row()
-            if row < self.gallery_item_model.rowCount() - 1:
-                next_index = self.gallery_item_model.index(row + 1, 0)
-            else:
-                return # End of list
-        
-        self.event_gallery_list_widget.setCurrentIndex(next_index)
-        self.on_gallery_item_clicked(next_index)
+            return
+        model = index.model()
+        row = index.row()
+        if row < model.rowCount() - 1:
+            next_index = model.index(row + 1, 0)
+            self.event_gallery_list_widget.setCurrentIndex(next_index)
+            self.on_gallery_item_clicked(next_index)
 
     def navigate_previous(self):
         index = self.event_gallery_list_widget.currentIndex()
         if not index.isValid():
             return
-        
+        model = index.model()
         row = index.row()
         if row > 0:
-            prev_index = self.gallery_item_model.index(row - 1, 0)
-        else:
-            return # Start of list
-            
-        self.event_gallery_list_widget.setCurrentIndex(prev_index)
-        self.on_gallery_item_clicked(prev_index)
+            prev_index = model.index(row - 1, 0)
+            self.event_gallery_list_widget.setCurrentIndex(prev_index)
+            self.on_gallery_item_clicked(prev_index)
 
     def init_toolbar(self):
         self.toolbar_widget = self.addToolBar("Toolbar")
@@ -264,7 +266,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         items = self.load_gallery_items(event.id)
         self.gallery_item_model = GalleryItemModel(items)
-        self.event_gallery_list_widget.setModel(self.gallery_item_model)
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            # Apply any existing search text
+            self.gallery_search_proxy.setFilterText(self.event_gallery_search.text())
+        else:
+            self.event_gallery_list_widget.setModel(self.gallery_item_model)
 
         # Restore state
         self.gallery_stack.setCurrentIndex(0)  # grid view
@@ -291,7 +299,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def on_gallery_item_clicked(self, index):
         """Handle gallery item click - populate form with DB-first, fallback to file IPTC"""
-        item = self.gallery_item_model.itemFromIndex(index)
+        item = self._get_item_from_index(index)
         if item:
             # Resolve media_id from DB if available
             media_row = self.media_repo.get_by_file_path(item.img_path)
@@ -395,7 +403,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen önce bir fotoğraf seçin.")
             return
         
-        item = self.gallery_item_model.itemFromIndex(index)
+        item = self._get_item_from_index(index)
         if not item or not self.current_event_id:
             QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen bir etkinlik ve fotoğraf seçin.")
             return
@@ -570,7 +578,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gallery_stack.addWidget(self._loading_widget)
 
         self.gallery_item_model = GalleryItemModel([])
-        self.event_gallery_list_widget.setModel(self.gallery_item_model)
+        from gallery_item_model import GallerySearchProxyModel
+        self.gallery_search_proxy = GallerySearchProxyModel()
+        self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+        self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+        
+        # Connect search
+        self.event_gallery_search.textChanged.connect(self.on_gallery_search)
         
         # Connect click event to print EXIF data
         self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
@@ -581,7 +595,7 @@ class MainWindow(QtWidgets.QMainWindow):
         index = self.event_gallery_list_widget.currentIndex()
         if not index.isValid():
             return
-        item = self.gallery_item_model.itemFromIndex(index)
+        item = self._get_item_from_index(index)
         if not item or not self.current_event_id:
             return
 
@@ -596,6 +610,11 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             import logging
             logging.warning(f"Error updating faces: {e}")
+
+    def on_gallery_search(self, text):
+        """Update proxy model with search text to filter and sort the gallery view."""
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setFilterText(text)
 
     def media_details_form_widget(self):
         """Create form fields for media details"""
