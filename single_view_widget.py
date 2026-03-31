@@ -97,18 +97,45 @@ class SingleViewWidget(QtWidgets.QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
 
-        # Filename label
+        # Top bar: back button + filename label
+        top_bar = QtWidgets.QHBoxLayout()
+        top_bar.setSpacing(8)
+
+        self.back_btn = QtWidgets.QPushButton("← Geri")
+        self.back_btn.setFixedHeight(32)
+        self.back_btn.setFixedWidth(80)
+        self.back_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.back_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e0e0e0;
+                color: #222;
+                border: 1px solid #bbb;
+                border-radius: 4px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: #c8c8c8;
+            }
+            QPushButton:pressed {
+                background-color: #b0b0b0;
+            }
+        """)
+        self.back_btn.clicked.connect(self.doubleClicked.emit)
+        top_bar.addWidget(self.back_btn)
+
         self.filename_label = QtWidgets.QLabel("Dosya adı")
         self.filename_label.setAlignment(QtCore.Qt.AlignCenter)
         self.filename_label.setStyleSheet("""
             font-weight: bold;
-            color: #aaa;
+            color: #444;
             font-size: 14px;
-            background-color: rgba(0,0,0,100);
             padding: 5px;
-            border-radius: 4px;
         """)
-        layout.addWidget(self.filename_label)
+        top_bar.addWidget(self.filename_label, stretch=1)
+
+        layout.addLayout(top_bar)
 
         # Container that stacks image + overlay
         self._image_container = QtWidgets.QWidget()
