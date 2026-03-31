@@ -3,9 +3,10 @@ FaceOverlayWidget — transparent overlay drawn on top of the image display.
 
 Responsibilities:
 - Draw semi-transparent bounding boxes around detected faces with soft padding
-- Show a name label (QLineEdit) below each box for user input
-- Show a zoom popup when the user clicks a bounding box
-- Emit face_named(face_index, name_str) when user confirms a name
+- Show a name badge above each box when a name is assigned
+- Show a zoom popup (with name input) when the user clicks a bounding box
+- Emit face_named(face_index, name_str) when user confirms a name via zoom popup
+- Emit face_reset(face_index) when user clicks reset in zoom popup
 - Scale bbox coordinates from normalised (0..1) to pixel space on resize
 """
 from __future__ import annotations
@@ -26,21 +27,21 @@ BADGE_FONT_PT = 10
 # ---------------------------------------------------------------------------
 
 class NameLineEdit(QtWidgets.QLineEdit):
-    """Small floating name input placed below a face bounding box."""
+    """Small floating name input."""
 
     committed = QtCore.Signal(str)  # emitted on Enter
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setPlaceholderText("İsim gir, Enter'a bas…")
-        self.setFixedHeight(24)
+        self.setFixedHeight(28)
         self.setStyleSheet("""
             QLineEdit {
                 background: rgba(0,0,0,180);
                 color: #fff;
                 border: 1px solid rgba(80,200,255,200);
                 border-radius: 4px;
-                padding: 2px 6px;
+                padding: 2px 8px;
                 font-size: 10pt;
             }
             QLineEdit:focus { border: 1px solid #50C8FF; }
@@ -49,19 +50,30 @@ class NameLineEdit(QtWidgets.QLineEdit):
 
 
 # ---------------------------------------------------------------------------
-# Zoom popup dialog
+# Zoom popup dialog — contains the name input + reset
 # ---------------------------------------------------------------------------
 
 class FaceZoomPopup(QtWidgets.QDialog):
     """
-    Small popup that shows a cropped, zoomed view of a single face.
-    Displayed when the user clicks on a bounding box.
+    Popup that shows a cropped zoomed view of a single face AND
+    provides the name-input field + reset button for labelling.
     """
 
-    def __init__(self, pixmap: QtGui.QPixmap, face_name: str | None, parent=None):
+    # Forwarded signals
+    face_named = QtCore.Signal(int, str)   # (face_index, name)
+    face_reset = QtCore.Signal(int)        # (face_index)
+
+    def __init__(
+        self,
+        pixmap: QtGui.QPixmap,
+        face_name: str | None,
+        face_index: int,
+        parent=None,
+    ):
         super().__init__(parent, QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle("Yüz Zoom")
+        self._face_index = face_index
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -78,37 +90,119 @@ class FaceZoomPopup(QtWidgets.QDialog):
             }
         """)
         cLayout = QtWidgets.QVBoxLayout(container)
-        cLayout.setContentsMargins(8, 8, 8, 8)
-        cLayout.setSpacing(4)
+        cLayout.setContentsMargins(10, 10, 10, 10)
+        cLayout.setSpacing(8)
 
         # Zoomed face image
         img_label = QtWidgets.QLabel()
-        # Scale to a fixed popup size keeping aspect ratio
         popup_size = QtCore.QSize(220, 220)
         scaled = pixmap.scaled(popup_size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
         img_label.setPixmap(scaled)
         img_label.setAlignment(QtCore.Qt.AlignCenter)
         cLayout.addWidget(img_label)
 
-        # Name label
+        # --- Name input row ---
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(6)
+
+        self._name_edit = NameLineEdit()
         if face_name:
-            name_lbl = QtWidgets.QLabel(face_name)
-            name_lbl.setAlignment(QtCore.Qt.AlignCenter)
-            name_lbl.setStyleSheet("color: #50C8FF; font-weight: bold; font-size: 11pt;")
-            cLayout.addWidget(name_lbl)
+            self._name_edit.setText(face_name)
+        self._name_edit.committed.connect(self._on_committed)
+        row.addWidget(self._name_edit)
+
+        # Reset button
+        reset_btn = QtWidgets.QPushButton("🔄")
+        reset_btn.setFixedSize(28, 28)
+        reset_btn.setToolTip("Etiketi sil ve yeniden algıla")
+        reset_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(200, 60, 60, 180);
+                color: white;
+                border: 1px solid rgba(255,100,100,200);
+                border-radius: 4px;
+                font-size: 13px;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background: rgba(255, 80, 80, 220);
+            }
+        """)
+        reset_btn.clicked.connect(self._on_reset)
+        row.addWidget(reset_btn)
+
+        cLayout.addLayout(row)
+
+        # Confirm button
+        confirm_btn = QtWidgets.QPushButton("✔ Kaydet")
+        confirm_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        confirm_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(80,200,255,180);
+                color: #000;
+                border: none;
+                border-radius: 4px;
+                font-size: 10pt;
+                font-weight: bold;
+                padding: 4px 0;
+            }
+            QPushButton:hover {
+                background: rgba(80,200,255,230);
+            }
+        """)
+        confirm_btn.clicked.connect(lambda: self._on_committed(self._name_edit.text().strip()))
+        cLayout.addWidget(confirm_btn)
+
+        # Close button
+        close_btn = QtWidgets.QPushButton("✕ Kapat")
+        close_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(60,60,70,200);
+                color: #aaa;
+                border: 1px solid rgba(120,120,130,150);
+                border-radius: 4px;
+                font-size: 9pt;
+                padding: 3px 0;
+            }
+            QPushButton:hover {
+                background: rgba(90,90,100,230);
+                color: #fff;
+            }
+        """)
+        close_btn.clicked.connect(self.close)
+        cLayout.addWidget(close_btn)
 
         # Close hint
-        hint = QtWidgets.QLabel("Kapat: Esc veya tıkla")
+        hint = QtWidgets.QLabel("Esc veya dışına tıkla")
         hint.setAlignment(QtCore.Qt.AlignCenter)
-        hint.setStyleSheet("color: #666; font-size: 8pt;")
+        hint.setStyleSheet("color: #555; font-size: 7pt;")
         cLayout.addWidget(hint)
 
         layout.addWidget(container)
         self.setLayout(layout)
         self.adjustSize()
 
-    def mousePressEvent(self, event):
+        # Focus the input immediately
+        self._name_edit.setFocus()
+
+    def _on_committed(self, name: str) -> None:
+        if name:
+            self.face_named.emit(self._face_index, name)
         self.close()
+
+    def _on_reset(self) -> None:
+        self.face_reset.emit(self._face_index)
+        self.close()
+
+    def mousePressEvent(self, event):
+        # Close only if click is outside the container
+        child = self.childAt(event.pos())
+        if child is None:
+            self.close()
+        else:
+            super().mousePressEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_Escape:
@@ -123,11 +217,12 @@ class FaceZoomPopup(QtWidgets.QDialog):
 class FaceOverlayWidget(QtWidgets.QWidget):
     """
     Transparent overlay widget positioned over the displayed image.
+    Name labelling is done exclusively via the zoom popup.
     """
 
-    # Emitted when user types a name and presses Enter: (face_index, name)
+    # Emitted when user types a name and presses Enter in the zoom popup
     face_named = QtCore.Signal(int, str)
-    # Emitted when user clicks the reset button: (face_index)
+    # Emitted when user clicks the reset button in the zoom popup
     face_reset = QtCore.Signal(int)
 
     def __init__(self, parent=None):
@@ -157,61 +252,25 @@ class FaceOverlayWidget(QtWidgets.QWidget):
         bbox: {x1,y1,x2,y2} normalised floats
         img_rect: pixel rect of the scaled image within this widget
         """
-        for f in self._faces:
-            f["name_input"].deleteLater()
-            f["reset_btn"].deleteLater()
         self._faces = []
         self._img_rect = img_rect
 
         for i, face in enumerate(faces):
-            inp = NameLineEdit(self)
             existing = face.get("person_name") or ""
-            if existing:
-                inp.setText(existing)
             idx = face.get("face_index", i)
-            inp.committed.connect(lambda name, fi=idx: self.face_named.emit(fi, name))
-            inp.show()
-
-            # Reset button (🔄) — deletes DB label, re-runs inference
-            btn = QtWidgets.QPushButton("🔄", self)
-            btn.setFixedSize(24, 24)
-            btn.setToolTip("Etiketi sil ve yeniden algıla")
-            btn.setCursor(QtCore.Qt.PointingHandCursor)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(200, 60, 60, 180);
-                    color: white;
-                    border: 1px solid rgba(255,100,100,200);
-                    border-radius: 4px;
-                    font-size: 12px;
-                    padding: 0;
-                }
-                QPushButton:hover {
-                    background: rgba(255, 80, 80, 220);
-                }
-            """)
-            btn.clicked.connect(lambda checked=False, fi=idx: self.face_reset.emit(fi))
-            btn.show()
-
             self._faces.append({
                 "bbox"        : face["bbox"],
                 "face_id"     : face.get("face_id"),
                 "person_name" : existing,
                 "face_index"  : idx,
-                "name_input"  : inp,
-                "reset_btn"   : btn,
             })
 
-        self._layout_inputs()
         self.update()
 
     def clear_faces(self) -> None:
         if self._zoom_popup:
             self._zoom_popup.close()
             self._zoom_popup = None
-        for f in self._faces:
-            f["name_input"].deleteLater()
-            f["reset_btn"].deleteLater()
         self._faces = []
         self._img_rect = QtCore.QRect()
         self._source_pixmap = None
@@ -244,36 +303,12 @@ class FaceOverlayWidget(QtWidgets.QWidget):
             QtCore.QPoint(min(r.right(), x2), min(r.bottom(), y2)),
         )
 
-    def _layout_inputs(self) -> None:
-        for face in self._faces:
-            rect = self._bbox_to_pixels(face["bbox"])
-            inp: NameLineEdit = face["name_input"]
-            btn: QtWidgets.QPushButton = face["reset_btn"]
-            if rect.isEmpty():
-                inp.hide()
-                btn.hide()
-                continue
-            # Width: at least bbox width, minimum 130px, leave room for reset btn
-            btn_w = btn.width() + 4
-            inp_w = max(rect.width(), 130)
-            total_w = inp_w + btn_w
-            inp_x = rect.left() + (rect.width() - total_w) // 2
-            inp_y = rect.bottom() + 4
-            inp_x = max(0, min(inp_x, self.width() - total_w))
-            inp_y = min(inp_y, self.height() - inp.height() - 2)
-            inp.setFixedWidth(inp_w)
-            inp.move(inp_x, inp_y)
-            inp.show()
-            btn.move(inp_x + inp_w + 4, inp_y)
-            btn.show()
-
     def _crop_face_pixmap(self, bbox: dict) -> QtGui.QPixmap | None:
         """Crop the face from the source pixmap using normalised bbox coords."""
         if self._source_pixmap is None or self._source_pixmap.isNull():
             return None
         pm = self._source_pixmap
         w, h = pm.width(), pm.height()
-        # Add generous padding for context
         pad = 0.05
         x1 = max(0.0, bbox["x1"] - pad)
         y1 = max(0.0, bbox["y1"] - pad)
@@ -291,12 +326,20 @@ class FaceOverlayWidget(QtWidgets.QWidget):
         crop = self._crop_face_pixmap(face["bbox"])
         if crop is None or crop.isNull():
             return
-        popup = FaceZoomPopup(crop, face.get("person_name"), self.window())
+        popup = FaceZoomPopup(
+            crop,
+            face.get("person_name"),
+            face["face_index"],
+            self.window(),
+        )
+        popup.face_named.connect(self.face_named)
+        popup.face_reset.connect(self.face_reset)
+
         # Position near the click, but keep on screen
         screen = QtWidgets.QApplication.screenAt(global_pos)
         if screen:
             sg = screen.availableGeometry()
-            px = min(global_pos.x() + 15, sg.right() - popup.width() - 10)
+            px = min(global_pos.x() + 15, sg.right()  - popup.width()  - 10)
             py = min(global_pos.y() + 15, sg.bottom() - popup.height() - 10)
             popup.move(px, py)
         else:
@@ -326,44 +369,45 @@ class FaceOverlayWidget(QtWidgets.QWidget):
             # Name badge above the box
             name = face.get("person_name") or ""
             if name:
-                # Measure text width
                 font = painter.font()
                 font.setPointSize(BADGE_FONT_PT)
                 font.setBold(True)
                 painter.setFont(font)
                 fm = QtGui.QFontMetrics(font)
-                text_w = fm.horizontalAdvance(name) + 20   # padding
+                text_w = fm.horizontalAdvance(name) + 20
                 badge_w = max(rect.width(), text_w)
                 badge_x = rect.left() + (rect.width() - badge_w) // 2
                 badge_y = rect.top() - BADGE_H - 2
                 badge_rect = QtCore.QRect(badge_x, badge_y, badge_w, BADGE_H)
 
-                # Keep within widget
                 if badge_rect.top() < 0:
-                    # Draw below box instead
-                    badge_rect.moveTop(rect.bottom() + face["name_input"].height() + 6)
+                    badge_rect.moveTop(rect.bottom() + 4)
 
                 painter.fillRect(badge_rect, BADGE_BG)
-                # Cyan border on badge
                 painter.setPen(QtGui.QPen(BOX_COLOR, 1))
                 painter.drawRect(badge_rect)
-                # Text
                 painter.setPen(BADGE_FG)
                 painter.drawText(badge_rect, QtCore.Qt.AlignCenter, name)
 
+            # Click-to-label hint (when no name yet)
+            else:
+                font = painter.font()
+                font.setPointSize(8)
+                font.setBold(False)
+                painter.setFont(font)
+                painter.setPen(QtGui.QColor(200, 200, 200, 180))
+                painter.drawText(rect, QtCore.Qt.AlignBottom | QtCore.Qt.AlignHCenter, "🖱 tıkla → isim ver")
+
     def mousePressEvent(self, event):
-        """Open zoom popup when user clicks inside a bounding box."""
+        """Open zoom popup (with name input) when user clicks inside a bounding box."""
         if event.button() == QtCore.Qt.LeftButton:
             for face in self._faces:
                 rect = self._bbox_to_pixels(face["bbox"])
                 if rect.contains(event.pos()):
                     self._show_zoom(face, event.globalPosition().toPoint())
-                    # Focus the name input for this face
-                    face["name_input"].setFocus()
                     break
         super().mousePressEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._layout_inputs()
         self.update()

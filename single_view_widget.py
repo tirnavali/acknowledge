@@ -508,5 +508,5 @@ class SingleViewWidget(QtWidgets.QWidget):
             img_rect = self._get_image_display_rect()
             # Re-layout face inputs for new size
             self.face_overlay._img_rect = img_rect
-            self.face_overlay._layout_inputs()
+            pass  # name inputs are now inside the zoom popup
             self.face_overlay.update()
