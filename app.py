@@ -227,6 +227,8 @@ class MainWindow(QtWidgets.QMainWindow):
         items = []
         event = EventRepository().get_by_id(event_id)
         # Use absolute path to avoid issues with current working directory
+        if not event.vault_folder_path:
+            return items
         abs_folder_path = os.path.abspath(event.vault_folder_path)
         if not os.path.exists(abs_folder_path):
             return items
