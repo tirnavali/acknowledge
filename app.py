@@ -798,6 +798,48 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.tab_widget.widget(index) is self.persons_tab:
             self._load_persons_table()
 
+    def _on_person_row_clicked(self, row: int, _col: int):
+        name_item = self._persons_table.item(row, 0)
+        if name_item is None:
+            return
+        person_id = name_item.data(QtCore.Qt.UserRole)
+        person_name = name_item.text()
+        if not person_id:
+            return
+
+        try:
+            items = self.app_service.get_media_service().get_gallery_items_for_person(person_id)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Hata", f"Fotoğraflar yüklenemedi: {e}")
+            return
+
+        self.current_event_id = None
+        self.current_media_id = None
+        self.gallery_item_model = GalleryItemModel(items)
+        if hasattr(self, "gallery_search_proxy"):
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            self.gallery_search_proxy.setFilterText("")
+        else:
+            self.event_gallery_list_widget.setModel(self.gallery_item_model)
+        self.gallery_item_model.start_loading()
+
+        self._person_filter_label.setText(f"Kişi filtresi: {person_name}  —  {len(items)} fotoğraf")
+        self._person_filter_bar.show()
+
+        self.tab_widget.setCurrentWidget(self.events_tab)
+        self.gallery_stack.setCurrentIndex(0)
+
+    def _clear_person_filter(self):
+        self._person_filter_bar.hide()
+        self.current_event_id = None
+        self.gallery_item_model = GalleryItemModel([])
+        if hasattr(self, "gallery_search_proxy"):
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+        else:
+            self.event_gallery_list_widget.setModel(self.gallery_item_model)
+
     def _init_persons_tab(self):
         layout = QtWidgets.QVBoxLayout(self.persons_tab)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -833,7 +875,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persons_table.setAlternatingRowColors(True)
         self._persons_table.verticalHeader().setVisible(False)
         self._persons_table.setSortingEnabled(True)
+        self._persons_table.setCursor(QtCore.Qt.PointingHandCursor)
+        self._persons_table.cellClicked.connect(self._on_person_row_clicked)
         layout.addWidget(self._persons_table)
+
+        hint = QtWidgets.QLabel("Bir satıra tıklayarak o kişiye ait fotoğrafları Etkinlikler sekmesinde görüntüleyin.")
+        hint.setStyleSheet("color: #888; font-size: 10px;")
+        layout.addWidget(hint)
 
     def _load_persons_table(self):
         try:
@@ -845,6 +893,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persons_table.setRowCount(len(rows))
         for i, person in enumerate(rows):
             name_item = QtWidgets.QTableWidgetItem(person["name"])
+            name_item.setData(QtCore.Qt.UserRole, person["id"])  # store UUID for lookup
             count_item = QtWidgets.QTableWidgetItem()
             count_item.setData(QtCore.Qt.DisplayRole, int(person["photo_count"]))
             count_item.setTextAlignment(QtCore.Qt.AlignCenter)
@@ -895,8 +944,31 @@ class MainWindow(QtWidgets.QMainWindow):
         # event column
         self.events_column.addWidget(self.event_search)
         self.events_column.addWidget(self.event_card_list_widget)
+        # Person filter banner (hidden by default)
+        self._person_filter_bar = QtWidgets.QWidget()
+        self._person_filter_bar.setStyleSheet(
+            "background: #1a3a5c; border: 1px solid #2d6ca2; border-radius: 4px;"
+        )
+        _pfbar_layout = QtWidgets.QHBoxLayout(self._person_filter_bar)
+        _pfbar_layout.setContentsMargins(10, 4, 6, 4)
+        self._person_filter_label = QtWidgets.QLabel()
+        self._person_filter_label.setStyleSheet("color: #8ecfff; font-weight: bold; font-size: 12px;")
+        _pfbar_layout.addWidget(self._person_filter_label)
+        _pfbar_layout.addStretch()
+        _clear_filter_btn = QtWidgets.QPushButton("✕ Filtreyi Temizle")
+        _clear_filter_btn.setStyleSheet("""
+            QPushButton { background: transparent; color: #8ecfff;
+                          border: 1px solid #2d6ca2; border-radius: 3px;
+                          padding: 2px 8px; font-size: 11px; }
+            QPushButton:hover { background: #2d6ca2; color: white; }
+        """)
+        _clear_filter_btn.clicked.connect(self._clear_person_filter)
+        _pfbar_layout.addWidget(_clear_filter_btn)
+        self._person_filter_bar.hide()
+
         # event gallery
         self.events_gallery.addLayout(self.gallery_search_layout)
+        self.events_gallery.addWidget(self._person_filter_bar)
         self.events_gallery.addWidget(self.gallery_stack)  
         # media details
         self.media_details_form_widget()     

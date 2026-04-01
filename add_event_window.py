@@ -1,6 +1,5 @@
 from PySide6 import QtWidgets, QtCore
 import os
-from src.services.event_service import EventService
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -84,11 +83,12 @@ class AddEvent(QtWidgets.QWidget):
         
         if event_name and event_folder:
             try:
-                service = EventService(self.media_vault_base_path)
+                service = self.parent().app_service.get_event_service()
                 event = service.create_and_import_event(
                     name=event_name,
                     event_date=event_date,
-                    source_folder=event_folder
+                    source_folder=event_folder,
+                    vault_base_path=self.media_vault_base_path,
                 )
                 QtWidgets.QMessageBox.information(self, "Başarılı", f"Etkinlik oluşturuldu: {event.name}")
                 self.parent().refresh_events()

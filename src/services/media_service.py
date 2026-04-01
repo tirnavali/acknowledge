@@ -133,3 +133,24 @@ class MediaService(BaseService):
         except Exception as e:
             self.logger.error(f"Error getting file paths for event {event_id}: {e}")
             raise
+
+    def get_gallery_items_for_person(self, person_id):
+        """Get GalleryItems for all media linked to a person."""
+        try:
+            from gallery_item_model import GalleryItem
+            import os
+            records = self.media_repository.get_all_for_person(person_id)
+            items = []
+            for rec in records:
+                path = rec.get("file_path", "")
+                if path and os.path.exists(path):
+                    items.append(GalleryItem(
+                        os.path.basename(path),
+                        path,
+                        in_db=True,
+                        db_metadata=rec,
+                    ))
+            return items
+        except Exception as e:
+            self.logger.error(f"Error getting gallery items for person {person_id}: {e}")
+            raise

@@ -140,6 +140,18 @@ class MediaRepository:
             )
             return [dict(row._mapping) for row in result.fetchall()]
 
+    def get_all_for_person(self, person_id: UUID) -> list[dict]:
+        """Return all media records linked to a person via media_persons."""
+        with get_db() as db:
+            result = db.execute(text("""
+                SELECT m.*
+                FROM medias m
+                JOIN media_persons mp ON m.id = mp.media_id
+                WHERE mp.person_id = :person_id
+                ORDER BY m.file_path
+            """), {"person_id": str(person_id)})
+            return [dict(row._mapping) for row in result.fetchall()]
+
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""
         import os

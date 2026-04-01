@@ -13,6 +13,31 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets, QtGui
 
 
+def _tr_fold(s: str) -> str:
+    """Lowercase with correct Turkish İ/I mapping."""
+    return s.replace('İ', 'i').replace('I', 'ı').replace('Ş', 'ş').replace('Ğ', 'ğ').replace('Ü', 'ü').replace('Ö', 'ö').replace('Ç', 'ç').lower()
+
+
+class ContainsCompleter(QtWidgets.QCompleter):
+    """QCompleter with Turkish-aware, anywhere-in-string matching."""
+
+    def __init__(self, words: list[str], parent=None):
+        self._all_words = words
+        self._list_model = QtCore.QStringListModel(words)
+        super().__init__(self._list_model, parent)
+        self.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
+        self.setCaseSensitivity(QtCore.Qt.CaseSensitive)  # filtering done in splitPath
+
+    def splitPath(self, path: str) -> list[str]:
+        folded = _tr_fold(path)
+        filtered = [w for w in self._all_words if folded in _tr_fold(w)]
+        self._list_model.setStringList(filtered)
+        return ['']  # '' matches everything; model is already pre-filtered
+
+    def pathFromIndex(self, index: QtCore.QModelIndex) -> str:
+        return index.data() or ''
+
+
 PADDING       = 0.015                                     # extra pad around bbox (fraction of image)
 BOX_COLOR     = QtGui.QColor(80, 200, 255, 200)           # cyan border
 BOX_FILL      = QtGui.QColor(80, 200, 255, 30)
@@ -111,10 +136,7 @@ class FaceZoomPopup(QtWidgets.QDialog):
             self._name_edit.setText(face_name)
         self._name_edit.committed.connect(self._on_committed)
         if person_names:
-            completer = QtWidgets.QCompleter(person_names, self._name_edit)
-            completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
-            completer.setFilterMode(QtCore.Qt.MatchContains)
-            self._name_edit.setCompleter(completer)
+            self._name_edit.setCompleter(ContainsCompleter(person_names, self._name_edit))
         row.addWidget(self._name_edit)
 
         # Reset button
