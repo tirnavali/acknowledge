@@ -69,6 +69,7 @@ class FaceZoomPopup(QtWidgets.QDialog):
         face_name: str | None,
         face_index: int,
         parent=None,
+        person_names: list[str] | None = None,
     ):
         super().__init__(parent, QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
@@ -109,6 +110,11 @@ class FaceZoomPopup(QtWidgets.QDialog):
         if face_name:
             self._name_edit.setText(face_name)
         self._name_edit.committed.connect(self._on_committed)
+        if person_names:
+            completer = QtWidgets.QCompleter(person_names, self._name_edit)
+            completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
+            completer.setFilterMode(QtCore.Qt.MatchContains)
+            self._name_edit.setCompleter(completer)
         row.addWidget(self._name_edit)
 
         # Reset button
@@ -235,6 +241,7 @@ class FaceOverlayWidget(QtWidgets.QWidget):
         # The original (un-scaled) QPixmap — used for zoom crops
         self._source_pixmap: QtGui.QPixmap | None = None
         self._zoom_popup: FaceZoomPopup | None = None
+        self._person_names: list[str] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -243,6 +250,10 @@ class FaceOverlayWidget(QtWidgets.QWidget):
     def set_source_pixmap(self, pixmap: QtGui.QPixmap | None):
         """Provide the full-res pixmap for zoom crops."""
         self._source_pixmap = pixmap
+
+    def set_person_names(self, names: list[str]) -> None:
+        """Store person names for autocomplete in the zoom popup."""
+        self._person_names = names
 
     def set_faces(self, faces: list[dict], img_rect: QtCore.QRect) -> None:
         """
@@ -331,6 +342,7 @@ class FaceOverlayWidget(QtWidgets.QWidget):
             face.get("person_name"),
             face["face_index"],
             self.window(),
+            person_names=self._person_names,
         )
         popup.face_named.connect(self.face_named)
         popup.face_reset.connect(self.face_reset)
@@ -345,6 +357,8 @@ class FaceOverlayWidget(QtWidgets.QWidget):
         else:
             popup.move(global_pos + QtCore.QPoint(15, 15))
         popup.show()
+        popup.raise_()
+        popup.activateWindow()
         self._zoom_popup = popup
 
     # ------------------------------------------------------------------

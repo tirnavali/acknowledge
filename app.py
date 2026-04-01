@@ -17,6 +17,7 @@ from src.repositories.person_repository import PersonRepository
 from src.repositories.face_repository import FaceRepository
 from src.services.face_service import FaceAnalysisService
 from single_view_widget import SingleViewWidget
+from src.services.application_service import ApplicationService
 import os
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -26,10 +27,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1400, 900)
         self.current_event_id = None
         self.current_media_id = None
-        self.media_repo = MediaRepository()
-        self.person_repo = PersonRepository()
-        self.face_repo = FaceRepository()
-        self.face_service = FaceAnalysisService()  # singleton, lazy model load
+        self.app_service = ApplicationService()
         self.init_db()
         self.init_vault()
         self.UI()
@@ -87,7 +85,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 for col_name, col_type in iptc_columns:
                     try:
                         db.execute(text(f"ALTER TABLE medias ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                    except Exception:
+                    except Exception as e:
+                        print(f"Warning: Could not add column {col_name}: {e}")
                         pass  # Column already exists
                 db.commit()
             
@@ -111,6 +110,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_widgets()
         # self.media_details_form_widget()
         self.layouts()
+        self._init_persons_tab()
         self.apply_style()
 
     def init_menubar(self):
@@ -205,13 +205,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.events_tab = QtWidgets.QWidget()
         self.tab_widget.addTab(self.events_tab, "Etkinlikler")
 
+        self.persons_tab = QtWidgets.QWidget()
+        self.tab_widget.addTab(self.persons_tab, "Kişiler")
+
         self.settings_tab = QtWidgets.QWidget()
         self.tab_widget.addTab(self.settings_tab, "Ayarlar")
 
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.show()
 
     def fetch_events(self):
-        return EventRepository().get_all()
+        return self.app_service.get_event_service().get_all()
     
     def load_events(self):
         """Load events from database and populate the list widget"""
@@ -231,34 +235,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.event_card_list_widget.setItemWidget(item, card)
     
     def load_gallery_items(self, event_id):
-        items = []
-        event = EventRepository().get_by_id(event_id)
-        if not event or not event.vault_folder_path:
-            return items
-        abs_folder_path = os.path.abspath(event.vault_folder_path)
-        if not os.path.exists(abs_folder_path):
-            return items
-
-        # Fetch ALL metadata from DB in one query for this event
-        db_records = self.media_repo.get_all_for_event(event_id)
-        # Create a lookup map: normalized path -> record dict
-        db_map = {os.path.normpath(r['file_path']): r for r in db_records}
-
-        for filename in os.listdir(abs_folder_path):
-            if filename.lower().endswith((".jpg", ".png", ".jpeg")):
-                img_path = os.path.join(abs_folder_path, filename)
-                norm_path = os.path.normpath(img_path)
-                db_record = db_map.get(norm_path)
-                
-                # Create lazy item (metadata from DB if available)
-                item = GalleryItem(
-                    filename, 
-                    img_path, 
-                    in_db=(db_record is not None),
-                    db_metadata=db_record
-                )
-                items.append(item)
-        return items
+        """Load gallery items for an event using the service layer."""
+        return self.app_service.get_media_service().get_gallery_items(event_id)
 
 
     def refresh_events(self):
@@ -275,11 +253,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gallery_stack.setCurrentIndex(2)  # loading widget
         self.media_details_scroll.setEnabled(False)
         self.media_details_scroll.setStyleSheet(
-            "background-color: #ebebeb; border: 1px solid #ccc; border-radius: 4px; opacity: 0.5;"
+            "background-color: #252526; border: 1px solid #3f3f46; border-radius: 4px; opacity: 0.5;"
         )
         QtWidgets.QApplication.processEvents()
 
-        items = self.load_gallery_items(event.id)
+        items = self.app_service.get_media_service().get_gallery_items(event.id)
         self.gallery_item_model = GalleryItemModel(items)
         if hasattr(self, 'gallery_search_proxy'):
             self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
@@ -296,7 +274,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gallery_stack.setCurrentIndex(0)  # grid view
         self.media_details_scroll.setEnabled(True)
         self.media_details_scroll.setStyleSheet(
-            "background-color: #f5f5f5; border: 1px solid #ccc; border-radius: 4px;"
+            "background-color: #252526; border: 1px solid #3f3f46; border-radius: 4px;"
         )
 
     def show_event_context_menu(self, pos):
@@ -341,8 +319,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if reply == QtWidgets.QMessageBox.Yes:
             try:
-                # Delete from repository
-                EventRepository().delete(event.id)
+                # Delete from service
+                self.app_service.get_event_service().delete(event.id)
                 # If this was currently open, reset view
                 if self.current_event_id == event.id:
                     self.current_event_id = None
@@ -376,7 +354,7 @@ class MainWindow(QtWidgets.QMainWindow):
         item = self._get_item_from_index(index)
         if item:
             # Resolve media_id from DB if available
-            media_row = self.media_repo.get_by_file_path(item.img_path)
+            media_row = self.app_service.get_media_service().get_by_file_path(item.img_path)
             media_id = media_row['id'] if media_row else None
             self.current_media_id = media_id
 
@@ -404,13 +382,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # --- DB-first loading: prefer DB over file IPTC ---
             db_iptc = None
-            self.current_media_id = None
             if self.current_event_id:
-                db_iptc = self.media_repo.get_iptc_data(item.img_path)
+                db_iptc = self.app_service.get_media_service().get_iptc_data(item.img_path)
                 if db_iptc:
-                    media_row = self.media_repo.get_by_file_path(item.img_path)
-                    if media_row:
-                        self.current_media_id = media_row['id']
+                    self.current_media_id = db_iptc['id']
 
             if db_iptc:
                 # Populate from database
@@ -443,7 +418,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 
                 # Persons from DB
                 if self.current_media_id:
-                    persons = self.person_repo.get_persons_for_media(self.current_media_id)
+                    persons = self.app_service.get_person_service().get_persons_for_media(self.current_media_id)
                     self.media_people_input.setText(', '.join(persons))
             else:
                 # Fallback: populate from file IPTC
@@ -511,22 +486,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self._write_iptc_to_file(item.img_path, iptc_data)
             
             # 2. Save to database (ensure media record exists)
-            media_id = self.media_repo.ensure_media_exists(
-                self.current_event_id, item.img_path, "photo"
+            media_id = self.app_service.get_media_service().ensure_media_exists(
+                self.current_event_id, item.img_path, 'photo'
             )
             self.current_media_id = media_id
-            self.media_repo.save_iptc(media_id, iptc_data)
+            self.app_service.get_media_service().save_iptc_data(media_id, iptc_data)
             
             # 3. Handle persons
-            self.person_repo.unlink_all_from_media(media_id)
+            self.app_service.get_person_service().unlink_all_from_media(media_id)
             people_text = self.media_people_input.text()
             if people_text:
                 for name in people_text.split(','):
                     name = name.strip()
                     if name:
-                        person_id = self.person_repo.find_or_create(name)
+                        person_id = self.app_service.get_person_service().find_or_create(name)
                         if person_id:
-                            self.person_repo.link_to_media(person_id, media_id)
+                            self.app_service.get_person_service().link_to_media(person_id, media_id)
             
             if not silent:
                 QtWidgets.QMessageBox.information(self, "Başarılı", "✅ IPTC verileri dosyaya ve veritabanına kaydedildi.")
@@ -538,14 +513,14 @@ class MainWindow(QtWidgets.QMainWindow):
         """Refresh the in_db badge on all gallery items for the current event."""
         if not self.current_event_id:
             return
-        db_paths = self.media_repo.get_file_paths_for_event(self.current_event_id)
+        db_paths = self.app_service.get_media_service().get_file_paths_for_event(self.current_event_id)
         for row in range(self.gallery_item_model.rowCount()):
             item = self.gallery_item_model.item(row)
             if item:
                 in_db = os.path.normpath(item.img_path) in db_paths
                 if item.in_db != in_db:
                     item.in_db = in_db
-                new_icon = QtGui.QIcon(self.gallery_item_model._make_icon(item))
+                new_icon = QtGui.QIcon(GalleryItemModel.generate_pixmap(item))
                 item.setIcon(new_icon)
 
 
@@ -618,10 +593,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.load_events()
         
         # Gallery search section
+        self.gallery_search_layout = QtWidgets.QHBoxLayout()
         self.event_gallery_search = QtWidgets.QLineEdit()
         self.event_gallery_search.setPlaceholderText("EXIF İçinde Ara...")
         self.event_gallery_search.setFixedHeight(30)
-        self.event_gallery_search.setFixedWidth(600)
+        self.event_gallery_search.setMinimumWidth(300)
+        
+        self.event_gallery_date_cb = QtWidgets.QCheckBox("Tarih Filtresi:")
+        self.event_gallery_date = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
+        self.event_gallery_date.setCalendarPopup(True)
+        self.event_gallery_date.setFixedHeight(30)
+        self.event_gallery_date.setEnabled(False)
+        self.event_gallery_date_cb.toggled.connect(self.event_gallery_date.setEnabled)
+
+        self.event_gallery_search_btn = QtWidgets.QPushButton("Ara")
+        self.event_gallery_search_btn.setFixedHeight(30)
+        
+        self.gallery_search_layout.addWidget(self.event_gallery_search)
+        self.gallery_search_layout.addWidget(self.event_gallery_date_cb)
+        self.gallery_search_layout.addWidget(self.event_gallery_date)
+        self.gallery_search_layout.addWidget(self.event_gallery_search_btn)
+        self.gallery_search_layout.addStretch()
         # Gallery Stack section (Grid + Single)
         self.gallery_stack = QtWidgets.QStackedWidget()
         
@@ -635,10 +627,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Single View — inject face recognition dependencies
         self.single_view_widget = SingleViewWidget(
-            face_service=self.face_service,
-            face_repository=self.face_repo,
-            person_repository=self.person_repo,
-            media_repository=self.media_repo,
+            face_service=self.app_service.get_face_service(),
+            person_service=self.app_service.get_person_service(),
+            media_service=self.app_service.get_media_service(),
         )
         self.single_view_widget.doubleClicked.connect(self.switch_to_grid_view)
         self.single_view_widget.nextRequested.connect(self.navigate_next)
@@ -665,7 +656,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
         
         # Connect search
-        self.event_gallery_search.textChanged.connect(self.on_gallery_search)
+        self.event_gallery_search.returnPressed.connect(self.on_gallery_search)
+        self.event_gallery_search_btn.clicked.connect(self.on_gallery_search)
         
         # Connect click event to print EXIF data
         self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
@@ -681,10 +673,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            self.current_media_id = self.media_repo.ensure_media_exists(
-                self.current_event_id, item.img_path, "photo"
+            self.current_media_id = self.app_service.get_media_service().ensure_media_exists(
+                self.current_event_id, item.img_path, 'photo'
             )
-            persons = self.person_repo.get_persons_for_media(self.current_media_id)
+            persons = self.app_service.get_person_service().get_persons_for_media(self.current_media_id)
             self.media_people_input.setText(', '.join(persons))
             # Auto-save changes without showing a confirmation popup
             self.save_media_iptc(silent=True)
@@ -692,10 +684,14 @@ class MainWindow(QtWidgets.QMainWindow):
             import logging
             logging.warning(f"Error updating faces: {e}")
 
-    def on_gallery_search(self, text):
+    def on_gallery_search(self):
         """Update proxy model with search text to filter and sort the gallery view."""
         if hasattr(self, 'gallery_search_proxy'):
-            self.gallery_search_proxy.setFilterText(text)
+            text = self.event_gallery_search.text()
+            date_filter = None
+            if self.event_gallery_date_cb.isChecked():
+                date_filter = self.event_gallery_date.date().toString("yyyyMMdd")
+            self.gallery_search_proxy.setFilterText(text, date_filter)
 
     def media_details_form_widget(self):
         """Create form fields for media details"""
@@ -798,6 +794,72 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_form.setVerticalSpacing(8)
 
         
+    def _on_tab_changed(self, index: int):
+        if self.tab_widget.widget(index) is self.persons_tab:
+            self._load_persons_table()
+
+    def _init_persons_tab(self):
+        layout = QtWidgets.QVBoxLayout(self.persons_tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        # Search bar + refresh button
+        top_bar = QtWidgets.QHBoxLayout()
+        self._persons_search = QtWidgets.QLineEdit()
+        self._persons_search.setPlaceholderText("İsimde ara…")
+        self._persons_search.setFixedHeight(30)
+        self._persons_search.textChanged.connect(self._filter_persons_table)
+        top_bar.addWidget(self._persons_search)
+
+        refresh_btn = QtWidgets.QPushButton("Yenile")
+        refresh_btn.setFixedHeight(30)
+        refresh_btn.clicked.connect(self._load_persons_table)
+        top_bar.addWidget(refresh_btn)
+        layout.addLayout(top_bar)
+
+        # Table
+        self._persons_table = QtWidgets.QTableWidget()
+        self._persons_table.setColumnCount(2)
+        self._persons_table.setHorizontalHeaderLabels(["İsim", "Fotoğraf Sayısı"])
+        self._persons_table.horizontalHeader().setStretchLastSection(False)
+        self._persons_table.horizontalHeader().setSectionResizeMode(
+            0, QtWidgets.QHeaderView.Stretch
+        )
+        self._persons_table.horizontalHeader().setSectionResizeMode(
+            1, QtWidgets.QHeaderView.ResizeToContents
+        )
+        self._persons_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self._persons_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self._persons_table.setAlternatingRowColors(True)
+        self._persons_table.verticalHeader().setVisible(False)
+        self._persons_table.setSortingEnabled(True)
+        layout.addWidget(self._persons_table)
+
+    def _load_persons_table(self):
+        try:
+            rows = self.app_service.get_person_service().get_all_with_counts()
+        except Exception:
+            rows = []
+
+        self._persons_table.setSortingEnabled(False)
+        self._persons_table.setRowCount(len(rows))
+        for i, person in enumerate(rows):
+            name_item = QtWidgets.QTableWidgetItem(person["name"])
+            count_item = QtWidgets.QTableWidgetItem()
+            count_item.setData(QtCore.Qt.DisplayRole, int(person["photo_count"]))
+            count_item.setTextAlignment(QtCore.Qt.AlignCenter)
+            self._persons_table.setItem(i, 0, name_item)
+            self._persons_table.setItem(i, 1, count_item)
+        self._persons_table.setSortingEnabled(True)
+        self._persons_search.clear()
+
+    def _filter_persons_table(self, text: str):
+        text = text.lower()
+        for row in range(self._persons_table.rowCount()):
+            item = self._persons_table.item(row, 0)
+            visible = text in (item.text().lower() if item else "")
+            self._persons_table.setRowHidden(row, not visible)
+
     def layouts(self):
         self.events_layout = QtWidgets.QHBoxLayout()
         self.events_column = QtWidgets.QVBoxLayout()
@@ -807,7 +869,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_scroll = QtWidgets.QScrollArea()
         self.media_details_scroll.setWidgetResizable(True)
         self.media_details_scroll.setFixedWidth(450)
-        self.media_details_scroll.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ccc; border-radius: 4px;")
+        self.media_details_scroll.setStyleSheet("background-color: #252526; border: 1px solid #3f3f46; border-radius: 4px;")
         
         self.media_details_container = QtWidgets.QWidget()
         self.media_details_form = QtWidgets.QFormLayout()
@@ -818,10 +880,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_media_btn = QtWidgets.QPushButton("💾 Kaydet")
         self.save_media_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2d7d46; color: white; padding: 10px;
+                background-color: #0078D7; color: white; padding: 10px;
                 border: none; border-radius: 4px; font-weight: bold; font-size: 14px;
             }
-            QPushButton:hover { background-color: #3a9d5a; }
+            QPushButton:hover { background-color: #005A9E; }
         """)
         self.save_media_btn.clicked.connect(self.save_media_iptc)
         self.media_details_form.addRow(self.save_media_btn)
@@ -834,7 +896,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.events_column.addWidget(self.event_search)
         self.events_column.addWidget(self.event_card_list_widget)
         # event gallery
-        self.events_gallery.addWidget(self.event_gallery_search)
+        self.events_gallery.addLayout(self.gallery_search_layout)
         self.events_gallery.addWidget(self.gallery_stack)  
         # media details
         self.media_details_form_widget()     
@@ -846,69 +908,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def apply_style(self):
         self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f0f0f0;
-            }
-            QTabWidget::pane {
-                border: 1px solid #ccc;
-                background-color: #ffffff;
-            }
-            QTabBar::tab {
-                background: #e0e0e0;
-                color: #333;
-                padding: 10px 20px;
-                border: 1px solid #ccc;
-                border-bottom: none;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected {
-                background: #ffffff;
-                color: #000;
-            }
-            QListView, QListWidget {
-                background-color: #ffffff;
-                border: 1px solid #ccc;
-                color: #222;
-                border-radius: 4px;
-            }
-            QLineEdit {
-                background-color: #ffffff;
-                border: 1px solid #bbb;
-                color: #222;
-                padding: 5px;
-                border-radius: 4px;
-            }
-            QTextEdit {
-                background-color: #ffffff;
-                border: 1px solid #bbb;
-                color: #222;
-                border-radius: 4px;
-            }
-            QLabel {
-                color: #222;
-            }
-            QMenuBar {
-                background-color: #f0f0f0;
-                color: #222;
-            }
-            QMenuBar::item:selected {
-                background-color: #ddd;
-            }
-            QMenu {
-                background-color: #ffffff;
-                color: #222;
-                border: 1px solid #ccc;
-            }
-            QMenu::item:selected {
-                background-color: #e0e0e0;
-            }
-            QScrollArea {
-                background-color: #f5f5f5;
-            }
-            QWidget {
-                background-color: #f5f5f5;
-                color: #222;
-            }
+            QMainWindow { background-color: #1e1e1e; color: #ffffff; }
+            QTabWidget::pane { border: 1px solid #3f3f46; background-color: #1e1e1e; }
+            QTabBar::tab { background: #252526; color: #ffffff; padding: 10px 20px; border: 1px solid #3f3f46; border-bottom: none; margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px;}
+            QTabBar::tab:selected { background: #1e1e1e; color: #ffffff; font-weight: bold; border-bottom: 2px solid #0078D7; }
+            QListView, QListWidget { background-color: #252526; border: 1px solid #3f3f46; color: #ffffff; border-radius: 4px; }
+            QLineEdit, QTextEdit, QDateEdit, QDateTimeEdit { background-color: #333333; border: 1px solid #555555; color: #ffffff; padding: 4px; border-radius: 4px; }
+            QLineEdit:focus, QTextEdit:focus, QDateEdit:focus { border: 1px solid #0078D7; }
+            QLabel { color: #ffffff; }
+            QMenuBar { background-color: #1e1e1e; color: #ffffff; }
+            QMenuBar::item:selected { background-color: #333333; }
+            QMenu { background-color: #252526; color: #ffffff; border: 1px solid #3f3f46; }
+            QMenu::item:selected { background-color: #0078D7; color: white;}
+            QScrollArea { background-color: #252526; border: none; }
+            QWidget { background-color: #1e1e1e; color: #ffffff; }
+            QPushButton { background-color: #333333; color: white; padding: 6px 15px; border: 1px solid #555555; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #3f3f46; border: 1px solid #0078D7; }
+            QPushButton:pressed { background-color: #0078D7; border: 1px solid #0078D7; }
+            QCheckBox { color: #ffffff; }
         """)
 
 
@@ -916,6 +933,7 @@ class MainWindow(QtWidgets.QMainWindow):
 def app():
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
+    window.app_service.initialize_application()
     sys.exit(app.exec())
 
 if __name__ == "__main__":

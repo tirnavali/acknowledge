@@ -70,6 +70,18 @@ class PersonRepository:
             result = db.execute(text("SELECT * FROM persons ORDER BY name"))
             return [dict(row._mapping) for row in result.fetchall()]
 
+    def get_all_with_counts(self) -> list[dict]:
+        """Get all persons with their linked photo counts."""
+        with get_db() as db:
+            result = db.execute(text("""
+                SELECT p.id, p.name, COUNT(mp.media_id) AS photo_count
+                FROM persons p
+                LEFT JOIN media_persons mp ON p.id = mp.person_id
+                GROUP BY p.id, p.name
+                ORDER BY p.name
+            """))
+            return [dict(row._mapping) for row in result.fetchall()]
+
     def link_to_media(self, person_id: UUID, media_id: UUID) -> None:
         """Link a person to a media (create junction record)."""
         with get_db() as db:

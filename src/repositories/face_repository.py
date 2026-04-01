@@ -28,6 +28,10 @@ class FaceRepository:
         Returns:
             List of newly created face_detection UUIDs.
         """
+        # Validate that media_id is actually a UUID
+        if not isinstance(media_id, UUID):
+            raise ValueError(f"Expected media_id to be a UUID, got {type(media_id)}")
+        
         media_id_str = str(media_id)
         ids = []
         with get_db() as db:
@@ -46,7 +50,7 @@ class FaceRepository:
                     "id": str(new_id),
                     "media_id": media_id_str,
                     "bbox": f'{{"x1":{face.x1},"y1":{face.y1},"x2":{face.x2},"y2":{face.y2}}}',
-                    "emb": str(embedding_list) if embedding_list else None,
+                    "emb": "[" + ",".join(str(v) for v in embedding_list) + "]" if embedding_list else None,
                 })
                 ids.append(new_id)
             db.commit()
@@ -114,6 +118,7 @@ class FaceRepository:
             else (None, None).
         """
         emb_list = embedding.tolist()
+        emb_str = "[" + ",".join(str(v) for v in emb_list) + "]"
         with get_db() as db:
             result = db.execute(text("""
                 SELECT fd.person_id, p.name,
@@ -123,7 +128,7 @@ class FaceRepository:
                 WHERE fd.embedding IS NOT NULL AND fd.person_id IS NOT NULL
                 ORDER BY distance ASC
                 LIMIT 1
-            """), {"emb": str(emb_list)})
+            """), {"emb": emb_str})
             row = result.fetchone()
             if row and row.distance is not None and float(row.distance) < threshold:
                 return UUID(str(row.person_id)), row.name

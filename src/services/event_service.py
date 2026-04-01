@@ -1,36 +1,60 @@
-import shutil
-import os
-from src.domain.entities.event import Event
+"""Event service for handling event-related business logic."""
+
+from src.services.base_service import BaseService
 from src.repositories.event_repository import EventRepository
-from src.repositories.media_repository import MediaRepository
+from src.domain.entities.event import Event
+import logging
 
-class EventService:
-    def __init__(self, vault_base_path: str):
-        self.vault_base_path = vault_base_path
-        self.event_repo = EventRepository()
-        self.media_repo = MediaRepository()
+class EventService(BaseService):
+    """Service for managing events."""
     
-    def create_and_import_event(self, name: str, event_date, source_folder: str) -> Event:
-        # 1. Entity oluştur (Class Method Factory)
-        event = Event.create(name, event_date, source_folder)
-        
-        # 2. Vault'a kopyala
-        dest_path = os.path.join(self.vault_base_path, str(event.id))
-        shutil.copytree(source_folder, dest_path)
-        
-        # 3. State güncelle (iş mantığı entity içinde)
-        event.mark_as_imported(dest_path)
-        
-        # 4. Kaydet
-        self.event_repo.save(event)
-
-        # 5. Klasördeki tüm görselleri medias tablosuna ekle
-        for filename in os.listdir(dest_path):
-            if filename.lower().endswith((".jpg", ".jpeg", ".png")):
-                img_path = os.path.join(dest_path, filename)
-                try:
-                    self.media_repo.ensure_media_exists(event.id, img_path, "photo")
-                except Exception:
-                    pass  # Zaten varsa atla
-        
-        return event
+    def __init__(self, event_repository: EventRepository):
+        super().__init__()
+        self.event_repository = event_repository
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    def get_all(self):
+        """Get all events."""
+        try:
+            return self.event_repository.get_all()
+        except Exception as e:
+            self.logger.error(f"Error getting all events: {e}")
+            raise
+    
+    def get_by_id(self, event_id):
+        """Get event by ID."""
+        try:
+            return self.event_repository.get_by_id(event_id)
+        except Exception as e:
+            self.logger.error(f"Error getting event by ID {event_id}: {e}")
+            raise
+    
+    def create(self, event_data):
+        """Create new event."""
+        try:
+            event = Event(**event_data)
+            return self.event_repository.create(event)
+        except Exception as e:
+            self.logger.error(f"Error creating event: {e}")
+            raise
+    
+    def update(self, event_id, event_data):
+        """Update event."""
+        try:
+            event = Event(id=event_id, **event_data)
+            return self.event_repository.update(event)
+        except Exception as e:
+            self.logger.error(f"Error updating event {event_id}: {e}")
+            raise
+    
+    def delete(self, event_id):
+        """Delete event."""
+        try:
+            return self.event_repository.delete(event_id)
+        except Exception as e:
+            self.logger.error(f"Error deleting event {event_id}: {e}")
+            raise
+    
+    def get_event_by_id(self, event_id):
+        """Get event by ID (alias for get_by_id)."""
+        return self.get_by_id(event_id)

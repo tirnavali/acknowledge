@@ -1,109 +1,127 @@
-"""
-FaceAnalysisService — wraps insightface for face detection and embedding extraction.
+"""Face service for handling face detection and recognition."""
 
-Design decisions:
-- Model is loaded lazily on first call (heavy ~200 MB, downloaded once by insightface)
-- Returns a list of FaceResult dataclasses with normalised bbox and numpy embedding
-- Runs synchronously; callers should use QThread to avoid UI blocking
-- A threading.Lock serialises concurrent detect() calls so rapid event-switching
-  cannot corrupt the singleton insightface model state.
-"""
-from __future__ import annotations
+from src.services.base_service import BaseService
+from src.services.face_analysis_service import FaceAnalysisService
+from src.repositories.face_repository import FaceRepository
+from src.repositories.person_repository import PersonRepository
+from src.database import get_db
+from sqlalchemy import text
 import logging
-import threading
-from dataclasses import dataclass
-import numpy as np
+import uuid
 
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class FaceResult:
-    """Single detected face from an image."""
-    # Normalised bounding box (0.0–1.0 relative to original image)
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-    # 512-dim ArcFace embedding
-    embedding: np.ndarray  # shape (512,)
-    # Confidence score
-    score: float
-
-
-class FaceAnalysisService:
-    """
-    Singleton-style service for face detection and embedding.
-    Uses insightface buffalo_l model (ArcFace, 512-dim embeddings).
-    """
-
-    _instance = None
-    _app = None  # insightface FaceAnalysis
-    _lock = threading.Lock()  # serialise concurrent detect() calls
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def _load_model(self):
-        """Lazy load the insightface model (only once)."""
-        if self._app is not None:
-            return
+class FaceService(BaseService):
+    """Service for handling face detection and recognition."""
+    
+    def __init__(self, face_repository: FaceRepository, person_repository: PersonRepository):
+        super().__init__()
+        self.face_repository = face_repository
+        self.person_repository = person_repository
+        self.face_analysis_service = FaceAnalysisService()  # singleton
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    def get_all(self):
+        """Get all faces."""
         try:
-            import insightface
-            from insightface.app import FaceAnalysis
-            self._app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
-            self._app.prepare(ctx_id=0, det_size=(640, 640))
-            logger.info("✅ InsightFace model loaded (buffalo_l)")
+            return self.face_repository.get_all()
         except Exception as e:
-            logger.error(f"❌ InsightFace model load failed: {e}")
-            self._app = None
+            self.logger.error(f"Error getting all faces: {e}")
+            raise
+    
+    def get_by_id(self, face_id):
+        """Get face by ID."""
+        try:
+            return self.face_repository.get_by_id(face_id)
+        except Exception as e:
+            self.logger.error(f"Error getting face by ID {face_id}: {e}")
+            raise
+    
+    def create(self, face_data):
+        """Create new face record."""
+        try:
+            return self.face_repository.create(face_data)
+        except Exception as e:
+            self.logger.error(f"Error creating face: {e}")
+            raise
+    
+    def update(self, face_id, face_data):
+        """Update face record."""
+        try:
+            return self.face_repository.update(face_id, face_data)
+        except Exception as e:
+            self.logger.error(f"Error updating face {face_id}: {e}")
+            raise
+    
+    def delete(self, face_id):
+        """Delete face record."""
+        try:
+            return self.face_repository.delete(face_id)
+        except Exception as e:
+            self.logger.error(f"Error deleting face {face_id}: {e}")
+            raise
+    
+    def detect_faces(self, image_path):
+        """Detect faces in an image."""
+        try:
+            return self.face_analysis_service.detect(image_path)
+        except Exception as e:
+            self.logger.error(f"Error detecting faces in {image_path}: {e}")
+            raise
+    
+    def recognize_faces(self, face_embeddings):
+        """Recognize faces using embeddings."""
+        try:
+            return self.face_analysis_service.recognize_faces(face_embeddings)
+        except Exception as e:
+            self.logger.error(f"Error recognizing faces: {e}")
+            raise
+    
+    def get_face_details(self, face_id):
+        """Get detailed information about a face."""
+        try:
+            return self.face_repository.get_face_details(face_id)
+        except Exception as e:
+            self.logger.error(f"Error getting face details for {face_id}: {e}")
             raise
 
-    def detect(self, img_path: str) -> list[FaceResult]:
-        """
-        Detect all faces in an image and return normalised results.
+    def get_faces_for_media(self, media_id):
+        """Get all faces for a media item."""
+        try:
+            return self.face_repository.get_faces_for_media(media_id)
+        except Exception as e:
+            self.logger.error(f"Error getting faces for media {media_id}: {e}")
+            raise
 
-        Uses a threading lock so that concurrent calls (e.g. rapid event-switching)
-        are serialised and cannot corrupt the singleton insightface model state.
+    def save_faces(self, media_id, results):
+        """Save face detection results to database."""
+        try:
+            # Validate that media_id is actually a UUID
+            if not isinstance(media_id, uuid.UUID):
+                raise ValueError(f"Expected media_id to be a UUID, got {type(media_id)}")
+            return self.face_repository.save_faces(media_id, results)
+        except Exception as e:
+            self.logger.error(f"Error saving faces for media {media_id}: {e}")
+            raise
 
-        Args:
-            img_path: Absolute path to the image file.
+    def assign_person(self, face_id, person_id):
+        """Assign a person to a face detection."""
+        try:
+            return self.face_repository.assign_person(face_id, person_id)
+        except Exception as e:
+            self.logger.error(f"Error assigning person {person_id} to face {face_id}: {e}")
+            raise
 
-        Returns:
-            List of FaceResult sorted by face area (largest first).
-        """
-        import cv2
+    def delete_faces_for_media(self, media_id):
+        """Delete all face detections for a media item."""
+        try:
+            return self.face_repository.delete_faces_for_media(media_id)
+        except Exception as e:
+            self.logger.error(f"Error deleting faces for media {media_id}: {e}")
+            raise
 
-        with self._lock:
-            self._load_model()
-            if self._app is None:
-                return []
-
-            img = cv2.imread(img_path)
-            if img is None:
-                logger.warning(f"Could not read image: {img_path}")
-                return []
-
-            h, w = img.shape[:2]
-            faces = self._app.get(img)
-
-        results = []
-        for face in faces:
-            bbox = face.bbox.astype(float)
-            x1, y1, x2, y2 = bbox
-            results.append(FaceResult(
-                x1=max(0.0, x1 / w),
-                y1=max(0.0, y1 / h),
-                x2=min(1.0, x2 / w),
-                y2=min(1.0, y2 / h),
-                embedding=face.embedding,
-                score=float(face.det_score),
-            ))
-
-        results.sort(key=lambda f: (f.x2 - f.x1) * (f.y2 - f.y1), reverse=True)
-        return results
-
-    def is_ready(self) -> bool:
-        return self._app is not None
+    def find_similar_person(self, embedding) -> tuple:
+        """Find closest matching person for a face embedding via pgvector similarity."""
+        try:
+            return self.face_repository.find_similar_person(embedding)
+        except Exception as e:
+            self.logger.error(f"Error finding similar person: {e}")
+            raise

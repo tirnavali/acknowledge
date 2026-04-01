@@ -155,6 +155,8 @@ class GalleryItemModel(QtGui.QStandardItemModel):
 
     def setup_model(self):
         for item in self.items:
+            # Ensure text is white for high contrast
+            item.setForeground(QtGui.QColor('#ffffff'))
             item.setIcon(QtGui.QIcon(self._placeholder))
             self.appendRow(item)
 
@@ -198,31 +200,48 @@ class GalleryItemModel(QtGui.QStandardItemModel):
 
 
 class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
-    # (Rest of the class remains identical)
     def __init__(self, parent=None):
         super().__init__(parent)
         self._filter_text = ""
+        self._filter_date = None
     
-    def setFilterText(self, text):
+    def setFilterText(self, text, filter_date=None):
         self._filter_text = text.strip().lower()
+        self._filter_date = filter_date
         self.invalidateFilter()
-        if self._filter_text:
+        if self._filter_text or self._filter_date:
             self.sort(0, QtCore.Qt.DescendingOrder)
         else:
             self.sort(-1)
             
     def filterAcceptsRow(self, source_row, source_parent):
-        if not self._filter_text: return True
+        if not self._filter_text and not self._filter_date: 
+            return True
+        
         model = self.sourceModel()
         index = model.index(source_row, 0, source_parent)
         item = model.itemFromIndex(index)
         if not item: return False
+
+        if self._filter_date:
+            item_date = item.iptc_data.get('Date Created')
+            if not item_date:
+                exif_date_str = item.exif_data.get('Date/Time Original') or item.exif_data.get('Date/Time')
+                if exif_date_str:
+                    item_date = exif_date_str.replace(":", "").replace("-", "")[:8]
+            
+            if not item_date or not item_date.startswith(self._filter_date):
+                return False
+
+        if not self._filter_text:
+            return True
+
         score = self._calculate_score(item, self._filter_text)
         item.setData(score, QtCore.Qt.UserRole + 1)
         return score > 0
         
     def lessThan(self, left, right):
-        if not self._filter_text: return left.row() < right.row()
+        if not self._filter_text and not self._filter_date: return left.row() < right.row()
         left_item = self.sourceModel().itemFromIndex(left)
         right_item = self.sourceModel().itemFromIndex(right)
         if not left_item or not right_item: return False

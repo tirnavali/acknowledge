@@ -14,28 +14,29 @@ class EventCardWidget(QtWidgets.QWidget):
         self.event_name.setWordWrap(True)
         # Set tooltip so user can see full name on hover
         self.event_name.setToolTip(event_name)
-        self.event_name.setStyleSheet("font-weight: bold; font-size: 13px; color: #333;")
+        self.event_name.setStyleSheet("font-weight: bold; font-size: 13px; color: #f0f0f0;")
         self.event_name.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
         self.layout.addWidget(self.event_name)
         
         self.event_date = QtWidgets.QLabel(event_date.strftime("%Y-%m-%d %H:%M:%S"))
-        self.event_date.setStyleSheet("color: #666; font-size: 11px;")
+        self.event_date.setStyleSheet("color: #a0a0a0; font-size: 11px;")
         self.layout.addWidget(self.event_date)
         
         # Optional: Add visual feedback for hover
         self.setStyleSheet("""
             EventCardWidget {
-                border: 1px solid #ccc;
+                border: 1px solid #3f3f46;
                 border-radius: 5px;
                 padding: 5px;
-                background-color: white;
+                background-color: #2d2d30;
             }
             EventCardWidget:hover {
-                background-color: #f0f0f0;
+                background-color: #3e3e42;
+                border: 1px solid #555558;
             }
             EventCardWidget:focus {
                 border: 2px solid #0078d4;
-                background-color: #e6f2ff;
+                background-color: #1e3a5f;
             }
         """)
         

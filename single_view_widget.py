@@ -9,6 +9,7 @@ Architecture:
 from __future__ import annotations
 import os
 import logging
+from uuid import UUID
 from PySide6 import QtCore, QtWidgets, QtGui
 
 from face_overlay_widget import FaceOverlayWidget
@@ -33,7 +34,7 @@ class FaceDetectionWorker(QtCore.QThread):
 
     def run(self):
         try:
-            results = self._service.detect(self._img_path)
+            results = self._service.detect_faces(self._img_path)
             self.detected.emit(results)
         except Exception as e:
             self.error.emit(str(e))
@@ -53,9 +54,9 @@ class SingleViewWidget(QtWidgets.QWidget):
 
     Dependencies injected at construction:
         face_service    — FaceAnalysisService (optional, can be None to disable)
-        face_repository — FaceRepository      (optional)
-        person_repository — PersonRepository  (optional)
-        media_repository  — MediaRepository   (optional)
+        face_service    — FaceService (optional, can be None to disable)
+        person_service  — PersonService (optional, can be None to disable)
+        media_service   — MediaService (optional, can be None to disable)
     """
 
     doubleClicked   = QtCore.Signal()
@@ -66,18 +67,17 @@ class SingleViewWidget(QtWidgets.QWidget):
     def __init__(
         self,
         face_service=None,
-        face_repository=None,
-        person_repository=None,
-        media_repository=None,
+        person_service=None,
+        media_service=None,
         parent=None,
     ):
         super().__init__(parent)
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
 
         self._face_service      = face_service
-        self._face_repo         = face_repository
-        self._person_repo       = person_repository
-        self._media_repo        = media_repository
+        self._face_service      = face_service  # Use the actual service
+        self._person_service    = person_service
+        self._media_service     = media_service
 
         self.current_img_path   = None
         self._current_media_id  = None
@@ -204,14 +204,18 @@ class SingleViewWidget(QtWidgets.QWidget):
             return  # face detection disabled
 
         # Try DB-first: if LABELLED detections exist, skip re-running model
-        if self._current_media_id and self._face_repo:
-            db_faces = self._face_repo.get_faces_for_media(self._current_media_id)
-            # Only use DB data if at least one face has a name assigned
-            has_named = any(f.get("person_name") for f in db_faces)
-            if db_faces and has_named:
-                self._show_db_faces(db_faces)
-                self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
-                return
+        if self._current_media_id and self._face_service:
+            try:
+                db_faces = self._face_service.get_faces_for_media(self._current_media_id)
+                # Only use DB data if at least one face has a name assigned
+                has_named = any(f.get("person_name") for f in db_faces)
+                if db_faces and has_named:
+                    self._show_db_faces(db_faces)
+                    self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
+                    return
+            except Exception as e:
+                logger.warning(f"Could not get faces from DB: {e}")
+                # Fall back to detection if DB access fails
 
         # No DB data → run detector
         self._status_label.setText("🔍 Yüzler algılanıyor…")
@@ -252,8 +256,8 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._skip_similarity = False  # reset flag
         for i, face in enumerate(results):
             person_id, person_name = None, None
-            if not skip_sim and self._face_repo and face.embedding is not None:
-                person_id, person_name = self._face_repo.find_similar_person(face.embedding)
+            if not skip_sim and self._face_service and face.embedding is not None:
+                person_id, person_name = self._face_service.find_similar_person(face.embedding)
             face_dicts.append({
                 "bbox"        : {"x1": face.x1, "y1": face.y1, "x2": face.x2, "y2": face.y2},
                 "face_id"     : None,
@@ -262,31 +266,36 @@ class SingleViewWidget(QtWidgets.QWidget):
             })
 
         # Ensure media record exists in DB (create it if needed)
-        if self._face_repo and self._media_repo and self.current_img_path:
+        if self._media_service and self._face_service and self.current_img_path:
             if not self._current_media_id and self._current_event_id:
                 try:
-                    self._current_media_id = self._media_repo.ensure_media_exists(
+                    self._current_media_id = self._media_service.ensure_media_exists(
                         self._current_event_id, self.current_img_path, "photo"
                     )
                 except Exception as e:
                     logger.warning(f"Could not ensure media exists: {e}")
 
         # Save detections to DB (always save so we don't wipe them on refresh)
-        if self._current_media_id and self._face_repo:
-            saved_ids = self._face_repo.save_faces(self._current_media_id, results)
-            for i, fid in enumerate(saved_ids):
-                face_dicts[i]["face_id"] = str(fid)
-                # If auto-matched, assign immediately
-                if not skip_sim and face_dicts[i]["person_name"] and self._person_repo:
-                    pid, _ = self._face_repo.find_similar_person(results[i].embedding)
-                    if pid:
-                        self._face_repo.assign_person(fid, pid)
-                        self._person_repo.link_to_media(pid, self._current_media_id)
+        if self._current_media_id and self._face_service:
+            try:
+                saved_ids = self._face_service.save_faces(self._current_media_id, results)
+                for i, fid in enumerate(saved_ids):
+                    face_dicts[i]["face_id"] = str(fid)
+                    # If auto-matched, assign immediately
+                    if not skip_sim and face_dicts[i]["person_name"] and self._person_service:
+                        pid, _ = self._face_service.find_similar_person(results[i].embedding)
+                        if pid:
+                            self._face_service.assign_person(fid, pid)
+                            self._person_service.link_to_media(pid, self._current_media_id)
+            except Exception as e:
+                logger.warning(f"Failed to save faces: {e}")
 
+        self._refresh_person_names()
         img_rect = self._get_image_display_rect()
         self.face_overlay.set_faces(face_dicts, img_rect)
         self.face_overlay.setGeometry(self._image_container.rect())
         self.face_overlay.show()
+        self.face_overlay.raise_()
 
         # Emit signal to inform main app that automatic matches might have updated the persons in this media
         if any(fd["person_name"] for fd in face_dicts):
@@ -295,6 +304,17 @@ class SingleViewWidget(QtWidgets.QWidget):
     def _on_detection_error(self, msg: str):
         logger.error(f"Face detection error: {msg}")
         self._status_label.setText(f"⚠️ Yüz algılama hatası: {msg[:60]}")
+
+    def _refresh_person_names(self) -> None:
+        """Fetch all person names from DB and push to the face overlay for autocomplete."""
+        if not self._person_service:
+            return
+        try:
+            persons = self._person_service.get_all()
+            names = [p["name"] for p in persons if p.get("name")]
+            self.face_overlay.set_person_names(names)
+        except Exception as e:
+            logger.warning(f"Could not refresh person names: {e}")
 
     def _show_db_faces(self, db_faces: list[dict]):
         """Render faces loaded from the database (skip detection)."""
@@ -311,10 +331,12 @@ class SingleViewWidget(QtWidgets.QWidget):
                 "face_index"  : i,
             })
 
+        self._refresh_person_names()
         img_rect = self._get_image_display_rect()
         self.face_overlay.set_faces(face_dicts, img_rect)
         self.face_overlay.setGeometry(self._image_container.rect())
         self.face_overlay.show()
+        self.face_overlay.raise_()
 
     # ------------------------------------------------------------------
     # Name assignment
@@ -329,15 +351,15 @@ class SingleViewWidget(QtWidgets.QWidget):
         2. Face HAS person, new name matches ANOTHER existing person → REASSIGN
         3. Face HAS person, new name does NOT exist yet → RENAME in place (global)
         """
-        if not name or not self._person_repo:
+        if not name or not self._person_service:
             return
 
         name = name.strip()
 
         # Ensure media record exists
-        if not self._current_media_id and self._media_repo and self._current_event_id and self.current_img_path:
+        if not self._current_media_id and self._media_service and self._current_event_id and self.current_img_path:
             try:
-                self._current_media_id = self._media_repo.ensure_media_exists(
+                self._current_media_id = self._media_service.ensure_media_exists(
                     self._current_event_id, self.current_img_path, "photo"
                 )
             except Exception as e:
@@ -350,10 +372,10 @@ class SingleViewWidget(QtWidgets.QWidget):
         face_id = face_info.get("face_id")
 
         # Ensure face row is in DB
-        if not face_id and self._current_media_id and self._face_repo and face_index < len(self._pending_results):
+        if not face_id and self._current_media_id and self._face_service and face_index < len(self._pending_results):
             try:
                 # Save ALL pending results, not just this one, to avoid wiping other faces
-                saved_ids = self._face_repo.save_faces(
+                saved_ids = self._face_service.save_faces(
                     self._current_media_id, self._pending_results
                 )
                 if saved_ids:
@@ -365,14 +387,12 @@ class SingleViewWidget(QtWidgets.QWidget):
             except Exception as e:
                 logger.warning(f"save_faces fallback failed: {e}")
 
-        from uuid import UUID
-
         # --- Look up OLD person currently assigned to this face ---
         old_person_id = None
         old_person_name = None
-        if face_id and self._face_repo and self._current_media_id:
+        if face_id and self._face_service and self._current_media_id:
             try:
-                all_faces = self._face_repo.get_faces_for_media(self._current_media_id)
+                all_faces = self._face_service.get_faces_for_media(self._current_media_id)
                 for f in all_faces:
                     if str(f.get("id")) == str(face_id) and f.get("person_id"):
                         old_person_id = UUID(str(f["person_id"]))
@@ -382,7 +402,7 @@ class SingleViewWidget(QtWidgets.QWidget):
                 logger.warning(f"Could not look up old person: {e}")
 
         # --- Check if new name already exists (WITHOUT creating) ---
-        existing_person_id = self._person_repo.find_by_name(name)
+        existing_person_id = self._person_service.find_by_name(name) if self._person_service else None
 
         # Same person, same name → noop
         if old_person_id and existing_person_id and str(old_person_id) == str(existing_person_id):
@@ -393,7 +413,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         if old_person_id and not existing_person_id:
             # Name doesn't exist yet → RENAME the existing person in-place
             # This propagates to ALL photos that reference this person_id
-            self._person_repo.rename(old_person_id, name)
+            self._person_service.rename(old_person_id, name)
             final_person_id = old_person_id
             action = "yeniden adlandırıldı (tüm fotoğraflara yansıdı)"
 
@@ -404,32 +424,32 @@ class SingleViewWidget(QtWidgets.QWidget):
 
             # Unlink old person from this media if no other face still uses them
             try:
-                all_faces = self._face_repo.get_faces_for_media(self._current_media_id) if self._face_repo else []
+                all_faces = self._face_service.get_faces_for_media(self._current_media_id) if self._face_service else []
                 still_linked = any(
                     str(f.get("id")) != str(face_id)
                     and str(f.get("person_id") or "") == str(old_person_id)
                     for f in all_faces
                 )
                 if not still_linked:
-                    self._person_repo.unlink_from_media(old_person_id, self._current_media_id)
+                    self._person_service.unlink_from_media(old_person_id, self._current_media_id)
             except Exception as e:
                 logger.warning(f"Old person unlink failed: {e}")
 
         else:
             # No old person → create/find and assign fresh
-            final_person_id = self._person_repo.find_or_create(name)
+            final_person_id = self._person_service.find_or_create(name)
             action = "kaydedildi"
 
         if not final_person_id:
             return
 
         # Assign person to face detection row
-        if face_id and self._face_repo:
-            self._face_repo.assign_person(UUID(str(face_id)), final_person_id)
+        if face_id and self._face_service:
+            self._face_service.assign_person(UUID(str(face_id)), final_person_id)
 
         # Link person to media
-        if self._current_media_id:
-            self._person_repo.link_to_media(final_person_id, self._current_media_id)
+        if self._current_media_id and self._person_service:
+            self._person_service.link_to_media(final_person_id, self._current_media_id)
 
         self.face_overlay.update_person_name(face_index, name)
         self._status_label.setText(f"✅ '{name}' {action}.")
@@ -441,9 +461,9 @@ class SingleViewWidget(QtWidgets.QWidget):
             return
 
         # Delete DB records
-        if self._current_media_id and self._face_repo:
+        if self._current_media_id and self._face_service:
             try:
-                self._face_repo.delete_faces_for_media(self._current_media_id)
+                self._face_service.delete_faces_for_media(self._current_media_id)
             except Exception as e:
                 logger.warning(f"delete_faces_for_media failed: {e}")
 
@@ -526,7 +546,6 @@ class SingleViewWidget(QtWidgets.QWidget):
             # Reposition overlay to match container
             self.face_overlay.setGeometry(self._image_container.rect())
             img_rect = self._get_image_display_rect()
-            # Re-layout face inputs for new size
             self.face_overlay._img_rect = img_rect
-            pass  # name inputs are now inside the zoom popup
+            self.face_overlay.raise_()
             self.face_overlay.update()

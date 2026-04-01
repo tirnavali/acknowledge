@@ -36,3 +36,6 @@ env/
 
 # OS
 Thumbs.db
+
+# Models
+models/
