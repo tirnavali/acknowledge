@@ -150,6 +150,34 @@ class MediaService(BaseService):
             self.logger.error(f"Error getting file paths for event {event_id}: {e}")
             raise
 
+    def get_gallery_items_for_search(self, query: str) -> list:
+        """Search IPTC metadata across all events and return GalleryItems."""
+        try:
+            from gallery_item_model import GalleryItem
+            records = self.media_repository.search_across_events(query)
+            items = []
+            for rec in records:
+                path = rec.get("file_path", "")
+                if path and os.path.exists(path):
+                    items.append(GalleryItem(
+                        os.path.basename(path),
+                        path,
+                        in_db=True,
+                        db_metadata=rec,
+                    ))
+            return items
+        except Exception as e:
+            self.logger.error(f"Error searching across events for '{query}': {e}")
+            raise
+
+    def search_across_events_raw(self, query: str) -> list[dict]:
+        """Return raw DB records for FTS search (no Qt objects created here)."""
+        try:
+            return self.media_repository.search_across_events(query)
+        except Exception as e:
+            self.logger.error(f"Error in raw search for '{query}': {e}")
+            raise
+
     def get_gallery_items_for_person(self, person_id):
         """Get GalleryItems for all media linked to a person."""
         try:

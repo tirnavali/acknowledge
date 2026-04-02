@@ -18,6 +18,12 @@ class GalleryItem(QtGui.QStandardItem):
         self.setToolTip(self.img_path)
         self.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
         
+        # Store event_id so proxy model can filter by event during search
+        self.event_id = str(db_metadata.get('event_id', '')) if db_metadata else None
+
+        # Store DB search rank (set by FTS query; 0 for non-search items)
+        self.search_rank = float(db_metadata.get('rank') or 0) if db_metadata else 0.0
+
         # Pre-populate from DB if available to avoid disk I/O
         if db_metadata:
             self._pop_from_db(db_metadata)
@@ -46,6 +52,11 @@ class GalleryItem(QtGui.QStandardItem):
             val = db_metadata.get(db_key)
             if val:
                 self.iptc_data[display_name] = str(val)
+
+        # Populate People from FTS person_names aggregation
+        pnames = db_metadata.get('person_names', '')
+        if pnames:
+            self.iptc_data['People'] = pnames
 
     def load_from_file(self):
         """Heavy I/O: Read EXIF/IPTC from file. Called from background thread."""
@@ -204,7 +215,13 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         super().__init__(parent)
         self._filter_text = ""
         self._filter_date = None
-    
+        self._filter_event_id = None   # set during search mode to narrow by event
+
+    def setEventFilter(self, event_id):
+        """Narrow results to a single event (pass None to show all events)."""
+        self._filter_event_id = str(event_id) if event_id is not None else None
+        self.invalidateFilter()
+
     def setFilterText(self, text, filter_date=None):
         self._filter_text = text.strip().lower()
         self._filter_date = filter_date
@@ -213,15 +230,19 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
             self.sort(0, QtCore.Qt.DescendingOrder)
         else:
             self.sort(-1)
-            
+
     def filterAcceptsRow(self, source_row, source_parent):
-        if not self._filter_text and not self._filter_date: 
+        if not self._filter_text and not self._filter_date and not self._filter_event_id:
             return True
         
         model = self.sourceModel()
         index = model.index(source_row, 0, source_parent)
         item = model.itemFromIndex(index)
         if not item: return False
+
+        if self._filter_event_id:
+            if not item.event_id or item.event_id != self._filter_event_id:
+                return False
 
         if self._filter_date:
             item_date = item.iptc_data.get('Date Created')
@@ -236,18 +257,25 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         if not self._filter_text:
             return True
 
+        item_rank = getattr(item, 'search_rank', 0)
+        if item_rank > 0:
+            return True   # already approved by PostgreSQL FTS
         score = self._calculate_score(item, self._filter_text)
         item.setData(score, QtCore.Qt.UserRole + 1)
         return score > 0
         
     def lessThan(self, left, right):
         if not self._filter_text and not self._filter_date: return left.row() < right.row()
-        left_item = self.sourceModel().itemFromIndex(left)
-        right_item = self.sourceModel().itemFromIndex(right)
-        if not left_item or not right_item: return False
-        left_score = left_item.data(QtCore.Qt.UserRole + 1) or 0
-        right_score = right_item.data(QtCore.Qt.UserRole + 1) or 0
-        return left_score < right_score
+        l_item = self.sourceModel().itemFromIndex(left)
+        r_item = self.sourceModel().itemFromIndex(right)
+        if not l_item or not r_item: return False
+        l_rank = getattr(l_item, 'search_rank', 0) or 0
+        r_rank = getattr(r_item, 'search_rank', 0) or 0
+        if l_rank or r_rank:
+            return l_rank < r_rank   # higher DB rank → shown first (DescendingOrder)
+        l_score = l_item.data(QtCore.Qt.UserRole + 1) or 0
+        r_score = r_item.data(QtCore.Qt.UserRole + 1) or 0
+        return l_score < r_score
 
     def _calculate_score(self, item, search_text):
         score = 0

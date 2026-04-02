@@ -59,6 +59,19 @@ class EventCardWidget(QtWidgets.QWidget):
         else:
             super().mouseReleaseEvent(event)
     
+    def setSelected(self, selected: bool):
+        base = """
+            EventCardWidget { border:1px solid #3f3f46; border-radius:5px; padding:5px;
+                              background-color:#2d2d30; }
+            EventCardWidget:hover { background-color:#3e3e42; border:1px solid #555558; }
+        """
+        active = """
+            EventCardWidget { border:2px solid #0078d4; border-radius:5px; padding:5px;
+                              background-color:#1e3a5f; }
+            EventCardWidget:hover { background-color:#2a4a6f; border:2px solid #0078d4; }
+        """
+        self.setStyleSheet(active if selected else base)
+
     def keyPressEvent(self, event):
         """Handle keyboard events - emit clicked signal on Enter/Return"""
         if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):

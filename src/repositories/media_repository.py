@@ -12,6 +12,12 @@ def sanitize_str(value):
     return value or ""
 
 
+def _build_prefix_tsquery(query: str) -> str:
+    """Convert a plain query into a prefix tsquery: 'anka pol' → 'anka:* & pol:*'."""
+    words = [w for w in query.strip().split() if w]
+    return ' & '.join(f'{w}:*' for w in words)
+
+
 def _abs(path: str) -> str:
     """Normalize a file path to absolute form."""
     return os.path.normpath(os.path.abspath(path)) if path else path
@@ -166,6 +172,57 @@ class MediaRepository:
                 {"mid": str(media_id)}
             )
             db.commit()
+
+    def search_across_events(self, query: str) -> list[dict]:
+        """PostgreSQL FTS across all IPTC fields + persons. Returns rows with 'rank'.
+        Supports prefix wildcard: 'anka' matches 'ankara', 'pol' matches 'polis', etc.
+        """
+        clean = sanitize_str(query)
+        tsq = _build_prefix_tsquery(clean)
+        with get_db() as db:
+            result = db.execute(text("""
+                WITH person_names AS (
+                    SELECT mp.media_id, STRING_AGG(p.name, ' ') AS names
+                    FROM media_persons mp
+                    JOIN persons p ON mp.person_id = p.id
+                    GROUP BY mp.media_id
+                ),
+                docs AS (
+                    SELECT
+                        m.*,
+                        e.name  AS event_name,
+                        COALESCE(pn.names, '') AS person_names,
+                        to_tsvector('simple',
+                            COALESCE(m.iptc_headline, '')               || ' ' ||
+                            COALESCE(m.iptc_caption, '')                || ' ' ||
+                            COALESCE(m.iptc_keywords, '')               || ' ' ||
+                            COALESCE(m.iptc_object_name, '')            || ' ' ||
+                            COALESCE(m.iptc_city, '')                   || ' ' ||
+                            COALESCE(m.iptc_state, '')                  || ' ' ||
+                            COALESCE(m.iptc_country, '')                || ' ' ||
+                            COALESCE(m.iptc_credit, '')                 || ' ' ||
+                            COALESCE(m.iptc_source, '')                 || ' ' ||
+                            COALESCE(m.iptc_byline, '')                 || ' ' ||
+                            COALESCE(m.iptc_byline_title, '')           || ' ' ||
+                            COALESCE(m.iptc_category, '')               || ' ' ||
+                            COALESCE(m.iptc_writer, '')                 || ' ' ||
+                            COALESCE(m.iptc_copyright, '')              || ' ' ||
+                            COALESCE(m.iptc_supplemental_categories,'') || ' ' ||
+                            COALESCE(pn.names, '')                      || ' ' ||
+                            COALESCE(e.name, '')                        || ' ' ||
+                            COALESCE(m.file_path, '')
+                        ) AS doc
+                    FROM medias m
+                    JOIN events e ON m.event_id = e.id
+                    LEFT JOIN person_names pn ON m.id = pn.media_id
+                )
+                SELECT *,
+                    ts_rank(doc, to_tsquery('simple', :tsq)) AS rank
+                FROM docs
+                WHERE doc @@ to_tsquery('simple', :tsq)
+                ORDER BY rank DESC
+            """), {"tsq": tsq})
+            return [dict(row._mapping) for row in result.fetchall()]
 
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""

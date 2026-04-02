@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 # Background worker — keeps UI responsive during detection
 # ---------------------------------------------------------------------------
 
+class ImageLoaderWorker(QtCore.QThread):
+    """Loads a QImage from disk in a background thread (QImage is thread-safe; QPixmap is not)."""
+
+    loaded = QtCore.Signal(str, QtGui.QImage)  # (path, image)
+
+    def __init__(self, img_path: str, parent=None):
+        super().__init__(parent)
+        self._img_path = img_path
+
+    def run(self):
+        image = QtGui.QImage(self._img_path)
+        self.loaded.emit(self._img_path, image)
+
+
 class FaceDetectionWorker(QtCore.QThread):
     """Runs FaceAnalysisService.detect() in a worker thread."""
 
@@ -86,6 +100,8 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._is_batch_pending  = False
         self._detection_worker: FaceDetectionWorker | None = None
         self._detection_img_path: str | None = None   # path sent to current worker
+        self._image_loader: ImageLoaderWorker | None = None
+        self._source_pixmap: QtGui.QPixmap | None = None
         # Raw FaceResult list from last detection (needed to save to DB)
         self._pending_results: list = []
         self._skip_similarity = False  # set by reset to skip auto-matching
@@ -191,10 +207,11 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._is_batch_pending = is_batch_pending
 
     def set_image(self, img_path: str):
-        """Load image, clear overlay, trigger face detection."""
+        """Load image asynchronously, clear overlay, trigger face detection."""
         self.current_img_path = img_path
         self.face_overlay.clear_faces()
         self._pending_results = []
+        self._source_pixmap = None
 
         if not img_path or not os.path.exists(img_path):
             self.image_label.setText("Resim yüklenemedi.")
@@ -203,8 +220,36 @@ class SingleViewWidget(QtWidgets.QWidget):
             return
 
         self.filename_label.setText(os.path.basename(img_path))
-        self._refresh_pixmap()
 
+        # Stop any in-flight loader for a previous image
+        if self._image_loader and self._image_loader.isRunning():
+            self._image_loader.quit()
+            self._image_loader.wait(200)
+
+        # Show placeholder immediately so the UI feels responsive
+        self.image_label.setText("⏳ Yükleniyor…")
+        self._status_label.setText("")
+
+        self._image_loader = ImageLoaderWorker(img_path, self)
+        self._image_loader.loaded.connect(self._on_image_loaded)
+        self._image_loader.start()
+
+    def _on_image_loaded(self, path: str, image: QtGui.QImage):
+        """Called on the UI thread once the background loader finishes."""
+        if path != self.current_img_path:
+            return  # user switched image before this one finished loading
+
+        if image.isNull():
+            self.image_label.setText("Geçersiz resim dosyası.")
+            return
+
+        # Convert QImage → QPixmap on the UI thread (the only safe place)
+        pixmap = QtGui.QPixmap.fromImage(image)
+        self._source_pixmap = pixmap
+        self.face_overlay.set_source_pixmap(pixmap)
+        self._scale_and_show(pixmap, smooth=True)
+
+        # Now trigger face detection logic
         if self._face_service is None:
             return  # face detection disabled
 
@@ -612,22 +657,20 @@ class SingleViewWidget(QtWidgets.QWidget):
     # Image / layout helpers
     # ------------------------------------------------------------------
 
-    def _refresh_pixmap(self):
-        if not self.current_img_path:
-            return
-        pixmap = QtGui.QPixmap(self.current_img_path)
-        if pixmap.isNull():
-            self.image_label.setText("Geçersiz resim dosyası.")
-            return
-        # Keep full-res pixmap for zoom crops
-        self._source_pixmap = pixmap
-        self.face_overlay.set_source_pixmap(pixmap)
+    def _scale_and_show(self, pixmap: QtGui.QPixmap, smooth: bool = True):
+        """Scale pixmap to fit the container and display it."""
+        mode = QtCore.Qt.SmoothTransformation if smooth else QtCore.Qt.FastTransformation
         scaled = pixmap.scaled(
             self._image_container.size(),
             QtCore.Qt.KeepAspectRatio,
-            QtCore.Qt.SmoothTransformation,
+            mode,
         )
         self.image_label.setPixmap(scaled)
+
+    def _refresh_pixmap(self):
+        """Re-scale the cached source pixmap on resize — never reloads from disk."""
+        if self._source_pixmap and not self._source_pixmap.isNull():
+            self._scale_and_show(self._source_pixmap, smooth=False)
 
     def _get_image_display_rect(self) -> QtCore.QRect:
         """

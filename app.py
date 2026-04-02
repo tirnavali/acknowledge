@@ -20,7 +20,7 @@ from single_view_widget import SingleViewWidget
 from src.services.application_service import ApplicationService
 import os
 
-logging.basicConfig(level=logging.DEBUG, format="%(name)s %(levelname)s: %(message)s")
+logging.basicConfig(level=logging.WARNING, format="%(name)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +70,24 @@ class BatchFaceWorker(QtCore.QThread):
         self.finished.emit()
 
 
+class SearchWorker(QtCore.QThread):
+    """Runs the FTS DB query in the background to avoid freezing the UI."""
+    finished = QtCore.Signal(object, str)   # (list[dict], query_text)
+    error    = QtCore.Signal(str)
+
+    def __init__(self, media_service, query, parent=None):
+        super().__init__(parent)
+        self._media_service = media_service
+        self._query = query
+
+    def run(self):
+        try:
+            records = self._media_service.search_across_events_raw(self._query)
+            self.finished.emit(records, self._query)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -80,6 +98,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.app_service = ApplicationService()
         self._face_detection_queue: list = []   # list of (file_paths, event)
         self._batch_face_worker = None
+        self._search_worker = None              # background FTS worker
+        self._search_mode = False               # True while cross-event search is active
+        self._selected_event_card = None        # currently highlighted EventCardWidget
         self.init_db()
         self.init_vault()
         self.UI()
@@ -279,7 +300,7 @@ class MainWindow(QtWidgets.QMainWindow):
             card.event = event
             # Force width so sizeHint() calculates the correct height for wrapped text
             card.setFixedWidth(184)
-            card.clicked.connect(lambda e=event: self.on_event_card_clicked(e))
+            card.clicked.connect(lambda e=event, c=card: self.on_event_card_clicked(e, c))
             # Get size hint and add a tiny bit of vertical padding to be safe against cropping
             size = card.sizeHint()
             item.setSizeHint(QtCore.QSize(size.width(), size.height() + 4))
@@ -411,12 +432,25 @@ class MainWindow(QtWidgets.QMainWindow):
         queue_info = f" (+{len(self._face_detection_queue)} kuyrukta)" if self._face_detection_queue else ""
         self.statusBar().showMessage(f"🔍 Yüz tanıma: 0/{len(file_paths)}{queue_info}")
     
-    def on_event_card_clicked(self, event):
+    def on_event_card_clicked(self, event, card=None):
         """Handle event card click"""
+        # Deselect previous card, highlight new one
+        if self._selected_event_card:
+            self._selected_event_card.setSelected(False)
+        if card:
+            card.setSelected(True)
+            self._selected_event_card = card
+
         self.switch_to_grid_view()
         self.current_event_id = event.id
 
-        # Show loading state
+        if self._search_mode:
+            # In search mode: just narrow the already-loaded cross-event results by this event
+            self.gallery_search_proxy.setEventFilter(event.id)
+            self._resume_batch_face_detection(event)
+            return
+
+        # Normal mode: load this event's items from disk + DB
         self.gallery_stack.setCurrentIndex(2)  # loading widget
         self.media_details_scroll.setEnabled(False)
         self.media_details_scroll.setStyleSheet(
@@ -428,24 +462,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gallery_item_model = GalleryItemModel(items)
         if hasattr(self, 'gallery_search_proxy'):
             self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.gallery_search_proxy.setEventFilter(None)
             self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
-            # Apply any existing search text
             self.gallery_search_proxy.setFilterText(self.event_gallery_search.text())
         else:
             self.event_gallery_list_widget.setModel(self.gallery_item_model)
 
-        # Trigger background loading (icons & file metadata fallback)
         self.gallery_item_model.start_loading()
-
-        # Resume any interrupted face detection (no-op if all images already processed)
         self._resume_batch_face_detection(event)
 
-        # Restore state
         self.gallery_stack.setCurrentIndex(0)  # grid view
         self.media_details_scroll.setEnabled(True)
         self.media_details_scroll.setStyleSheet(
             "background-color: #252526; border: 1px solid #3f3f46; border-radius: 4px;"
         )
+
+    def _clear_event_card_selection(self):
+        """Deselect all event cards and clear the current event."""
+        self.event_card_list_widget.clearSelection()
+        for i in range(self.event_card_list_widget.count()):
+            w = self.event_card_list_widget.itemWidget(self.event_card_list_widget.item(i))
+            if w:
+                w.setSelected(False)
+        self._selected_event_card = None
+        self.current_event_id = None
+
+    def eventFilter(self, obj, event):
+        if obj is self.event_gallery_search and event.type() == QtCore.QEvent.FocusIn:
+            self._clear_event_card_selection()
+        return super().eventFilter(obj, event)
 
     def show_event_context_menu(self, pos):
         """Show context menu for event card"""
@@ -837,6 +882,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Connect search
         self.event_gallery_search.returnPressed.connect(self.on_gallery_search)
         self.event_gallery_search_btn.clicked.connect(self.on_gallery_search)
+        self.event_gallery_search.installEventFilter(self)
         
         # Connect click event to print EXIF data
         self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
@@ -864,13 +910,72 @@ class MainWindow(QtWidgets.QMainWindow):
             logging.warning(f"Error updating faces: {e}")
 
     def on_gallery_search(self):
-        """Update proxy model with search text to filter and sort the gallery view."""
-        if hasattr(self, 'gallery_search_proxy'):
-            text = self.event_gallery_search.text()
-            date_filter = None
-            if self.event_gallery_date_cb.isChecked():
-                date_filter = self.event_gallery_date.date().toString("yyyyMMdd")
-            self.gallery_search_proxy.setFilterText(text, date_filter)
+        """Search IPTC across all events; narrow by event when user clicks an event card."""
+        if not hasattr(self, 'gallery_search_proxy'):
+            return
+        self._clear_event_card_selection()  # ensure deselected even if called via button
+        text = self.event_gallery_search.text().strip()
+        date_filter = None
+        if self.event_gallery_date_cb.isChecked():
+            date_filter = self.event_gallery_date.date().toString("yyyyMMdd")
+
+        if text:
+            # Show loading screen and kick off background FTS query
+            self._search_mode = True
+            self._pending_search_date_filter = date_filter
+            self._pending_search_text = text
+            self.gallery_stack.setCurrentIndex(2)  # loading widget
+
+            # Cancel any previous search still running
+            if self._search_worker and self._search_worker.isRunning():
+                self._search_worker.finished.disconnect()
+                self._search_worker.error.disconnect()
+                self._search_worker.quit()
+
+            self._search_worker = SearchWorker(
+                self.app_service.get_media_service(), text, parent=self
+            )
+            self._search_worker.finished.connect(self._on_search_finished)
+            self._search_worker.error.connect(self._on_search_error)
+            self._search_worker.start()
+        else:
+            # Search cleared: exit search mode and reload current event
+            self._search_mode = False
+            self.gallery_search_proxy.setEventFilter(None)
+            if self.current_event_id:
+                items = self.app_service.get_media_service().get_gallery_items(self.current_event_id)
+                self.gallery_item_model = GalleryItemModel(items)
+                self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+                self.gallery_search_proxy.setFilterText("", date_filter)
+                self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+                self.gallery_item_model.start_loading()
+            else:
+                self.gallery_search_proxy.setFilterText("", date_filter)
+
+    def _on_search_finished(self, records, query_text):
+        """Called on the main thread when the background FTS query completes."""
+        # Ignore stale results if the user already typed something else
+        if query_text != self._pending_search_text:
+            return
+        from gallery_item_model import GalleryItem
+        items = [
+            GalleryItem(os.path.basename(r['file_path']), r['file_path'], in_db=True, db_metadata=r)
+            for r in records
+            if r.get('file_path') and os.path.exists(r['file_path'])
+        ]
+        date_filter = self._pending_search_date_filter
+        self.gallery_item_model = GalleryItemModel(items)
+        self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+        self.gallery_search_proxy.setEventFilter(None)
+        self.gallery_search_proxy.setFilterText(query_text, date_filter)
+        self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+        self.gallery_item_model.start_loading()
+        self.gallery_stack.setCurrentIndex(0)
+        self.statusBar().showMessage(f"🔍 {len(items)} sonuç bulundu.", 4000)
+
+    def _on_search_error(self, message):
+        self.gallery_stack.setCurrentIndex(0)
+        self.statusBar().showMessage(f"❌ Arama hatası: {message}", 6000)
 
     def media_details_form_widget(self):
         """Create form fields for media details"""
