@@ -122,6 +122,15 @@ class PersonRepository:
             """), {"media_id": str(media_id), "person_id": str(person_id)})
             db.commit()
 
+    def delete(self, person_id: UUID) -> None:
+        """Delete a person. CASCADE removes media_persons links automatically."""
+        with get_db() as db:
+            db.execute(
+                text("DELETE FROM persons WHERE id = :pid"),
+                {"pid": str(person_id)}
+            )
+            db.commit()
+
     def get_persons_for_media(self, media_id: UUID) -> list[str]:
         """Get all person names linked to a media."""
         with get_db() as db:

@@ -857,6 +857,12 @@ class MainWindow(QtWidgets.QMainWindow):
         refresh_btn.setFixedHeight(30)
         refresh_btn.clicked.connect(self._load_persons_table)
         top_bar.addWidget(refresh_btn)
+
+        delete_btn = QtWidgets.QPushButton("Kişi Sil")
+        delete_btn.setFixedHeight(30)
+        delete_btn.setStyleSheet("QPushButton { color: #c0392b; } QPushButton:hover { background-color: #c0392b; color: white; }")
+        delete_btn.clicked.connect(self._delete_selected_person)
+        top_bar.addWidget(delete_btn)
         layout.addLayout(top_bar)
 
         # Table
@@ -876,10 +882,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persons_table.verticalHeader().setVisible(False)
         self._persons_table.setSortingEnabled(True)
         self._persons_table.setCursor(QtCore.Qt.PointingHandCursor)
-        self._persons_table.cellClicked.connect(self._on_person_row_clicked)
+        self._persons_table.cellDoubleClicked.connect(self._on_person_row_clicked)
         layout.addWidget(self._persons_table)
 
-        hint = QtWidgets.QLabel("Bir satıra tıklayarak o kişiye ait fotoğrafları Etkinlikler sekmesinde görüntüleyin.")
+        hint = QtWidgets.QLabel("Bir satıra çift tıklayarak o kişiye ait fotoğrafları Etkinlikler sekmesinde görüntüleyin.")
         hint.setStyleSheet("color: #888; font-size: 10px;")
         layout.addWidget(hint)
 
@@ -908,6 +914,36 @@ class MainWindow(QtWidgets.QMainWindow):
             item = self._persons_table.item(row, 0)
             visible = text in (item.text().lower() if item else "")
             self._persons_table.setRowHidden(row, not visible)
+
+    def _delete_selected_person(self):
+        selected = self._persons_table.selectedItems()
+        if not selected:
+            QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen silmek istediğiniz kişiyi seçin.")
+            return
+
+        row = self._persons_table.currentRow()
+        name_item = self._persons_table.item(row, 0)
+        if not name_item:
+            return
+
+        name = name_item.text()
+        person_id = name_item.data(QtCore.Qt.UserRole)
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Kişi Sil",
+            f'"{name}" adlı kişiyi silmek istediğinizden emin misiniz?\nFotoğraflardaki bağlantılar da kaldırılacaktır.',
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            self.app_service.get_person_service().delete(person_id)
+            self._load_persons_table()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Hata", f"Kişi silinemedi: {e}")
 
     def layouts(self):
         self.events_layout = QtWidgets.QHBoxLayout()
