@@ -23,6 +23,14 @@ class EventService(BaseService):
             self.logger.error(f"Error getting all events: {e}")
             raise
     
+    def search_by_name(self, query: str) -> list[Event]:
+        """Search events by name."""
+        try:
+            return self.event_repository.search_by_name(query)
+        except Exception as e:
+            self.logger.error(f"Error searching events by name '{query}': {e}")
+            raise
+    
     def get_by_id(self, event_id):
         """Get event by ID."""
         try:

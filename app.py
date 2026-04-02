@@ -261,11 +261,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.add_event.triggered.connect(self.add_event_window)
         self.toolbar_widget.addAction(self.add_event)
 
-        self.toolbar_widget.addAction("Yeni Medya")
-        self.toolbar_widget.addAction("Open")
-        self.toolbar_widget.addAction("Save")
-        self.toolbar_widget.addAction("Save As")
-        self.toolbar_widget.addAction("Exit")
+        self.toolbar_widget.addAction("Çıkış")
         self.toolbar_widget.show()
 
     def add_event_window(self):
@@ -290,9 +286,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def fetch_events(self):
         return self.app_service.get_event_service().get_all()
     
-    def load_events(self):
-        """Load events from database and populate the list widget"""
-        events = self.fetch_events()
+    def load_events(self, events=None):
+        """Load events from database or provided list and populate the list widget"""
+        if events is None:
+            events = self.fetch_events()
+            
         for event in events:
             item = QtWidgets.QListWidgetItem(self.event_card_list_widget)
             card = EventCardWidget(event.name, event.event_date)
@@ -316,6 +314,25 @@ class MainWindow(QtWidgets.QMainWindow):
         """Clear and reload the event list"""
         self.event_card_list_widget.clear()
         self.load_events()
+
+    def on_event_search_entered(self):
+        """Handle search by name for events."""
+        query = self.event_search.text().strip()
+        self.event_card_list_widget.clear()
+        
+        if not query:
+            self.load_events()
+            return
+            
+        try:
+            results = self.app_service.get_event_service().search_by_name(query)
+            if results:
+                self.load_events(results)
+                self.statusBar().showMessage(f"🔍 '{query}' için {len(results)} sonuç bulundu.", 3000)
+            else:
+                self.statusBar().showMessage(f"❌ '{query}' için sonuç bulunamadı.", 3000)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Arama Hatası", f"Etkinlik araması sırasında hata oluştu: {e}")
 
     # ------------------------------------------------------------------
     # Background batch face detection
@@ -812,6 +829,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Context menu setup
         self.event_card_list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.event_card_list_widget.customContextMenuRequested.connect(self.show_event_context_menu)
+        
+        # Search functionality
+        self.event_search.returnPressed.connect(self.on_event_search_entered)
         
         # Load events into the list
         self.load_events()
