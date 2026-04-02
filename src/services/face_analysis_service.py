@@ -30,6 +30,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
+BLUR_THRESHOLD = 20.0  # Variance of Laplacian; only truly unrecognizable blobs are skipped
+
+
+def _variance_of_laplacian(gray_img) -> float:
+    """Return the Laplacian variance of a grayscale image crop (blur metric)."""
+    import cv2
+    return cv2.Laplacian(gray_img, cv2.CV_64F).var()
+
 
 @dataclass
 class FaceResult:
@@ -101,14 +109,33 @@ class FaceAnalysisService:
 
         results = []
         for face in faces:
+            import cv2
             bbox = face.bbox.astype(float)
             x1, y1, x2, y2 = bbox
+
+            # Guard: clamp to image bounds and skip empty/degenerate crops
+            ix1 = max(0, int(x1))
+            iy1 = max(0, int(y1))
+            ix2 = min(w, int(x2))
+            iy2 = min(h, int(y2))
+            if ix2 <= ix1 or iy2 <= iy1:
+                logger.debug("Skipping face: empty crop after clamping bbox to image bounds.")
+                continue
+
+            # Blur gatekeeper: skip faces with no discernible structure (very low threshold)
+            crop = img[iy1:iy2, ix1:ix2]
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            blur_score = _variance_of_laplacian(gray)
+            if blur_score < BLUR_THRESHOLD:
+                logger.debug(f"Skipping face: too blurry. Score: {blur_score:.2f} (threshold={BLUR_THRESHOLD})")
+                continue
+
             results.append(FaceResult(
                 x1=max(0.0, x1 / w),
                 y1=max(0.0, y1 / h),
                 x2=min(1.0, x2 / w),
                 y2=min(1.0, y2 / h),
-                embedding=face.embedding,  # shape (512,)
+                embedding=face.embedding,
                 score=float(face.det_score),
             ))
 

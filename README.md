@@ -6,9 +6,10 @@ A desktop application designed for managing, searching, and recognizing faces in
 
 - **Media Management**: Import and organize photos into events and vaults.
 - **Embedded Metadata**: Read and write IPTC metadata directly into image files (Headline, Caption, Keywords, Credit, Source, etc.).
-- **Face Detection & Recognition**: 
-  - Uses **MediaPipe** for lightning-fast face detection.
-  - Extracts 512-dimensional facial embeddings using a lightweight **ArcFace ONNX model**.
+- **Face Detection & Recognition**:
+  - Uses **InsightFace (buffalo_l)** for face detection and 512-dimensional ArcFace embedding extraction.
+  - Applies a **Variance of the Laplacian** blur filter before saving — completely unrecognizable faces
+    (score < 20.0) are skipped to keep the pgvector index clean. Slightly blurry faces still pass through.
   - Stores vectors in PostgreSQL using the `pgvector` extension for rapid similarity search and auto-tagging.
 - **Database synchronization**: Seamlessly syncs manual file metadata blocks with the robust PostgreSQL backend.
 
