@@ -1,6 +1,7 @@
+import os
 import sys
 from sqlalchemy import text
-from src.database import engine, Base, SessionLocal
+from src.database import engine, Base, SessionLocal, get_db
 # Modelleri import etmezseniz tablolar oluşmaz!
 from src.models import Event, Media, Photo, Video, Pdf 
 
@@ -32,7 +33,48 @@ def init_db():
         print("🏗️  Yeni tablolar oluşturuluyor...")
         Base.metadata.create_all(bind=engine)
         print("✅ Başarılı! 'events' ve 'medias' tabloları oluşturuldu.")
-        
+
+        # Add face_detected_at column to existing databases
+        with SessionLocal() as db:
+            db.execute(text(
+                "ALTER TABLE medias ADD COLUMN IF NOT EXISTS face_detected_at TIMESTAMPTZ"
+            ))
+            db.execute(text(
+                "ALTER TABLE face_detections ADD COLUMN IF NOT EXISTS person_cleared BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            db.commit()
+            print("✅ 'face_detected_at' ve 'person_cleared' kolonları eklendi (veya zaten vardı).")
+
+        # Migrate relative file_path values to absolute
+        with get_db() as db:
+            rows = db.execute(text("SELECT id, file_path FROM medias")).fetchall()
+            # Build a set of all existing absolute paths for collision detection
+            existing_abs = {
+                os.path.normpath(os.path.abspath(r.file_path))
+                for r in rows if r.file_path and os.path.isabs(r.file_path)
+            }
+            migrated = deleted = 0
+            for row in rows:
+                fp = row.file_path or ""
+                if fp and not os.path.isabs(fp):
+                    abs_fp = os.path.normpath(os.path.abspath(fp))
+                    if abs_fp in existing_abs:
+                        # An absolute-path record already exists — remove the relative duplicate
+                        db.execute(
+                            text("DELETE FROM medias WHERE id = :id"),
+                            {"id": str(row.id)}
+                        )
+                        deleted += 1
+                    else:
+                        db.execute(
+                            text("UPDATE medias SET file_path = :p WHERE id = :id"),
+                            {"p": abs_fp, "id": str(row.id)}
+                        )
+                        existing_abs.add(abs_fp)
+                        migrated += 1
+            db.commit()
+            print(f"✅ {migrated} kayıt mutlak yola dönüştürüldü, {deleted} yinelenen kayıt silindi.")
+
     except Exception as e:
         print(f"❌ HATA: Veritabanına bağlanılamadı.\nDetay: {e}")
         print("İpucu: Docker çalışıyor mu? .env dosyasındaki şifreler doğru mu?")

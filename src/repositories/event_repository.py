@@ -37,8 +37,18 @@ class EventRepository:
             return None
 
     def delete(self, event_id: UUID) -> None:
-        """Delete an event and all its associated data via cascade."""
+        """Delete an event and all its associated data."""
         with get_db() as db:
+            # Delete child rows explicitly — DB-level CASCADE may not exist on older schemas
+            db.execute(text("""
+                DELETE FROM face_detections
+                WHERE media_id IN (SELECT id FROM medias WHERE event_id = :id)
+            """), {"id": str(event_id)})
+            db.execute(text("""
+                DELETE FROM media_persons
+                WHERE media_id IN (SELECT id FROM medias WHERE event_id = :id)
+            """), {"id": str(event_id)})
+            db.execute(text("DELETE FROM medias WHERE event_id = :id"), {"id": str(event_id)})
             db.execute(text("DELETE FROM events WHERE id = :id"), {"id": str(event_id)})
             db.commit()
 

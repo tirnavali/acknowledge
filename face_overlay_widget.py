@@ -85,8 +85,9 @@ class FaceZoomPopup(QtWidgets.QDialog):
     """
 
     # Forwarded signals
-    face_named = QtCore.Signal(int, str)   # (face_index, name)
-    face_reset = QtCore.Signal(int)        # (face_index)
+    face_named   = QtCore.Signal(int, str)  # (face_index, name)
+    face_reset   = QtCore.Signal(int)       # (face_index) — re-detect all faces
+    face_cleared = QtCore.Signal(int)       # (face_index) — clear this face's person only
 
     def __init__(
         self,
@@ -139,10 +140,32 @@ class FaceZoomPopup(QtWidgets.QDialog):
             self._name_edit.setCompleter(ContainsCompleter(person_names, self._name_edit))
         row.addWidget(self._name_edit)
 
-        # Reset button
+        # Clear button — removes only this face's person assignment
+        clear_btn = QtWidgets.QPushButton("✕")
+        clear_btn.setFixedSize(28, 28)
+        clear_btn.setToolTip("Sadece bu yüzün kişi atamasını temizle")
+        clear_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(180, 120, 0, 180);
+                color: white;
+                border: 1px solid rgba(255,180,0,200);
+                border-radius: 4px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background: rgba(220, 150, 0, 220);
+            }
+        """)
+        clear_btn.clicked.connect(self._on_clear)
+        row.addWidget(clear_btn)
+
+        # Reset button — deletes all faces and re-detects
         reset_btn = QtWidgets.QPushButton("🔄")
         reset_btn.setFixedSize(28, 28)
-        reset_btn.setToolTip("Etiketi sil ve yeniden algıla")
+        reset_btn.setToolTip("Tüm yüzleri sil ve yeniden algıla")
         reset_btn.setCursor(QtCore.Qt.PointingHandCursor)
         reset_btn.setStyleSheet("""
             QPushButton {
@@ -220,6 +243,10 @@ class FaceZoomPopup(QtWidgets.QDialog):
             self.face_named.emit(self._face_index, name)
         self.close()
 
+    def _on_clear(self) -> None:
+        self.face_cleared.emit(self._face_index)
+        self.close()
+
     def _on_reset(self) -> None:
         self.face_reset.emit(self._face_index)
         self.close()
@@ -249,9 +276,11 @@ class FaceOverlayWidget(QtWidgets.QWidget):
     """
 
     # Emitted when user types a name and presses Enter in the zoom popup
-    face_named = QtCore.Signal(int, str)
-    # Emitted when user clicks the reset button in the zoom popup
-    face_reset = QtCore.Signal(int)
+    face_named   = QtCore.Signal(int, str)
+    # Emitted when user clicks the reset button (re-detect all)
+    face_reset   = QtCore.Signal(int)
+    # Emitted when user clicks the clear button (clear this face's person only)
+    face_cleared = QtCore.Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -368,6 +397,7 @@ class FaceOverlayWidget(QtWidgets.QWidget):
         )
         popup.face_named.connect(self.face_named)
         popup.face_reset.connect(self.face_reset)
+        popup.face_cleared.connect(self.face_cleared)
 
         # Position near the click, but keep on screen
         screen = QtWidgets.QApplication.screenAt(global_pos)

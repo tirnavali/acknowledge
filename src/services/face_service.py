@@ -118,6 +118,14 @@ class FaceService(BaseService):
             self.logger.error(f"Error deleting faces for media {media_id}: {e}")
             raise
 
+    def clear_person_for_face(self, face_id):
+        """Clear person assignment from a single face detection row."""
+        try:
+            return self.face_repository.clear_person_for_face(face_id)
+        except Exception as e:
+            self.logger.error(f"Error clearing person for face {face_id}: {e}")
+            raise
+
     def find_similar_person(self, embedding) -> tuple:
         """Find closest matching person for a face embedding via pgvector similarity."""
         try:

@@ -126,6 +126,22 @@ class MediaService(BaseService):
             self.logger.error(f"Error getting IPTC data for media {media_id}: {e}")
             raise
 
+    def get_all_for_event(self, event_id):
+        """Return all media records for a given event."""
+        try:
+            return self.media_repository.get_all_for_event(event_id)
+        except Exception as e:
+            self.logger.error(f"Error getting all media for event {event_id}: {e}")
+            raise
+
+    def mark_face_detected(self, media_id):
+        """Mark face detection as completed for a media record."""
+        try:
+            return self.media_repository.mark_face_detected(media_id)
+        except Exception as e:
+            self.logger.error(f"Error marking face detected for media {media_id}: {e}")
+            raise
+
     def get_file_paths_for_event(self, event_id):
         """Get all file paths for a given event."""
         try:

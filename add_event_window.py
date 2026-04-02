@@ -91,6 +91,7 @@ class AddEvent(QtWidgets.QWidget):
                     vault_base_path=self.media_vault_base_path,
                 )
                 QtWidgets.QMessageBox.information(self, "Başarılı", f"Etkinlik oluşturuldu: {event.name}")
+                self.parent()._start_batch_face_detection(event)
                 self.parent().refresh_events()
                 self.close()
             except Exception as e:

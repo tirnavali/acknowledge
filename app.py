@@ -20,6 +20,56 @@ from single_view_widget import SingleViewWidget
 from src.services.application_service import ApplicationService
 import os
 
+logging.basicConfig(level=logging.DEBUG, format="%(name)s %(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+
+class BatchFaceWorker(QtCore.QThread):
+    """Runs face detection + auto-matching on a list of image files in the background."""
+
+    progress        = QtCore.Signal(int, int)   # (current, total)
+    finished        = QtCore.Signal()
+    error           = QtCore.Signal(str)
+    image_processed = QtCore.Signal(str)        # emits file_path when one image is done
+
+    def __init__(self, file_paths, event_id, face_service, media_service, person_service, parent=None):
+        super().__init__(parent)
+        self._file_paths  = file_paths
+        self._event_id    = event_id
+        self._face_svc    = face_service
+        self._media_svc   = media_service
+        self._person_svc  = person_service
+
+    def run(self):
+        total = len(self._file_paths)
+        for i, file_path in enumerate(self._file_paths, 1):
+            try:
+                media_id = self._media_svc.ensure_media_exists(
+                    self._event_id, file_path, "photo"
+                )
+                media_row = self._media_svc.get_by_file_path(file_path)
+                if media_row and media_row.get("face_detected_at"):
+                    self.progress.emit(i, total)
+                    continue
+
+                results = self._face_svc.detect_faces(file_path)
+                saved_ids = self._face_svc.save_faces(media_id, results) if results else []
+
+                for face_result, face_id in zip(results or [], saved_ids):
+                    if face_result.embedding is not None:
+                        pid, _ = self._face_svc.find_similar_person(face_result.embedding)
+                        if pid:
+                            self._face_svc.assign_person(face_id, pid)
+                            self._person_svc.link_to_media(pid, media_id)
+
+                self._media_svc.mark_face_detected(media_id)
+            except Exception as e:
+                logger.warning(f"BatchFaceWorker: error on {file_path}: {e}")
+            self.image_processed.emit(file_path)
+            self.progress.emit(i, total)
+        self.finished.emit()
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -28,6 +78,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_event_id = None
         self.current_media_id = None
         self.app_service = ApplicationService()
+        self._face_detection_queue: list = []   # list of (file_paths, event)
+        self._batch_face_worker = None
         self.init_db()
         self.init_vault()
         self.UI()
@@ -243,6 +295,121 @@ class MainWindow(QtWidgets.QMainWindow):
         """Clear and reload the event list"""
         self.event_card_list_widget.clear()
         self.load_events()
+
+    # ------------------------------------------------------------------
+    # Background batch face detection
+    # ------------------------------------------------------------------
+
+    def _start_batch_face_detection(self, event):
+        vault_path = event.vault_folder_path
+        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+        file_paths = [
+            os.path.join(vault_path, f)
+            for f in os.listdir(vault_path)
+            if os.path.splitext(f)[1].lower() in image_exts
+        ]
+        if not file_paths:
+            return
+        self._start_batch_face_detection_for_files(file_paths, event)
+
+    def _on_batch_face_progress(self, current, total):
+        self.statusBar().showMessage(f"🔍 Yüz tanıma: {current}/{total}")
+
+    def _on_batch_face_finished(self):
+        if self._face_detection_queue:
+            self._process_next_face_detection()
+        else:
+            self.statusBar().showMessage("✅ Yüz tanıma tamamlandı.", 5000)
+
+    def _on_batch_image_processed(self, file_path: str):
+        """If single view is showing this file, refresh its face overlay from DB."""
+        if self.single_view_widget.current_img_path == file_path:
+            self.single_view_widget.refresh_faces_from_db()
+
+    def _is_batch_pending_for_event(self, event_id) -> bool:
+        """Return True if event_id is currently being processed or is queued."""
+        if self._batch_face_worker and self._batch_face_worker.isRunning():
+            if self._batch_face_worker._event_id == event_id:
+                return True
+        return any(e.id == event_id for _, e in self._face_detection_queue)
+
+    def _resume_batch_face_detection(self, event):
+        """Start batch detection for any images not yet processed in this event.
+
+        Called each time an event is opened so interrupted runs are automatically
+        resumed after an app restart or worker crash.
+        """
+        vault_path = event.vault_folder_path
+        logger.debug(f"_resume_batch_face_detection: event={event.id} vault_path={vault_path!r}")
+        if not vault_path or not os.path.exists(vault_path):
+            logger.debug(f"_resume_batch_face_detection: returning — vault_path missing or not on disk")
+            return
+
+        # Skip if this event is already queued or being processed
+        active_event_ids = {e.id for _, e in self._face_detection_queue}
+        if self._batch_face_worker and self._batch_face_worker.isRunning():
+            active_event_ids.add(getattr(self._batch_face_worker, '_event_id', None))
+        if event.id in active_event_ids:
+            logger.debug(f"_resume_batch_face_detection: returning — event already active")
+            return
+
+        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+        disk_files = {
+            os.path.join(vault_path, f)
+            for f in os.listdir(vault_path)
+            if os.path.splitext(f)[1].lower() in image_exts
+        }
+        logger.debug(f"_resume_batch_face_detection: disk_files={len(disk_files)}")
+        if not disk_files:
+            logger.debug(f"_resume_batch_face_detection: returning — no image files on disk")
+            return
+
+        # Find files that haven't been through face detection yet
+        db_records = self.app_service.get_media_service().get_all_for_event(event.id)
+        processed = {
+            os.path.normpath(r['file_path'])
+            for r in db_records
+            if r.get('face_detected_at')
+        }
+        unprocessed = [f for f in disk_files if os.path.normpath(f) not in processed]
+        logger.debug(f"_resume_batch_face_detection: processed={len(processed)} unprocessed={len(unprocessed)}")
+        if not unprocessed:
+            logger.debug(f"_resume_batch_face_detection: returning — all images already processed")
+            return  # everything already done
+
+        self._start_batch_face_detection_for_files(unprocessed, event)
+
+    def _start_batch_face_detection_for_files(self, file_paths, event):
+        """Enqueue a batch job; start immediately only if no worker is running."""
+        self._face_detection_queue.append((list(file_paths), event))
+        total_queued = sum(len(fp) for fp, _ in self._face_detection_queue)
+        if self._batch_face_worker is None or not self._batch_face_worker.isRunning():
+            self._process_next_face_detection()
+        else:
+            self.statusBar().showMessage(
+                f"🔍 Yüz tanıma kuyruğu: {len(self._face_detection_queue)} etkinlik bekliyor"
+            )
+
+    def _process_next_face_detection(self):
+        """Pop the next job from the queue and start it."""
+        if not self._face_detection_queue:
+            return
+        file_paths, event = self._face_detection_queue.pop(0)
+        svc = self.app_service
+        self._batch_face_worker = BatchFaceWorker(
+            file_paths,
+            event.id,
+            svc.get_face_service(),
+            svc.get_media_service(),
+            svc.get_person_service(),
+            parent=self,
+        )
+        self._batch_face_worker.progress.connect(self._on_batch_face_progress)
+        self._batch_face_worker.finished.connect(self._on_batch_face_finished)
+        self._batch_face_worker.image_processed.connect(self._on_batch_image_processed)
+        self._batch_face_worker.start()
+        queue_info = f" (+{len(self._face_detection_queue)} kuyrukta)" if self._face_detection_queue else ""
+        self.statusBar().showMessage(f"🔍 Yüz tanıma: 0/{len(file_paths)}{queue_info}")
     
     def on_event_card_clicked(self, event):
         """Handle event card click"""
@@ -269,6 +436,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Trigger background loading (icons & file metadata fallback)
         self.gallery_item_model.start_loading()
+
+        # Resume any interrupted face detection (no-op if all images already processed)
+        self._resume_batch_face_detection(event)
 
         # Restore state
         self.gallery_stack.setCurrentIndex(0)  # grid view
@@ -359,7 +529,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.current_media_id = media_id
 
             # Provide context to single view BEFORE set_image (so DB-first works)
-            self.single_view_widget.set_context(self.current_event_id, media_id)
+            face_detected_at = media_row.get('face_detected_at') if media_row else None
+            is_batch_pending = (
+                not face_detected_at
+                and self._is_batch_pending_for_event(self.current_event_id)
+            )
+            self.single_view_widget.set_context(
+                self.current_event_id, media_id,
+                face_detected_at=face_detected_at,
+                is_batch_pending=is_batch_pending,
+            )
             # Update single view image
             self.single_view_widget.set_image(item.img_path)
             

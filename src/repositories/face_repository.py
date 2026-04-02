@@ -57,10 +57,10 @@ class FaceRepository:
         return ids
 
     def assign_person(self, face_id: UUID, person_id: UUID) -> None:
-        """Link a face detection to a known person."""
+        """Link a face detection to a known person and clear the cleared flag."""
         with get_db() as db:
             db.execute(text("""
-                UPDATE face_detections SET person_id = :person_id WHERE id = :face_id
+                UPDATE face_detections SET person_id = :person_id, person_cleared = FALSE WHERE id = :face_id
             """), {"person_id": str(person_id), "face_id": str(face_id)})
             db.commit()
 
@@ -70,6 +70,15 @@ class FaceRepository:
             db.execute(
                 text("DELETE FROM face_detections WHERE media_id = :mid"),
                 {"mid": str(media_id)}
+            )
+            db.commit()
+
+    def clear_person_for_face(self, face_id: UUID) -> None:
+        """Set person_id = NULL and person_cleared = TRUE for a single face detection row."""
+        with get_db() as db:
+            db.execute(
+                text("UPDATE face_detections SET person_id = NULL, person_cleared = TRUE WHERE id = :fid"),
+                {"fid": str(face_id)}
             )
             db.commit()
 
@@ -86,7 +95,8 @@ class FaceRepository:
         """
         with get_db() as db:
             result = db.execute(text("""
-                SELECT fd.id, fd.bbox, fd.embedding::text, fd.person_id, p.name as person_name
+                SELECT fd.id, fd.bbox, fd.embedding::text, fd.person_id, fd.person_cleared,
+                       p.name as person_name
                 FROM face_detections fd
                 LEFT JOIN persons p ON fd.person_id = p.id
                 WHERE fd.media_id = :mid

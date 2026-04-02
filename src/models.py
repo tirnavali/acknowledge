@@ -64,6 +64,7 @@ class Media(Base):
     technical_metadata = Column(JSONB, nullable=True)
     text_content = Column(Text, nullable=True)
     face_encoding = Column(Vector(128), nullable=True)
+    face_detected_at = Column(DateTime(timezone=True), nullable=True)
 
     # IPTC Metadata Columns
     iptc_headline = Column(String(500), nullable=True)

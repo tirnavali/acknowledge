@@ -82,6 +82,8 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.current_img_path   = None
         self._current_media_id  = None
         self._current_event_id  = None
+        self._face_detected_at  = None
+        self._is_batch_pending  = False
         self._detection_worker: FaceDetectionWorker | None = None
         self._detection_img_path: str | None = None   # path sent to current worker
         # Raw FaceResult list from last detection (needed to save to DB)
@@ -159,6 +161,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
         self.face_overlay.face_named.connect(self._on_face_named)
         self.face_overlay.face_reset.connect(self._on_face_reset)
+        self.face_overlay.face_cleared.connect(self._on_face_cleared)
         self.face_overlay.hide()
 
         # Scroll area wraps the container
@@ -180,10 +183,12 @@ class SingleViewWidget(QtWidgets.QWidget):
     # Public API
     # ------------------------------------------------------------------
 
-    def set_context(self, event_id, media_id=None):
+    def set_context(self, event_id, media_id=None, face_detected_at=None, is_batch_pending=False):
         """Call from MainWindow to provide DB context for this image."""
         self._current_event_id = event_id
         self._current_media_id = media_id
+        self._face_detected_at = face_detected_at
+        self._is_batch_pending = is_batch_pending
 
     def set_image(self, img_path: str):
         """Load image, clear overlay, trigger face detection."""
@@ -203,23 +208,57 @@ class SingleViewWidget(QtWidgets.QWidget):
         if self._face_service is None:
             return  # face detection disabled
 
-        # Try DB-first: if LABELLED detections exist, skip re-running model
+        # DB-first: if background worker already processed this media, load from DB and skip re-detection
+        if self._current_media_id and self._face_detected_at and self._face_service:
+            try:
+                db_faces = self._face_service.get_faces_for_media(self._current_media_id)
+                if db_faces:
+                    self._auto_match_db_faces(db_faces)
+                    self._show_db_faces(db_faces)
+                    self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
+                else:
+                    self._status_label.setText("Yüz algılanamadı.")
+                return
+            except Exception as e:
+                logger.warning(f"Could not get faces from DB: {e}")
+
+        # Batch worker is still running for this image → wait, don't duplicate detection
+        if self._is_batch_pending and not self._face_detected_at:
+            self._status_label.setText("⏳ Yüz tanıma bekleniyor…")
+            return
+
+        # Fallback: check for named detections (older records without face_detected_at)
         if self._current_media_id and self._face_service:
             try:
                 db_faces = self._face_service.get_faces_for_media(self._current_media_id)
-                # Only use DB data if at least one face has a name assigned
                 has_named = any(f.get("person_name") for f in db_faces)
                 if db_faces and has_named:
+                    self._auto_match_db_faces(db_faces)
                     self._show_db_faces(db_faces)
                     self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
                     return
             except Exception as e:
                 logger.warning(f"Could not get faces from DB: {e}")
-                # Fall back to detection if DB access fails
 
         # No DB data → run detector
         self._status_label.setText("🔍 Yüzler algılanıyor…")
         self._start_detection(img_path)
+
+    def refresh_faces_from_db(self):
+        """Re-fetch face detections from DB and update the overlay. Called after batch worker finishes."""
+        if not self._current_media_id or not self._face_service:
+            return
+        try:
+            db_faces = self._face_service.get_faces_for_media(self._current_media_id)
+            if db_faces:
+                self._auto_match_db_faces(db_faces)
+                self._show_db_faces(db_faces)
+                self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
+            else:
+                self._status_label.setText("Yüz algılanamadı.")
+            self._is_batch_pending = False
+        except Exception as e:
+            logger.warning(f"refresh_faces_from_db failed: {e}")
 
     # ------------------------------------------------------------------
     # Detection pipeline
@@ -297,6 +336,13 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay.show()
         self.face_overlay.raise_()
 
+        # Mark so batch worker skips this image later
+        if self._current_media_id and self._media_service:
+            try:
+                self._media_service.mark_face_detected(self._current_media_id)
+            except Exception as e:
+                logger.warning(f"mark_face_detected failed: {e}")
+
         # Emit signal to inform main app that automatic matches might have updated the persons in this media
         if any(fd["person_name"] for fd in face_dicts):
             self.facesChanged.emit()
@@ -315,6 +361,40 @@ class SingleViewWidget(QtWidgets.QWidget):
             self.face_overlay.set_person_names(names)
         except Exception as e:
             logger.warning(f"Could not refresh person names: {e}")
+
+    def _auto_match_db_faces(self, db_faces: list[dict]) -> None:
+        """For each DB face with no person assigned, attempt similarity match and persist."""
+        if not self._face_service:
+            return
+        import numpy as np
+        import json as _json
+        matched = 0
+        for face in db_faces:
+            if face.get("person_name") or face.get("person_id"):
+                continue  # already assigned
+            if face.get("person_cleared"):
+                continue  # user intentionally cleared this face — do not re-match
+            raw_emb = face.get("embedding")
+            if not raw_emb:
+                continue
+            try:
+                arr = np.array(_json.loads(str(raw_emb)), dtype=np.float32)
+                pid, pname = self._face_service.find_similar_person(arr)
+                if pid and pname:
+                    face["person_name"] = pname
+                    face_id = face.get("id")
+                    if face_id:
+                        self._face_service.assign_person(UUID(str(face_id)), pid)
+                    if self._current_media_id and self._person_service:
+                        self._person_service.link_to_media(pid, self._current_media_id)
+                    matched += 1
+            except Exception as e:
+                logger.warning(f"_auto_match_db_faces: failed for face {face.get('id')}: {e}")
+        if matched:
+            self._status_label.setText(
+                f"🗃️ {len(db_faces)} yüz yüklendi, {matched} kişi eşleşti"
+            )
+            self.facesChanged.emit()
 
     def _show_db_faces(self, db_faces: list[dict]):
         """Render faces loaded from the database (skip detection)."""
@@ -453,6 +533,56 @@ class SingleViewWidget(QtWidgets.QWidget):
 
         self.face_overlay.update_person_name(face_index, name)
         self._status_label.setText(f"✅ '{name}' {action}.")
+        self.facesChanged.emit()
+
+    def _on_face_cleared(self, face_index: int):
+        """Clear the person assignment for a single face without re-detecting anything."""
+        if face_index >= len(self.face_overlay._faces):
+            return
+
+        face_info = self.face_overlay._faces[face_index]
+        face_id = face_info.get("face_id")
+
+        if not face_id:
+            return  # face not saved to DB yet — nothing to clear
+
+        # Find the old person_id so we can unlink from media_persons if needed
+        old_person_id = None
+        if self._current_media_id and self._face_service:
+            try:
+                all_faces = self._face_service.get_faces_for_media(self._current_media_id)
+                for f in all_faces:
+                    if str(f.get("id")) == str(face_id):
+                        old_person_id = f.get("person_id")
+                        break
+            except Exception as e:
+                logger.warning(f"_on_face_cleared: could not fetch faces: {e}")
+
+        # Clear person_id on just this face row
+        if self._face_service:
+            try:
+                self._face_service.clear_person_for_face(UUID(str(face_id)))
+            except Exception as e:
+                logger.warning(f"clear_person_for_face failed: {e}")
+                return
+
+        # Unlink the person from media_persons if no other face in this media still uses them
+        if old_person_id and self._current_media_id and self._person_service:
+            try:
+                all_faces = self._face_service.get_faces_for_media(self._current_media_id)
+                still_linked = any(
+                    str(f.get("id")) != str(face_id)
+                    and str(f.get("person_id") or "") == str(old_person_id)
+                    for f in all_faces
+                )
+                if not still_linked:
+                    self._person_service.unlink_from_media(UUID(str(old_person_id)), self._current_media_id)
+            except Exception as e:
+                logger.warning(f"_on_face_cleared: unlink_from_media failed: {e}")
+
+        # Update only this face's badge in the overlay
+        self.face_overlay.update_person_name(face_index, "")
+        self._status_label.setText("✕ Yüz etiketi temizlendi.")
         self.facesChanged.emit()
 
     def _on_face_reset(self, face_index: int):

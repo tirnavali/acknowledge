@@ -1,4 +1,5 @@
 # src/repositories/media_repository.py
+import os
 from uuid import UUID
 from src.database import get_db
 from sqlalchemy import text
@@ -11,13 +12,18 @@ def sanitize_str(value):
     return value or ""
 
 
+def _abs(path: str) -> str:
+    """Normalize a file path to absolute form."""
+    return os.path.normpath(os.path.abspath(path)) if path else path
+
+
 class MediaRepository:
     def get_by_file_path(self, file_path: str) -> dict | None:
         """Find a media record by its file_path."""
         with get_db() as db:
             result = db.execute(
                 text("SELECT * FROM medias WHERE file_path = :file_path"),
-                {"file_path": sanitize_str(file_path)}
+                {"file_path": _abs(sanitize_str(file_path))}
             )
             row = result.fetchone()
             if row:
@@ -105,7 +111,7 @@ class MediaRepository:
 
     def ensure_media_exists(self, event_id: UUID, file_path: str, media_type: str = "photo") -> UUID:
         """Ensure a media record exists for the given file_path. Returns the media_id."""
-        clean_path = sanitize_str(file_path)
+        clean_path = _abs(sanitize_str(file_path))
         with get_db() as db:
             # Check if it already exists
             result = db.execute(
@@ -151,6 +157,15 @@ class MediaRepository:
                 ORDER BY m.file_path
             """), {"person_id": str(person_id)})
             return [dict(row._mapping) for row in result.fetchall()]
+
+    def mark_face_detected(self, media_id: UUID) -> None:
+        """Set face_detected_at = now for a media record."""
+        with get_db() as db:
+            db.execute(
+                text("UPDATE medias SET face_detected_at = now() WHERE id = :mid"),
+                {"mid": str(media_id)}
+            )
+            db.commit()
 
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""
