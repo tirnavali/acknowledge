@@ -18,6 +18,7 @@ from src.repositories.face_repository import FaceRepository
 from src.services.face_service import FaceAnalysisService
 from single_view_widget import SingleViewWidget
 from src.services.application_service import ApplicationService
+from caption_tab_widget import CaptionTabWidget
 import os
 
 logging.basicConfig(level=logging.WARNING, format="%(name)s %(levelname)s: %(message)s")
@@ -136,6 +137,18 @@ class MainWindow(QtWidgets.QMainWindow):
             Base.metadata.create_all(bind=engine)
         
             # Add IPTC columns to existing medias table (create_all doesn't add columns to existing tables)
+            caption_columns = [
+                ("tags_en", "TEXT"),
+                ("tags_tr", "TEXT"),
+            ]
+            with get_db() as db:
+                for col_name, col_type in caption_columns:
+                    try:
+                        db.execute(text(f"ALTER TABLE medias ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                    except Exception:
+                        pass
+                db.commit()
+
             iptc_columns = [
                 ("iptc_headline", "VARCHAR(500)"),
                 ("iptc_caption", "TEXT"),
@@ -279,6 +292,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.settings_tab = QtWidgets.QWidget()
         self.tab_widget.addTab(self.settings_tab, "Ayarlar")
+
+        self.caption_tab = CaptionTabWidget(
+            caption_service=self.app_service.get_caption_service(),
+            media_service=self.app_service.get_media_service(),
+            parent=self,
+        )
+        self.tab_widget.addTab(self.caption_tab, "Altyazı")
 
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.show()

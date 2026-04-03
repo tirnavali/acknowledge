@@ -61,6 +61,8 @@ class Media(Base):
     
     caption_tr = Column(Text, nullable=True)
     caption_en = Column(Text, nullable=True)
+    tags_en = Column(Text, nullable=True)   # comma-separated English tags
+    tags_tr = Column(Text, nullable=True)   # comma-separated Turkish tags
     technical_metadata = Column(JSONB, nullable=True)
     text_content = Column(Text, nullable=True)
     face_encoding = Column(Vector(128), nullable=True)

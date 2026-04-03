@@ -178,6 +178,14 @@ class MediaService(BaseService):
             self.logger.error(f"Error in raw search for '{query}': {e}")
             raise
 
+    def save_captions(self, media_id, result) -> None:
+        """Save caption and tag fields to the database."""
+        try:
+            self.media_repository.save_captions(media_id, result)
+        except Exception as e:
+            self.logger.error(f"Error saving captions for media {media_id}: {e}")
+            raise
+
     def get_gallery_items_for_person(self, person_id):
         """Get GalleryItems for all media linked to a person."""
         try:

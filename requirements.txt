@@ -4,3 +4,8 @@ python-dotenv>=1.0.0
 iptcinfo3>=2.0.0
 mediapipe
 onnxruntime
+# AI captioning — for CUDA, install torch first from https://pytorch.org with the correct CUDA version
+torch>=2.1.0
+transformers>=4.40.0
+accelerate>=0.28.0
+qwen-vl-utils>=0.0.8

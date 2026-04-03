@@ -42,8 +42,10 @@ def init_db():
             db.execute(text(
                 "ALTER TABLE face_detections ADD COLUMN IF NOT EXISTS person_cleared BOOLEAN NOT NULL DEFAULT FALSE"
             ))
+            db.execute(text("ALTER TABLE medias ADD COLUMN IF NOT EXISTS tags_en TEXT"))
+            db.execute(text("ALTER TABLE medias ADD COLUMN IF NOT EXISTS tags_tr TEXT"))
             db.commit()
-            print("✅ 'face_detected_at' ve 'person_cleared' kolonları eklendi (veya zaten vardı).")
+            print("✅ 'face_detected_at', 'person_cleared', 'tags_en', 'tags_tr' kolonları eklendi (veya zaten vardı).")
 
         # Migrate relative file_path values to absolute
         with get_db() as db:

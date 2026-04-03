@@ -115,6 +115,23 @@ class MediaRepository:
             })
             db.commit()
 
+    def save_captions(self, media_id: UUID, result: "CaptionResult") -> None:
+        """Update caption and tag fields for a media record."""
+        with get_db() as db:
+            db.execute(text("""
+                UPDATE medias
+                SET caption_en = :caption_en, caption_tr = :caption_tr,
+                    tags_en    = :tags_en,    tags_tr    = :tags_tr
+                WHERE id = :media_id
+            """), {
+                "media_id": str(media_id),
+                "caption_en": sanitize_str(result.caption_en),
+                "caption_tr": sanitize_str(result.caption_tr),
+                "tags_en":    sanitize_str(result.tags_en),
+                "tags_tr":    sanitize_str(result.tags_tr),
+            })
+            db.commit()
+
     def ensure_media_exists(self, event_id: UUID, file_path: str, media_type: str = "photo") -> UUID:
         """Ensure a media record exists for the given file_path. Returns the media_id."""
         clean_path = _abs(sanitize_str(file_path))

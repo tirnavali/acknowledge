@@ -4,6 +4,7 @@ import logging
 from src.services.event_service import EventService
 from src.services.media_service import MediaService
 from src.services.face_service import FaceService
+from src.services.caption_service import CaptionService
 from src.services.person_service import PersonService
 from src.repositories.event_repository import EventRepository
 from src.repositories.media_repository import MediaRepository
@@ -30,7 +31,8 @@ class ApplicationService:
         self.media_service = MediaService(self.media_repo, self.event_repo)
         self.face_service = FaceService(self.face_repo, self.person_repo)
         self.person_service = PersonService(self.person_repo)
-        
+        self.caption_service = CaptionService()   # singleton, model loads lazily
+
         self.logger.info("Application services initialized successfully")
     
     def get_event_service(self):
@@ -49,6 +51,9 @@ class ApplicationService:
         """Get person service."""
         return self.person_service
     
+    def get_caption_service(self) -> CaptionService:
+        return self.caption_service
+
     def initialize_application(self):
         """Initialize the application."""
         self.logger.info("Initializing application...")
