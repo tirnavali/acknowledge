@@ -64,8 +64,11 @@ def reveal_in_explorer(path: str):
         if system == "Darwin":  # macOS
             subprocess.run(["open", "-R", path], check=True)
         elif system == "Windows":
-            # Use explorer /select,<path> to highlight the file
-            subprocess.run(["explorer", f"/select,{path}"], check=True)
+            # Use explorer /select,"<path>" to highlight the file.
+            # We must pass this as a single string (often with shell=True or using os.system)
+            # because Python's list-based subprocess quoting will quote the entire argument
+            # (e.g. "/select,C:\My Path") which confuses explorer.exe into opening Documents instead.
+            os.system(f'explorer /select,"{path}"')
         else:  # Linux (Assume xdg-open or similar)
             # Many Linux file managers don't have a standard 'select' flag,
             # so we open the parent directory at least.
