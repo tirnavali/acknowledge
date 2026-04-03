@@ -3,6 +3,7 @@ import os
 from uuid import UUID
 from src.database import get_db
 from sqlalchemy import text
+from src.utils import path_util
 
 
 def sanitize_str(value):
@@ -19,8 +20,10 @@ def _build_prefix_tsquery(query: str) -> str:
 
 
 def _abs(path: str) -> str:
-    """Normalize a file path to absolute form."""
-    return os.path.normpath(os.path.abspath(path)) if path else path
+    """Normalize a file path to DB format (relative or normalized absolute)."""
+    if not path:
+        return ""
+    return path_util.to_db_path(path)
 
 
 class MediaRepository:

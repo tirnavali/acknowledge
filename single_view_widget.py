@@ -13,6 +13,7 @@ from uuid import UUID
 from PySide6 import QtCore, QtWidgets, QtGui
 
 from face_overlay_widget import FaceOverlayWidget
+from src.utils import path_util
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,7 @@ class SingleViewWidget(QtWidgets.QWidget):
 
         # No DB data → run detector
         self._status_label.setText("🔍 Yüzler algılanıyor…")
-        self._start_detection(img_path)
+        self._start_detection(path)
 
     def refresh_faces_from_db(self):
         """Re-fetch face detections from DB and update the overlay. Called after batch worker finishes."""
