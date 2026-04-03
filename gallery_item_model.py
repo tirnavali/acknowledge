@@ -151,8 +151,30 @@ class GalleryItemModel(QtGui.QStandardItemModel):
     @staticmethod
     def generate_pixmap(item: GalleryItem) -> QtGui.QPixmap:
         """Heavylifting for thumbnail generation"""
-        pixmap = QtGui.QPixmap(item.img_path)
-        if pixmap.isNull():
+        thumb_size = 300
+        dir_name = os.path.dirname(item.img_path)
+        base_name = os.path.basename(item.img_path)
+        thumb_dir = os.path.join(dir_name, ".thumbnails")
+        thumb_path = os.path.join(thumb_dir, base_name + ".thumb.jpg")
+        
+        pixmap = None
+        if os.path.exists(thumb_path):
+            pixmap = QtGui.QPixmap(thumb_path)
+            
+        if not pixmap or pixmap.isNull():
+            # Generate thumbnail using Pillow for high performance avoiding full uncompressed loading
+            try:
+                os.makedirs(thumb_dir, exist_ok=True)
+                with Image.open(item.img_path) as img:
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
+                    img.thumbnail((thumb_size, thumb_size))
+                    img.save(thumb_path, "JPEG", quality=85)
+                pixmap = QtGui.QPixmap(thumb_path)
+            except Exception:
+                pass
+                
+        if not pixmap or pixmap.isNull():
             pixmap = QtGui.QPixmap(150, 150)
             pixmap.fill(QtGui.QColor("#ffcccc"))
         else:
