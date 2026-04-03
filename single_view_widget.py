@@ -108,6 +108,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         # Raw FaceResult list from last detection (needed to save to DB)
         self._pending_results: list = []
         self._skip_similarity = False  # set by reset to skip auto-matching
+        self._zoom_factor = 1.0        # 1.0 = fit to container; >1.0 = zoom in; <1.0 = zoom out
 
         self._init_ui()
 
@@ -229,6 +230,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay.clear_faces()
         self._pending_results = []
         self._source_pixmap = None
+        self._zoom_factor = 1.0  # Reset zoom on new image load
 
         if not img_path or not os.path.exists(img_path):
             self.image_label.setText("Resim yüklenemedi.")
@@ -675,14 +677,34 @@ class SingleViewWidget(QtWidgets.QWidget):
     # ------------------------------------------------------------------
 
     def _scale_and_show(self, pixmap: QtGui.QPixmap, smooth: bool = True):
-        """Scale pixmap to fit the container and display it."""
+        """Scale pixmap based on zoom factor and fit to container."""
+        if pixmap.isNull():
+            return
+
+        # Base scale that fits the image into the visible container
+        container_size = self.scroll_area.size() - QtCore.QSize(20, 20) # padding
+        pw, ph = pixmap.width(), pixmap.height()
+        cw, ch = container_size.width(), container_size.height()
+
+        if pw == 0 or ph == 0:
+            return
+
+        fit_scale = min(cw / pw, ch / ph)
+        total_scale = fit_scale * self._zoom_factor
+
+        new_width = int(pw * total_scale)
+        new_height = int(ph * total_scale)
+
+        # Scale and show
         mode = QtCore.Qt.SmoothTransformation if smooth else QtCore.Qt.FastTransformation
         scaled = pixmap.scaled(
-            self._image_container.size(),
+            new_width, new_height,
             QtCore.Qt.KeepAspectRatio,
             mode,
         )
         self.image_label.setPixmap(scaled)
+        # Ensure label matches the pixmap size so scrollbars work correctly
+        self.image_label.setFixedSize(scaled.size())
 
     def _refresh_pixmap(self):
         """Re-scale the cached source pixmap on resize — never reloads from disk."""
@@ -698,16 +720,10 @@ class SingleViewWidget(QtWidgets.QWidget):
         if pm is None or pm.isNull():
             return self._image_container.rect()
 
-        label_size = self._image_container.size()
-        pm_size    = pm.size()
-
-        x_off = (label_size.width()  - pm_size.width())  // 2
-        y_off = (label_size.height() - pm_size.height()) // 2
-
-        return QtCore.QRect(
-            QtCore.QPoint(x_off, y_off),
-            pm_size,
-        )
+        # The image_label's geometry inside _image_container perfectly describes
+        # where the scaled image pixels reside, because we did setFixedSize()
+        # on the label to precisely match the scaled pixmap.
+        return self.image_label.geometry()
 
     # ------------------------------------------------------------------
     # Qt events
@@ -726,8 +742,30 @@ class SingleViewWidget(QtWidgets.QWidget):
             self.nextRequested.emit()
         elif event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Up):
             self.prevRequested.emit()
+        elif event.key() == QtCore.Qt.Key_Space:
+            self.doubleClicked.emit() # space bar toggles back to gallery
         else:
             super().keyPressEvent(event)
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel for zooming."""
+        if not self._source_pixmap or self._source_pixmap.isNull():
+            return
+
+        angle = event.angleDelta().y()
+        zoom_step = 1.1 if angle > 0 else 1/1.1
+        
+        # Clamp zoom factor
+        new_factor = self._zoom_factor * zoom_step
+        if 0.1 <= new_factor <= 20.0:
+            self._zoom_factor = new_factor
+            self._refresh_pixmap()
+            # Update overlay geometry and alignment
+            self.face_overlay.setGeometry(self._image_container.rect())
+            img_rect = self._get_image_display_rect()
+            self.face_overlay._img_rect = img_rect
+            self.face_overlay.raise_()
+            self.face_overlay.update()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

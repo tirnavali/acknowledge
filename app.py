@@ -597,7 +597,7 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def keyPressEvent(self, event):
         """Global key handler for navigation"""
-        # If in Single View, handle arrow keys for navigation
+        # If in Single View, handle navigation and view toggle
         if self.gallery_stack.currentIndex() == 1:
             if event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
                 # Check if focused widget is a text input
@@ -609,6 +609,22 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.navigate_previous()
                     event.accept()
                     return
+            elif event.key() == QtCore.Qt.Key_Space:
+                # Space in single view goes back to gallery
+                self.switch_to_grid_view()
+                event.accept()
+                return
+
+        # If in Gallery View, handle Space to open single view
+        elif self.gallery_stack.currentIndex() == 0:
+            if event.key() == QtCore.Qt.Key_Space:
+                index = self.event_gallery_list_widget.currentIndex()
+                if index.isValid():
+                    self.on_gallery_item_clicked(index)
+                    self.switch_to_single_view()
+                    event.accept()
+                    return
+
         super().keyPressEvent(event)
 
     def on_gallery_item_clicked(self, index):
