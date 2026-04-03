@@ -4,3 +4,10 @@ python-dotenv>=1.0.0
 iptcinfo3>=2.0.0
 mediapipe
 onnxruntime
+pgvector
+psycopg2-binary
+requests
+numpy
+insightface
+opencv-python
+

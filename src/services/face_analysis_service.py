@@ -30,7 +30,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
-BLUR_THRESHOLD = 20.0  # Variance of Laplacian; only truly unrecognizable blobs are skipped
+BLUR_THRESHOLD = 5.0  # Variance of Laplacian; lowered from 20.0 to allow close-ups with smooth skin.
 
 
 def _variance_of_laplacian(gray_img) -> float:
@@ -127,7 +127,7 @@ class FaceAnalysisService:
             gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
             blur_score = _variance_of_laplacian(gray)
             if blur_score < BLUR_THRESHOLD:
-                logger.debug(f"Skipping face: too blurry. Score: {blur_score:.2f} (threshold={BLUR_THRESHOLD})")
+                logger.info(f"Skipping face: too blurry. Score: {blur_score:.2f} (threshold={BLUR_THRESHOLD})")
                 continue
 
             results.append(FaceResult(
