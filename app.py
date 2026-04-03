@@ -153,6 +153,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 ("iptc_date_created", "VARCHAR(50)"),
                 ("iptc_category", "VARCHAR(100)"),
                 ("iptc_supplemental_categories", "VARCHAR(500)"),
+                ("title", "VARCHAR(500)"),
             ]
             with get_db() as db:
                 for col_name, col_type in iptc_columns:
@@ -630,6 +631,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if db_iptc:
                 # Populate from database
+                self.media_title_input.setPlainText(db_iptc.get('title') or '')
                 self.media_headline_input.setText(db_iptc.get('iptc_headline') or '')
                 self.media_object_name_input.setText(db_iptc.get('iptc_object_name') or '')
                 self.media_description_input.setPlainText(db_iptc.get('iptc_caption') or '')
@@ -707,6 +709,7 @@ class MainWindow(QtWidgets.QMainWindow):
             country = loc_parts[2] if len(loc_parts) >= 3 else ''
 
             iptc_data = {
+                "Title": self.media_title_input.toPlainText(),
                 "Headline": self.media_headline_input.text(),
                 "Caption": self.media_description_input.toPlainText(),
                 "Keywords": self.media_tags_input.toPlainText(),
@@ -1002,7 +1005,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from gallery_item_model import GalleryItem
         items = [
-            GalleryItem(os.path.basename(r['file_path']), r['file_path'], in_db=True, db_metadata=r)
+            GalleryItem(
+                r.get('title') or os.path.basename(r.get('file_path', '')),
+                r['file_path'], in_db=True, db_metadata=r
+            )
             for r in records
             if r.get('file_path') and os.path.exists(r['file_path'])
         ]

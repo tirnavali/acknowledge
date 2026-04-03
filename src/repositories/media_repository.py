@@ -55,7 +55,7 @@ class MediaRepository:
         """Get IPTC data stored in DB for a given file path. Returns None if not found."""
         with get_db() as db:
             result = db.execute(text("""
-                SELECT id, iptc_headline, iptc_caption, iptc_keywords,
+                SELECT id, title, iptc_headline, iptc_caption, iptc_keywords,
                        iptc_object_name, iptc_city, iptc_state, iptc_country,
                        iptc_credit, iptc_source, iptc_copyright, iptc_writer,
                        iptc_byline, iptc_byline_title, iptc_date_created,
@@ -66,10 +66,10 @@ class MediaRepository:
             if row:
                 d = dict(row._mapping)
                 # Only return if at least one IPTC field is populated
-                has_data = any(
-                    d.get(col) for col in d
-                    if col.startswith('iptc_')
-                )
+                has_data = any([
+                    d.get('title'),
+                    *[d.get(col) for col in d if col.startswith('iptc_')]
+                ])
                 return d if has_data else None
             return None
 
@@ -80,6 +80,7 @@ class MediaRepository:
         with get_db() as db:
             db.execute(text("""
                 UPDATE medias SET
+                    title = :title,
                     iptc_headline = :headline,
                     iptc_caption = :caption,
                     iptc_keywords = :keywords,
@@ -99,6 +100,7 @@ class MediaRepository:
                 WHERE id = :media_id
             """), {
                 "media_id": str(media_id),
+                "title": clean.get("Title", ""),
                 "headline": clean.get("Headline", ""),
                 "caption": clean.get("Caption", ""),
                 "keywords": clean.get("Keywords", ""),
@@ -196,6 +198,7 @@ class MediaRepository:
                         e.name  AS event_name,
                         COALESCE(pn.names, '') AS person_names,
                         to_tsvector('simple',
+                            COALESCE(m.title, '')                      || ' ' ||
                             COALESCE(m.iptc_headline, '')               || ' ' ||
                             COALESCE(m.iptc_caption, '')                || ' ' ||
                             COALESCE(m.iptc_keywords, '')               || ' ' ||

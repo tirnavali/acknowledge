@@ -58,6 +58,7 @@ class Media(Base):
     
     media_type = Column(String, nullable=False) # Polimorfik ayrıştırıcı
     file_path = Column(String, unique=True, nullable=False)
+    title = Column(String(500), nullable=True)
     
     caption_tr = Column(Text, nullable=True)
     caption_en = Column(Text, nullable=True)

@@ -27,6 +27,9 @@ class GalleryItem(QtGui.QStandardItem):
         # Pre-populate from DB if available to avoid disk I/O
         if db_metadata:
             self._pop_from_db(db_metadata)
+            db_title = db_metadata.get('title')
+            if db_title:
+                self.setText(db_title)
             
     def _pop_from_db(self, db_metadata):
         """Map database columns back to the display-friendly iptc_data dict."""
@@ -283,9 +286,10 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         iptc, exif = item.iptc_data, item.exif_data
         
         text_blocks = [
-            (iptc.get('People', ''), 10), (iptc.get('Headline', ''), 5),
-            (iptc.get('Caption', ''), 4), (iptc.get('Keywords', ''), 3),
-            (item.text(), 2), (" ".join(str(v) for v in iptc.values()), 1),
+            (iptc.get('People', ''), 10), (item.text(), 8),
+            (iptc.get('Headline', ''), 5), (iptc.get('Caption', ''), 4),
+            (iptc.get('Keywords', ''), 3),
+            (" ".join(str(v) for v in iptc.values()), 1),
             (" ".join(str(v) for v in exif.values()), 0.5)
         ]
         for kw in keywords:
