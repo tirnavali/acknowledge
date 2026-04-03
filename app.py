@@ -32,13 +32,14 @@ class BatchFaceWorker(QtCore.QThread):
     error           = QtCore.Signal(str)
     image_processed = QtCore.Signal(str)        # emits file_path when one image is done
 
-    def __init__(self, file_paths, event_id, face_service, media_service, person_service, parent=None):
+    def __init__(self, file_paths, event_id, face_service, media_service, person_service, parent=None, force=False):
         super().__init__(parent)
         self._file_paths  = file_paths
         self._event_id    = event_id
         self._face_svc    = face_service
         self._media_svc   = media_service
         self._person_svc  = person_service
+        self._force       = force
 
     def run(self):
         total = len(self._file_paths)
@@ -48,9 +49,12 @@ class BatchFaceWorker(QtCore.QThread):
                     self._event_id, file_path, "photo"
                 )
                 media_row = self._media_svc.get_by_file_path(file_path)
-                if media_row and media_row.get("face_detected_at"):
+                if not self._force and media_row and media_row.get("face_detected_at"):
                     self.progress.emit(i, total)
                     continue
+
+                if self._force:
+                    self._face_svc.delete_faces_for_media(media_id)
 
                 results = self._face_svc.detect_faces(file_path)
                 saved_ids = self._face_svc.save_faces(media_id, results) if results else []
@@ -62,6 +66,13 @@ class BatchFaceWorker(QtCore.QThread):
                             self._face_svc.assign_person(face_id, pid)
                             self._person_svc.link_to_media(pid, media_id)
 
+                # --- Automatic Metadata Extraction ---
+                from src.utils import metadata_util
+                meta = metadata_util.extract_metadata(file_path)
+                # Only save if we found at least some metadata (to avoid unnecessary writes)
+                if any(v.strip() for v in meta.values()):
+                    self._media_svc.save_iptc_data(media_id, meta)
+                
                 self._media_svc.mark_face_detected(media_id)
             except Exception as e:
                 logger.warning(f"BatchFaceWorker: error on {file_path}: {e}")
@@ -335,6 +346,7 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Arama Hatası", f"Etkinlik araması sırasında hata oluştu: {e}")
 
+
     # ------------------------------------------------------------------
     # Background batch face detection
     # ------------------------------------------------------------------
@@ -370,9 +382,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._batch_face_worker and self._batch_face_worker.isRunning():
             if self._batch_face_worker._event_id == event_id:
                 return True
-        return any(e.id == event_id for _, e in self._face_detection_queue)
+        return any(item[1].id == event_id for item in self._face_detection_queue)
 
-    def _resume_batch_face_detection(self, event):
+    def _resume_batch_face_detection(self, event, force=False):
         """Start batch detection for any images not yet processed in this event.
 
         Called each time an event is opened so interrupted runs are automatically
@@ -385,11 +397,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # Skip if this event is already queued or being processed
-        active_event_ids = {e.id for _, e in self._face_detection_queue}
+        active_event_ids = {item[1].id for item in self._face_detection_queue}
         if self._batch_face_worker and self._batch_face_worker.isRunning():
             active_event_ids.add(getattr(self._batch_face_worker, '_event_id', None))
         if event.id in active_event_ids:
             logger.debug(f"_resume_batch_face_detection: returning — event already active")
+            if force:
+                self.statusBar().showMessage(f"⚠️ '{event.name}' zaten işleniyor veya kuyrukta.", 4000)
             return
 
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
@@ -410,18 +424,20 @@ class MainWindow(QtWidgets.QMainWindow):
             for r in db_records
             if r.get('face_detected_at')
         }
-        unprocessed = [f for f in disk_files if os.path.normpath(f) not in processed]
+        unprocessed = list(disk_files) if force else [f for f in disk_files if os.path.normpath(f) not in processed]
         logger.debug(f"_resume_batch_face_detection: processed={len(processed)} unprocessed={len(unprocessed)}")
         if not unprocessed:
             logger.debug(f"_resume_batch_face_detection: returning — all images already processed")
+            if force:
+                self.statusBar().showMessage(f"✅ '{event.name}' için işlenecek yeni medya bulunamadı.", 4000)
             return  # everything already done
 
-        self._start_batch_face_detection_for_files(unprocessed, event)
+        self._start_batch_face_detection_for_files(unprocessed, event, force=force)
 
-    def _start_batch_face_detection_for_files(self, file_paths, event):
+    def _start_batch_face_detection_for_files(self, file_paths, event, force=False):
         """Enqueue a batch job; start immediately only if no worker is running."""
-        self._face_detection_queue.append((list(file_paths), event))
-        total_queued = sum(len(fp) for fp, _ in self._face_detection_queue)
+        self._face_detection_queue.append((list(file_paths), event, force))
+        total_queued = sum(len(item[0]) for item in self._face_detection_queue)
         if self._batch_face_worker is None or not self._batch_face_worker.isRunning():
             self._process_next_face_detection()
         else:
@@ -433,7 +449,14 @@ class MainWindow(QtWidgets.QMainWindow):
         """Pop the next job from the queue and start it."""
         if not self._face_detection_queue:
             return
-        file_paths, event = self._face_detection_queue.pop(0)
+            
+        item = self._face_detection_queue.pop(0)
+        if len(item) == 3:
+            file_paths, event, force = item
+        else:
+            file_paths, event = item
+            force = False
+            
         svc = self.app_service
         self._batch_face_worker = BatchFaceWorker(
             file_paths,
@@ -442,6 +465,7 @@ class MainWindow(QtWidgets.QMainWindow):
             svc.get_media_service(),
             svc.get_person_service(),
             parent=self,
+            force=force
         )
         self._batch_face_worker.progress.connect(self._on_batch_face_progress)
         self._batch_face_worker.finished.connect(self._on_batch_face_finished)
@@ -524,12 +548,17 @@ class MainWindow(QtWidgets.QMainWindow):
         
         menu = QtWidgets.QMenu(self)
         details_action = menu.addAction("🔍 Detaylar")
+        process_action = menu.addAction("⚙️ Yüz Tanıma ve İndeksleme Başlat")
+        menu.addSeparator()
         delete_action = menu.addAction("🗑️ Sil")
         
         action = menu.exec(self.event_card_list_widget.mapToGlobal(pos))
         
         if action == details_action:
             self.on_event_details(event)
+        elif action == process_action:
+            self._resume_batch_face_detection(event, force=True)
+            self.statusBar().showMessage(f"🚀 '{event.name}' için işlem manuel olarak başlatıldı...", 4000)
         elif action == delete_action:
             self.on_event_delete(event)
 
@@ -1312,6 +1341,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # event column
         self.events_column.addWidget(self.event_search)
+        self.event_card_list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.event_card_list_widget.customContextMenuRequested.connect(self.show_event_context_menu)
         self.events_column.addWidget(self.event_card_list_widget)
         # Person filter banner (hidden by default)
         self._person_filter_bar = QtWidgets.QWidget()

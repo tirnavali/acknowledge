@@ -70,63 +70,37 @@ class GalleryItem(QtGui.QStandardItem):
         self.is_loaded = True
 
     def __read_exif(self):
-        # ... (implementation remains same as before)
+        """Read EXIF via utility and store in local dict."""
+        from src.utils import metadata_util
+        extracted = metadata_util.extract_metadata(self.img_path)
+        # Update exif_data with what we found
+        for k in ['Title', 'Copyright', 'Writer']:
+            if extracted.get(k):
+                self.exif_data[k] = extracted[k]
+        # (Remaining special EXIF fields like Shutter/Aperture still need Image.open)
+        # We keep the legacy __read_exif for special technical fields if needed, 
+        # or simplified version. Let's do a simplified version.
         try:
             with Image.open(self.img_path) as img:
                 exif = img._getexif()
-                if exif is not None:
-                    tag_mapping = {
-                        'XPTitle': 'Title', 'XPSubject': 'Subject', 'XPRating': 'Rating',
-                        'XPKeywords': 'Tags', 'XPComment': 'Comments', 'Rating': 'Rating',
-                        'Make': 'Camera Make', 'Model': 'Camera Model', 'LensModel': 'Lens Model',
-                        'LensMake': 'Lens Make', 'Software': 'Software', 'DateTime': 'Date/Time',
-                        'DateTimeOriginal': 'Date/Time Original', 'DateTimeDigitized': 'Date/Time Digitized',
-                        'ExposureTime': 'Shutter Speed', 'FNumber': 'Aperture', 'ISOSpeedRatings': 'ISO',
-                        'ISO': 'ISO', 'ExposureProgram': 'Exposure Program', 'ExposureMode': 'Exposure Mode',
-                        'ExposureBiasValue': 'Exposure Compensation', 'MeteringMode': 'Metering Mode',
-                        'Flash': 'Flash', 'FocalLength': 'Focal Length', 'FocalLengthIn35mmFilm': 'Focal Length (35mm)',
-                        'Orientation': 'Orientation', 'XResolution': 'X Resolution', 'YResolution': 'Y Resolution',
-                        'ResolutionUnit': 'Resolution Unit', 'ColorSpace': 'Color Space', 'WhiteBalance': 'White Balance',
-                        'Artist': 'Artist', 'Copyright': 'Copyright', 'ImageDescription': 'Image Description', 'UserComment': 'User Comment'
-                    }
+                if exif:
                     for tag, value in exif.items():
                         tag_name = ExifTags.TAGS.get(tag, tag)
-                        if tag_name in tag_mapping:
-                            if isinstance(value, bytes):
-                                try: value = value.decode('utf-16le').strip('\x00')
-                                except: pass
-                            elif isinstance(value, tuple) and len(value) == 2 and value[1] != 0:
-                                if tag_name == 'ExposureTime': value = f"1/{int(value[1]/value[0])}" if value[0] < value[1] else f"{value[0]/value[1]:.1f}s"
-                                elif tag_name == 'FNumber': value = f"f/{value[0]/value[1]:.1f}"
-                                elif tag_name == 'FocalLength': value = f"{value[0]/value[1]:.1f}mm"
-                                else: value = value[0] / value[1]
-                            
-                            display_name = tag_mapping[tag_name]
-                            self.exif_data[display_name] = str(value)
+                        if tag_name in ['ExposureTime', 'FNumber', 'ISOSpeedRatings', 'FocalLength', 'Model', 'Make']:
+                            # Simplified formatting for technical fields
+                            if isinstance(value, tuple) and len(value) == 2 and value[1] != 0:
+                                val = value[0] / value[1]
+                                if tag_name == 'ExposureTime': val = f"1/{int(1/val)}" if val < 1 else f"{val}s"
+                                elif tag_name == 'FNumber': val = f"f/{val:.1f}"
+                                value = val
+                            self.exif_data[tag_name] = str(value)
         except: pass
     
     def __read_iptc(self):
-        # ... (implementation remains same as before)
+        """Read IPTC via utility and store in local dict."""
+        from src.utils import metadata_util
         try:
-            info = IPTCInfo(self.img_path, force=True)
-            iptc_fields = {
-                'headline': 'Headline', 'caption/abstract': 'Caption', 'keywords': 'Keywords',
-                'object name': 'Object Name', 'city': 'City', 'province/state': 'State',
-                'country/primary location name': 'Country', 'credit': 'Credit', 'source': 'Source',
-                'copyright notice': 'Copyright', 'writer/editor': 'Writer', 'by-line': 'By-line',
-                'by-line title': 'By-line Title', 'date created': 'Date Created', 'category': 'Category',
-                'supplemental category': 'Supplemental Categories', 'contact': 'People'
-            }
-            for iptc_key, display_name in iptc_fields.items():
-                try:
-                    value = info[iptc_key]
-                    if value:
-                        if isinstance(value, list):
-                            value = ', '.join([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in value])
-                        elif isinstance(value, bytes):
-                            value = value.decode('utf-8')
-                        self.iptc_data[display_name] = str(value).replace('\x00', '')
-                except: continue
+            self.iptc_data.update(metadata_util.extract_metadata(self.img_path))
         except: pass
 
 class GalleryItemWorker(QtCore.QObject):
