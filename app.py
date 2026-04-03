@@ -532,6 +532,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def eventFilter(self, obj, event):
         if obj is self.event_gallery_search and event.type() == QtCore.QEvent.FocusIn:
             self._clear_event_card_selection()
+        
+        # Override default Space bar selection in the list widget to open the image instead
+        if obj is self.event_gallery_list_widget and event.type() == QtCore.QEvent.KeyPress:
+            if event.key() == QtCore.Qt.Key_Space:
+                index = self.event_gallery_list_widget.currentIndex()
+                if index.isValid():
+                    self.switch_to_single_view()
+                return True # Consume event so list widget doesn't select/deselect
+                
         return super().eventFilter(obj, event)
 
     def show_event_context_menu(self, pos):
@@ -614,16 +623,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.switch_to_grid_view()
                 event.accept()
                 return
-
-        # If in Gallery View, handle Space to open single view
-        elif self.gallery_stack.currentIndex() == 0:
-            if event.key() == QtCore.Qt.Key_Space:
-                index = self.event_gallery_list_widget.currentIndex()
-                if index.isValid():
-                    self.on_gallery_item_clicked(index)
-                    self.switch_to_single_view()
-                    event.accept()
-                    return
 
         super().keyPressEvent(event)
 
@@ -955,6 +954,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_search.returnPressed.connect(self.on_gallery_search)
         self.event_gallery_search_btn.clicked.connect(self.on_gallery_search)
         self.event_gallery_search.installEventFilter(self)
+        
+        # Install event filter to capture Space bar properly before QListView consumes it
+        self.event_gallery_list_widget.installEventFilter(self)
         
         # Connect click event to print EXIF data
         self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)

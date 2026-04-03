@@ -748,7 +748,7 @@ class SingleViewWidget(QtWidgets.QWidget):
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        """Handle mouse wheel for zooming."""
+        """Handle mouse wheel for zooming towards cursor."""
         if not self._source_pixmap or self._source_pixmap.isNull():
             return
 
@@ -757,15 +757,47 @@ class SingleViewWidget(QtWidgets.QWidget):
         
         # Clamp zoom factor
         new_factor = self._zoom_factor * zoom_step
-        if 0.1 <= new_factor <= 20.0:
-            self._zoom_factor = new_factor
-            self._refresh_pixmap()
-            # Update overlay geometry and alignment
-            self.face_overlay.setGeometry(self._image_container.rect())
-            img_rect = self._get_image_display_rect()
-            self.face_overlay._img_rect = img_rect
-            self.face_overlay.raise_()
-            self.face_overlay.update()
+        if not (0.1 <= new_factor <= 20.0):
+            return
+
+        # 1. Capture old mouse positions
+        container_pos = self._image_container.mapFrom(self, event.position().toPoint())
+        old_x, old_y = container_pos.x(), container_pos.y()
+        old_w = max(1, self._image_container.width())
+        old_h = max(1, self._image_container.height())
+
+        viewport = self.scroll_area.viewport()
+        viewport_pos = viewport.mapFrom(self, event.position().toPoint())
+
+        # 2. Apply zoom
+        self._zoom_factor = new_factor
+        self._refresh_pixmap()
+        self._image_container.adjustSize()
+        
+        # Need to force event loop to process layout changes so scrollbars update max values
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents)
+        
+        # 3. Calculate new scrollbar values to keep mouse pointing at the same spot
+        new_w = self._image_container.width()
+        new_h = self._image_container.height()
+        
+        scale_x = new_w / old_w
+        scale_y = new_h / old_h
+        
+        new_x = old_x * scale_x
+        new_y = old_y * scale_y
+
+        h_bar = self.scroll_area.horizontalScrollBar()
+        v_bar = self.scroll_area.verticalScrollBar()
+        
+        h_bar.setValue(int(new_x - viewport_pos.x()))
+        v_bar.setValue(int(new_y - viewport_pos.y()))
+
+        # Update overlay geometry and alignment
+        self.face_overlay.setGeometry(self._image_container.rect())
+        self.face_overlay._img_rect = self._get_image_display_rect()
+        self.face_overlay.raise_()
+        self.face_overlay.update()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
