@@ -869,6 +869,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setUniformItemSizes(True)
         self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
         
+        # Context menu
+        self.event_gallery_list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.event_gallery_list_widget.customContextMenuRequested.connect(self.show_gallery_context_menu)
+        
         # Single View — inject face recognition dependencies
         self.single_view_widget = SingleViewWidget(
             face_service=self.app_service.get_face_service(),
@@ -907,6 +911,25 @@ class MainWindow(QtWidgets.QMainWindow):
         # Connect click event to print EXIF data
         self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
         self.event_gallery_list_widget.doubleClicked.connect(self.switch_to_single_view)
+
+    def show_gallery_context_menu(self, pos):
+        """Show context menu for gallery item"""
+        index = self.event_gallery_list_widget.indexAt(pos)
+        if not index.isValid():
+            return
+            
+        item = self._get_item_from_index(index)
+        if not item:
+            return
+            
+        menu = QtWidgets.QMenu(self)
+        reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
+        
+        action = menu.exec(self.event_gallery_list_widget.mapToGlobal(pos))
+        
+        if action == reveal_action:
+            from src.utils import path_util
+            path_util.reveal_in_explorer(item.img_path)
 
     def _on_faces_changed(self):
         """Update the UI people input and auto-save IPTC when face labels change."""

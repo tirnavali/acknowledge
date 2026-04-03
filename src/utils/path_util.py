@@ -46,3 +46,31 @@ def normalize_path(path: str) -> str:
     if not path:
         return ""
     return os.path.normpath(path)
+
+def reveal_in_explorer(path: str):
+    """
+    Opens the OS file explorer and selects the file at the given path.
+    Cross-platform support for macOS, Windows, and Linux.
+    """
+    import platform
+    import subprocess
+    
+    path = os.path.normpath(path)
+    if not os.path.exists(path):
+        return
+
+    system = platform.system()
+    try:
+        if system == "Darwin":  # macOS
+            subprocess.run(["open", "-R", path], check=True)
+        elif system == "Windows":
+            # Use explorer /select,<path> to highlight the file
+            subprocess.run(["explorer", f"/select,{path}"], check=True)
+        else:  # Linux (Assume xdg-open or similar)
+            # Many Linux file managers don't have a standard 'select' flag,
+            # so we open the parent directory at least.
+            parent = os.path.dirname(path)
+            subprocess.run(["xdg-open", parent], check=True)
+    except Exception as e:
+        import logging
+        logging.error(f"Error revealing file in explorer: {e}")

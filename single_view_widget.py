@@ -88,6 +88,8 @@ class SingleViewWidget(QtWidgets.QWidget):
     ):
         super().__init__(parent)
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
 
         self._face_service      = face_service
         self._face_service      = face_service  # Use the actual service
@@ -206,6 +208,20 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._current_media_id = media_id
         self._face_detected_at = face_detected_at
         self._is_batch_pending = is_batch_pending
+
+    def show_context_menu(self, pos):
+        """Show context menu for single view"""
+        if not self.current_img_path or not os.path.exists(self.current_img_path):
+            return
+            
+        menu = QtWidgets.QMenu(self)
+        reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
+        
+        action = menu.exec(self.mapToGlobal(pos))
+        
+        if action == reveal_action:
+            from src.utils import path_util
+            path_util.reveal_in_explorer(self.current_img_path)
 
     def set_image(self, img_path: str):
         """Load image asynchronously, clear overlay, trigger face detection."""
