@@ -1,5 +1,6 @@
 from PySide6 import QtWidgets, QtCore
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -101,7 +102,26 @@ class AddEvent(QtWidgets.QWidget):
     def select_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Klasör Seç")
         if folder:
+            basename = os.path.basename(folder)
             self.add_event_folder_line.setText(folder)
+            
+            event_name = basename
+            
+            # Auto-fill date if DD.MM.YYYY pattern is found in folder name
+            match = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", basename)
+            if match:
+                day, month, year = map(int, match.groups())
+                qdate = QtCore.QDate(year, month, day)
+                if qdate.isValid():
+                    qtime = QtCore.QTime(12, 0)
+                    self.add_event_date_line.setDateTime(QtCore.QDateTime(qdate, qtime))
+                    # Remove the date from the name and cleanup whitespace
+                    event_name = basename.replace(match.group(0), "").strip()
+                    event_name = re.sub(r"\s+", " ", event_name)
+
+            # Auto-fill event name from folder name if currently empty
+            if not self.add_event_name_line.toPlainText().strip():
+                self.add_event_name_line.setPlainText(event_name)
 
     def add_event(self):
         event_name   = self.add_event_name_line.toPlainText().strip()

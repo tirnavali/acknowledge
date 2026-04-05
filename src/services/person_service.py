@@ -2,14 +2,16 @@
 
 from src.services.base_service import BaseService
 from src.repositories.person_repository import PersonRepository
+from src.repositories.person_note_repository import PersonNoteRepository
 import logging
 
 class PersonService(BaseService):
     """Service for managing persons."""
-    
-    def __init__(self, person_repository: PersonRepository):
+
+    def __init__(self, person_repository: PersonRepository, person_note_repository: PersonNoteRepository = None):
         super().__init__()
         self.person_repository = person_repository
+        self.person_note_repository = person_note_repository
         self.logger = logging.getLogger(self.__class__.__name__)
     
     def get_all(self):
@@ -115,3 +117,24 @@ class PersonService(BaseService):
         except Exception as e:
             self.logger.error(f"Error getting persons with counts: {e}")
             raise
+
+    def save_note(self, person_id, media_id, note: str) -> None:
+        try:
+            self.person_note_repository.upsert(person_id, media_id, note)
+        except Exception as e:
+            self.logger.error(f"Error saving note for person {person_id} / media {media_id}: {e}")
+            raise
+
+    def get_note(self, person_id, media_id) -> str:
+        try:
+            return self.person_note_repository.get(person_id, media_id)
+        except Exception as e:
+            self.logger.error(f"Error getting note for person {person_id} / media {media_id}: {e}")
+            return ""
+
+    def search_notes(self, query: str) -> list[dict]:
+        try:
+            return self.person_note_repository.search_notes(query)
+        except Exception as e:
+            self.logger.error(f"Error searching notes for '{query}': {e}")
+            return []

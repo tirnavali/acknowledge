@@ -33,13 +33,14 @@ class BatchFaceWorker(QtCore.QThread):
     error           = QtCore.Signal(str)
     image_processed = QtCore.Signal(str)        # emits file_path when one image is done
 
-    def __init__(self, file_paths, event_id, face_service, media_service, person_service, parent=None):
+    def __init__(self, file_paths, event_id, face_service, media_service, person_service, parent=None, force=False):
         super().__init__(parent)
         self._file_paths  = file_paths
         self._event_id    = event_id
         self._face_svc    = face_service
         self._media_svc   = media_service
         self._person_svc  = person_service
+        self._force       = force
 
     def run(self):
         total = len(self._file_paths)
@@ -49,9 +50,12 @@ class BatchFaceWorker(QtCore.QThread):
                     self._event_id, file_path, "photo"
                 )
                 media_row = self._media_svc.get_by_file_path(file_path)
-                if media_row and media_row.get("face_detected_at"):
+                if not self._force and media_row and media_row.get("face_detected_at"):
                     self.progress.emit(i, total)
                     continue
+
+                if self._force:
+                    self._face_svc.delete_faces_for_media(media_id)
 
                 results = self._face_svc.detect_faces(file_path)
                 saved_ids = self._face_svc.save_faces(media_id, results) if results else []
@@ -63,6 +67,13 @@ class BatchFaceWorker(QtCore.QThread):
                             self._face_svc.assign_person(face_id, pid)
                             self._person_svc.link_to_media(pid, media_id)
 
+                # --- Automatic Metadata Extraction ---
+                from src.utils import metadata_util
+                meta = metadata_util.extract_metadata(file_path)
+                # Only save if we found at least some metadata (to avoid unnecessary writes)
+                if any(v.strip() for v in meta.values()):
+                    self._media_svc.save_iptc_data(media_id, meta)
+                
                 self._media_svc.mark_face_detected(media_id)
             except Exception as e:
                 logger.warning(f"BatchFaceWorker: error on {file_path}: {e}")
@@ -166,6 +177,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 ("iptc_date_created", "VARCHAR(50)"),
                 ("iptc_category", "VARCHAR(100)"),
                 ("iptc_supplemental_categories", "VARCHAR(500)"),
+                ("title", "VARCHAR(500)"),
             ]
             with get_db() as db:
                 for col_name, col_type in iptc_columns:
@@ -354,6 +366,7 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Arama Hatası", f"Etkinlik araması sırasında hata oluştu: {e}")
 
+
     # ------------------------------------------------------------------
     # Background batch face detection
     # ------------------------------------------------------------------
@@ -389,9 +402,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._batch_face_worker and self._batch_face_worker.isRunning():
             if self._batch_face_worker._event_id == event_id:
                 return True
-        return any(e.id == event_id for _, e in self._face_detection_queue)
+        return any(item[1].id == event_id for item in self._face_detection_queue)
 
-    def _resume_batch_face_detection(self, event):
+    def _resume_batch_face_detection(self, event, force=False):
         """Start batch detection for any images not yet processed in this event.
 
         Called each time an event is opened so interrupted runs are automatically
@@ -404,11 +417,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # Skip if this event is already queued or being processed
-        active_event_ids = {e.id for _, e in self._face_detection_queue}
+        active_event_ids = {item[1].id for item in self._face_detection_queue}
         if self._batch_face_worker and self._batch_face_worker.isRunning():
             active_event_ids.add(getattr(self._batch_face_worker, '_event_id', None))
         if event.id in active_event_ids:
             logger.debug(f"_resume_batch_face_detection: returning — event already active")
+            if force:
+                self.statusBar().showMessage(f"⚠️ '{event.name}' zaten işleniyor veya kuyrukta.", 4000)
             return
 
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
@@ -429,18 +444,20 @@ class MainWindow(QtWidgets.QMainWindow):
             for r in db_records
             if r.get('face_detected_at')
         }
-        unprocessed = [f for f in disk_files if os.path.normpath(f) not in processed]
+        unprocessed = list(disk_files) if force else [f for f in disk_files if os.path.normpath(f) not in processed]
         logger.debug(f"_resume_batch_face_detection: processed={len(processed)} unprocessed={len(unprocessed)}")
         if not unprocessed:
             logger.debug(f"_resume_batch_face_detection: returning — all images already processed")
+            if force:
+                self.statusBar().showMessage(f"✅ '{event.name}' için işlenecek yeni medya bulunamadı.", 4000)
             return  # everything already done
 
-        self._start_batch_face_detection_for_files(unprocessed, event)
+        self._start_batch_face_detection_for_files(unprocessed, event, force=force)
 
-    def _start_batch_face_detection_for_files(self, file_paths, event):
+    def _start_batch_face_detection_for_files(self, file_paths, event, force=False):
         """Enqueue a batch job; start immediately only if no worker is running."""
-        self._face_detection_queue.append((list(file_paths), event))
-        total_queued = sum(len(fp) for fp, _ in self._face_detection_queue)
+        self._face_detection_queue.append((list(file_paths), event, force))
+        total_queued = sum(len(item[0]) for item in self._face_detection_queue)
         if self._batch_face_worker is None or not self._batch_face_worker.isRunning():
             self._process_next_face_detection()
         else:
@@ -452,7 +469,14 @@ class MainWindow(QtWidgets.QMainWindow):
         """Pop the next job from the queue and start it."""
         if not self._face_detection_queue:
             return
-        file_paths, event = self._face_detection_queue.pop(0)
+            
+        item = self._face_detection_queue.pop(0)
+        if len(item) == 3:
+            file_paths, event, force = item
+        else:
+            file_paths, event = item
+            force = False
+            
         svc = self.app_service
         self._batch_face_worker = BatchFaceWorker(
             file_paths,
@@ -461,6 +485,7 @@ class MainWindow(QtWidgets.QMainWindow):
             svc.get_media_service(),
             svc.get_person_service(),
             parent=self,
+            force=force
         )
         self._batch_face_worker.progress.connect(self._on_batch_face_progress)
         self._batch_face_worker.finished.connect(self._on_batch_face_finished)
@@ -527,6 +552,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def eventFilter(self, obj, event):
         if obj is self.event_gallery_search and event.type() == QtCore.QEvent.FocusIn:
             self._clear_event_card_selection()
+        
+        # Override default Space bar selection in the list widget to open the image instead
+        if obj is self.event_gallery_list_widget and event.type() == QtCore.QEvent.KeyPress:
+            if event.key() == QtCore.Qt.Key_Space:
+                index = self.event_gallery_list_widget.currentIndex()
+                if index.isValid():
+                    self.switch_to_single_view()
+                return True # Consume event so list widget doesn't select/deselect
+                
         return super().eventFilter(obj, event)
 
     def show_event_context_menu(self, pos):
@@ -543,12 +577,17 @@ class MainWindow(QtWidgets.QMainWindow):
         
         menu = QtWidgets.QMenu(self)
         details_action = menu.addAction("🔍 Detaylar")
+        process_action = menu.addAction("⚙️ Yüz Tanıma ve İndeksleme Başlat")
+        menu.addSeparator()
         delete_action = menu.addAction("🗑️ Sil")
         
         action = menu.exec(self.event_card_list_widget.mapToGlobal(pos))
         
         if action == details_action:
             self.on_event_details(event)
+        elif action == process_action:
+            self._resume_batch_face_detection(event, force=True)
+            self.statusBar().showMessage(f"🚀 '{event.name}' için işlem manuel olarak başlatıldı...", 4000)
         elif action == delete_action:
             self.on_event_delete(event)
 
@@ -587,7 +626,7 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def keyPressEvent(self, event):
         """Global key handler for navigation"""
-        # If in Single View, handle arrow keys for navigation
+        # If in Single View, handle navigation and view toggle
         if self.gallery_stack.currentIndex() == 1:
             if event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
                 # Check if focused widget is a text input
@@ -599,6 +638,12 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.navigate_previous()
                     event.accept()
                     return
+            elif event.key() == QtCore.Qt.Key_Space:
+                # Space in single view goes back to gallery
+                self.switch_to_grid_view()
+                event.accept()
+                return
+
         super().keyPressEvent(event)
 
     def on_gallery_item_clicked(self, index):
@@ -650,6 +695,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if db_iptc:
                 # Populate from database
+                self.media_title_input.setPlainText(db_iptc.get('title') or '')
                 self.media_headline_input.setText(db_iptc.get('iptc_headline') or '')
                 self.media_object_name_input.setText(db_iptc.get('iptc_object_name') or '')
                 self.media_description_input.setPlainText(db_iptc.get('iptc_caption') or '')
@@ -727,6 +773,7 @@ class MainWindow(QtWidgets.QMainWindow):
             country = loc_parts[2] if len(loc_parts) >= 3 else ''
 
             iptc_data = {
+                "Title": self.media_title_input.toPlainText(),
                 "Headline": self.media_headline_input.text(),
                 "Caption": self.media_description_input.toPlainText(),
                 "Keywords": self.media_tags_input.toPlainText(),
@@ -889,6 +936,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setUniformItemSizes(True)
         self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
         
+        # Context menu
+        self.event_gallery_list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.event_gallery_list_widget.customContextMenuRequested.connect(self.show_gallery_context_menu)
+        
         # Single View — inject face recognition dependencies
         self.single_view_widget = SingleViewWidget(
             face_service=self.app_service.get_face_service(),
@@ -924,9 +975,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_search_btn.clicked.connect(self.on_gallery_search)
         self.event_gallery_search.installEventFilter(self)
         
+        # Install event filter to capture Space bar properly before QListView consumes it
+        self.event_gallery_list_widget.installEventFilter(self)
+        
         # Connect click event to print EXIF data
         self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
         self.event_gallery_list_widget.doubleClicked.connect(self.switch_to_single_view)
+
+    def show_gallery_context_menu(self, pos):
+        """Show context menu for gallery item"""
+        index = self.event_gallery_list_widget.indexAt(pos)
+        if not index.isValid():
+            return
+            
+        item = self._get_item_from_index(index)
+        if not item:
+            return
+            
+        menu = QtWidgets.QMenu(self)
+        reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
+        
+        action = menu.exec(self.event_gallery_list_widget.mapToGlobal(pos))
+        
+        if action == reveal_action:
+            from src.utils import path_util
+            path_util.reveal_in_explorer(item.img_path)
 
     def _on_faces_changed(self):
         """Update the UI people input and auto-save IPTC when face labels change."""
@@ -999,7 +1072,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from gallery_item_model import GalleryItem
         items = [
-            GalleryItem(os.path.basename(r['file_path']), r['file_path'], in_db=True, db_metadata=r)
+            GalleryItem(
+                r.get('title') or os.path.basename(r.get('file_path', '')),
+                r['file_path'], in_db=True, db_metadata=r
+            )
             for r in records
             if r.get('file_path') and os.path.exists(r['file_path'])
         ]
@@ -1169,7 +1245,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        # Search bar + refresh button
+        # ── Row 1: person name search + refresh + delete ──
         top_bar = QtWidgets.QHBoxLayout()
         self._persons_search = QtWidgets.QLineEdit()
         self._persons_search.setPlaceholderText("İsimde ara…")
@@ -1189,7 +1265,19 @@ class MainWindow(QtWidgets.QMainWindow):
         top_bar.addWidget(delete_btn)
         layout.addLayout(top_bar)
 
-        # Table
+        # ── Row 2: note search ──
+        note_bar = QtWidgets.QHBoxLayout()
+        note_icon = QtWidgets.QLabel("🔍")
+        note_bar.addWidget(note_icon)
+        self._notes_search = QtWidgets.QLineEdit()
+        self._notes_search.setPlaceholderText("Notlarda ara…")
+        self._notes_search.setFixedHeight(30)
+        self._notes_search.textChanged.connect(self._on_notes_search_changed)
+        note_bar.addWidget(self._notes_search)
+        layout.addLayout(note_bar)
+
+        # ── Stacked area: persons table / notes results table ──
+        # Persons table (default view)
         self._persons_table = QtWidgets.QTableWidget()
         self._persons_table.setColumnCount(2)
         self._persons_table.setHorizontalHeaderLabels(["İsim", "Fotoğraf Sayısı"])
@@ -1208,6 +1296,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persons_table.setCursor(QtCore.Qt.PointingHandCursor)
         self._persons_table.cellDoubleClicked.connect(self._on_person_row_clicked)
         layout.addWidget(self._persons_table)
+
+        # Notes results table (shown only during note search)
+        self._notes_table = QtWidgets.QTableWidget()
+        self._notes_table.setColumnCount(3)
+        self._notes_table.setHorizontalHeaderLabels(["Kişi", "Not", "Dosya"])
+        hh = self._notes_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        hh.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        self._notes_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self._notes_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self._notes_table.setAlternatingRowColors(True)
+        self._notes_table.verticalHeader().setVisible(False)
+        self._notes_table.setSortingEnabled(False)
+        self._notes_table.setCursor(QtCore.Qt.PointingHandCursor)
+        self._notes_table.cellDoubleClicked.connect(self._on_note_row_clicked)
+        self._notes_table.hide()
+        layout.addWidget(self._notes_table)
 
         hint = QtWidgets.QLabel("Bir satıra çift tıklayarak o kişiye ait fotoğrafları Etkinlikler sekmesinde görüntüleyin.")
         hint.setStyleSheet("color: #888; font-size: 10px;")
@@ -1238,6 +1344,84 @@ class MainWindow(QtWidgets.QMainWindow):
             item = self._persons_table.item(row, 0)
             visible = text in (item.text().lower() if item else "")
             self._persons_table.setRowHidden(row, not visible)
+
+    def _on_notes_search_changed(self, text: str):
+        query = text.strip()
+        if not query:
+            # Restore persons table
+            self._notes_table.hide()
+            self._persons_table.show()
+            return
+
+        # Show notes results table
+        self._persons_table.hide()
+        self._notes_table.show()
+
+        try:
+            results = self.app_service.get_person_service().search_notes(query)
+        except Exception:
+            results = []
+
+        from src.utils import path_util
+        self._notes_table.setSortingEnabled(False)
+        self._notes_table.setRowCount(len(results))
+        for i, rec in enumerate(results):
+            person_item = QtWidgets.QTableWidgetItem(rec.get("person_name", ""))
+            person_item.setData(QtCore.Qt.UserRole, rec)   # full record for navigation
+
+            note_item = QtWidgets.QTableWidgetItem(rec.get("note", ""))
+            note_item.setToolTip(rec.get("note", ""))
+
+            abs_path = path_util.from_db_path(rec.get("file_path", ""))
+            file_item = QtWidgets.QTableWidgetItem(os.path.basename(abs_path))
+            file_item.setToolTip(abs_path)
+
+            self._notes_table.setItem(i, 0, person_item)
+            self._notes_table.setItem(i, 1, note_item)
+            self._notes_table.setItem(i, 2, file_item)
+
+    def _on_note_row_clicked(self, row: int, _col: int):
+        person_item = self._notes_table.item(row, 0)
+        if person_item is None:
+            return
+        rec = person_item.data(QtCore.Qt.UserRole)
+        if not rec:
+            return
+
+        from src.utils import path_util
+        abs_path = path_util.from_db_path(rec.get("file_path", ""))
+        if not abs_path or not os.path.exists(abs_path):
+            QtWidgets.QMessageBox.warning(self, "Hata", "Dosya bulunamadı.")
+            return
+
+        # Load the single photo in gallery and switch to single view
+        from gallery_item_model import GalleryItem
+        item = GalleryItem(
+            os.path.basename(abs_path),
+            abs_path,
+            in_db=True,
+            db_metadata=rec,
+        )
+        self.gallery_item_model = GalleryItemModel([item])
+        if hasattr(self, "gallery_search_proxy"):
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            self.gallery_search_proxy.setFilterText("")
+        else:
+            self.event_gallery_list_widget.setModel(self.gallery_item_model)
+        self.gallery_item_model.start_loading()
+
+        self._person_filter_label.setText(f"Not araması: {rec.get('person_name', '')}  —  {os.path.basename(abs_path)}")
+        self._person_filter_bar.show()
+
+        # Switch to events tab and open single view for this image
+        self.tab_widget.setCurrentWidget(self.events_tab)
+        self.gallery_stack.setCurrentIndex(1)
+        self.single_view_widget.set_context(
+            event_id=None,
+            media_id=rec.get("media_id"),
+        )
+        self.single_view_widget.set_image(abs_path)
 
     def _delete_selected_person(self):
         selected = self._persons_table.selectedItems()
@@ -1303,6 +1487,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # event column
         self.events_column.addWidget(self.event_search)
+        self.event_card_list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.event_card_list_widget.customContextMenuRequested.connect(self.show_event_context_menu)
         self.events_column.addWidget(self.event_card_list_widget)
         # Person filter banner (hidden by default)
         self._person_filter_bar = QtWidgets.QWidget()

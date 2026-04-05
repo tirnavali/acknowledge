@@ -102,6 +102,22 @@ class EventService(BaseService):
             dst = os.path.join(vault_folder, filename)
             if not os.path.exists(dst):
                 shutil.copy2(src, dst)
+            
+            # Pre-generate thumbnail to make gallery load instantaneous
+            try:
+                thumb_dir = os.path.join(vault_folder, ".thumbnails")
+                os.makedirs(thumb_dir, exist_ok=True)
+                thumb_path = os.path.join(thumb_dir, filename + ".thumb.jpg")
+                if not os.path.exists(thumb_path):
+                    from PIL import Image
+                    with Image.open(dst) as img:
+                        if img.mode != "RGB":
+                            img = img.convert("RGB")
+                        img.thumbnail((300, 300))
+                        img.save(thumb_path, "JPEG", quality=85)
+            except Exception as e:
+                self.logger.warning(f"Could not pre-generate thumbnail for {filename}: {e}")
+
             if progress_callback is not None:
                 progress_callback(i, total)
 

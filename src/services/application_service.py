@@ -10,6 +10,7 @@ from src.repositories.event_repository import EventRepository
 from src.repositories.media_repository import MediaRepository
 from src.repositories.face_repository import FaceRepository
 from src.repositories.person_repository import PersonRepository
+from src.repositories.person_note_repository import PersonNoteRepository
 
 class ApplicationService:
     """Main application service that orchestrates all other services."""
@@ -25,12 +26,13 @@ class ApplicationService:
         self.media_repo = MediaRepository()
         self.face_repo = FaceRepository()
         self.person_repo = PersonRepository()
-        
+        self.person_note_repo = PersonNoteRepository()
+
         # Create services
         self.event_service = EventService(self.event_repo)
         self.media_service = MediaService(self.media_repo, self.event_repo)
         self.face_service = FaceService(self.face_repo, self.person_repo)
-        self.person_service = PersonService(self.person_repo)
+        self.person_service = PersonService(self.person_repo, self.person_note_repo)
         self.caption_service = CaptionService()   # singleton, model loads lazily
 
         self.logger.info("Application services initialized successfully")

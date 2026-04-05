@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Enum, Boolean, Table
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Enum, Boolean, Table, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -58,6 +58,7 @@ class Media(Base):
     
     media_type = Column(String, nullable=False) # Polimorfik ayrıştırıcı
     file_path = Column(String, unique=True, nullable=False)
+    title = Column(String(500), nullable=True)
     
     caption_tr = Column(Text, nullable=True)
     caption_en = Column(Text, nullable=True)
@@ -122,3 +123,16 @@ class Person(Base):
 
     def __repr__(self):
         return f"<Person(name='{self.name}')>"
+
+
+class PersonNote(Base):
+    __tablename__ = "person_notes"
+
+    id        = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    person_id = Column(UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
+    media_id  = Column(UUID(as_uuid=True), ForeignKey("medias.id",  ondelete="CASCADE"), nullable=False)
+    note      = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("person_id", "media_id", name="uq_person_note"),)

@@ -13,6 +13,7 @@ from uuid import UUID
 from PySide6 import QtCore, QtWidgets, QtGui
 
 from face_overlay_widget import FaceOverlayWidget
+from src.utils import path_util
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,8 @@ class SingleViewWidget(QtWidgets.QWidget):
     ):
         super().__init__(parent)
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
 
         self._face_service      = face_service
         self._face_service      = face_service  # Use the actual service
@@ -105,6 +108,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         # Raw FaceResult list from last detection (needed to save to DB)
         self._pending_results: list = []
         self._skip_similarity = False  # set by reset to skip auto-matching
+        self._zoom_factor = 1.0        # 1.0 = fit to container; >1.0 = zoom in; <1.0 = zoom out
 
         self._init_ui()
 
@@ -178,6 +182,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay.face_named.connect(self._on_face_named)
         self.face_overlay.face_reset.connect(self._on_face_reset)
         self.face_overlay.face_cleared.connect(self._on_face_cleared)
+        self.face_overlay.face_note_saved.connect(self._on_face_note_saved)
         self.face_overlay.hide()
 
         # Scroll area wraps the container
@@ -205,6 +210,21 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._current_media_id = media_id
         self._face_detected_at = face_detected_at
         self._is_batch_pending = is_batch_pending
+        self.face_overlay.set_media_id(media_id)
+
+    def show_context_menu(self, pos):
+        """Show context menu for single view"""
+        if not self.current_img_path or not os.path.exists(self.current_img_path):
+            return
+            
+        menu = QtWidgets.QMenu(self)
+        reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
+        
+        action = menu.exec(self.mapToGlobal(pos))
+        
+        if action == reveal_action:
+            from src.utils import path_util
+            path_util.reveal_in_explorer(self.current_img_path)
 
     def set_image(self, img_path: str):
         """Load image asynchronously, clear overlay, trigger face detection."""
@@ -212,6 +232,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay.clear_faces()
         self._pending_results = []
         self._source_pixmap = None
+        self._zoom_factor = 1.0  # Reset zoom on new image load
 
         if not img_path or not os.path.exists(img_path):
             self.image_label.setText("Resim yüklenemedi.")
@@ -287,7 +308,7 @@ class SingleViewWidget(QtWidgets.QWidget):
 
         # No DB data → run detector
         self._status_label.setText("🔍 Yüzler algılanıyor…")
-        self._start_detection(img_path)
+        self._start_detection(path)
 
     def refresh_faces_from_db(self):
         """Re-fetch face detections from DB and update the overlay. Called after batch worker finishes."""
@@ -342,11 +363,14 @@ class SingleViewWidget(QtWidgets.QWidget):
             person_id, person_name = None, None
             if not skip_sim and self._face_service and face.embedding is not None:
                 person_id, person_name = self._face_service.find_similar_person(face.embedding)
+            pid_str = str(person_id) if person_id else None
             face_dicts.append({
                 "bbox"        : {"x1": face.x1, "y1": face.y1, "x2": face.x2, "y2": face.y2},
                 "face_id"     : None,
                 "person_name" : person_name,
                 "face_index"  : i,
+                "person_id"   : pid_str,
+                "note"        : self._load_note(pid_str, self._current_media_id),
             })
 
         # Ensure media record exists in DB (create it if needed)
@@ -449,11 +473,14 @@ class SingleViewWidget(QtWidgets.QWidget):
             if isinstance(bbox, str):
                 import json
                 bbox = json.loads(bbox)
+            person_id = str(row["person_id"]) if row.get("person_id") else None
             face_dicts.append({
                 "bbox"        : bbox,
                 "face_id"     : str(row["id"]) if row.get("id") else None,
                 "person_name" : row.get("person_name"),
                 "face_index"  : i,
+                "person_id"   : person_id,
+                "note"        : self._load_note(person_id, self._current_media_id),
             })
 
         self._refresh_person_names()
@@ -462,6 +489,34 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay.setGeometry(self._image_container.rect())
         self.face_overlay.show()
         self.face_overlay.raise_()
+
+    # ------------------------------------------------------------------
+    # Note helpers
+    # ------------------------------------------------------------------
+
+    def _load_note(self, person_id, media_id) -> str:
+        if not person_id or not media_id or not self._person_service:
+            return ""
+        try:
+            from uuid import UUID
+            return self._person_service.get_note(UUID(str(person_id)), media_id)
+        except Exception as e:
+            logger.warning(f"_load_note failed: {e}")
+            return ""
+
+    def _on_face_note_saved(self, face_index: int, note: str):
+        face = next((f for f in self.face_overlay._faces if f["face_index"] == face_index), None)
+        person_id = face.get("person_id") if face else None
+        if not person_id or not self._current_media_id or not self._person_service:
+            return
+        try:
+            from uuid import UUID
+            self._person_service.save_note(UUID(str(person_id)), self._current_media_id, note)
+            # Keep the cached note in the face dict so re-opening the popup shows it
+            if face is not None:
+                face["note"] = note
+        except Exception as e:
+            logger.warning(f"_on_face_note_saved failed: {e}")
 
     # ------------------------------------------------------------------
     # Name assignment
@@ -577,6 +632,11 @@ class SingleViewWidget(QtWidgets.QWidget):
             self._person_service.link_to_media(final_person_id, self._current_media_id)
 
         self.face_overlay.update_person_name(face_index, name)
+        # Update person_id in the face dict so the note textarea is enabled on re-open
+        for f in self.face_overlay._faces:
+            if f["face_index"] == face_index:
+                f["person_id"] = str(final_person_id)
+                break
         self._status_label.setText(f"✅ '{name}' {action}.")
         self.facesChanged.emit()
 
@@ -658,14 +718,34 @@ class SingleViewWidget(QtWidgets.QWidget):
     # ------------------------------------------------------------------
 
     def _scale_and_show(self, pixmap: QtGui.QPixmap, smooth: bool = True):
-        """Scale pixmap to fit the container and display it."""
+        """Scale pixmap based on zoom factor and fit to container."""
+        if pixmap.isNull():
+            return
+
+        # Base scale that fits the image into the visible container
+        container_size = self.scroll_area.size() - QtCore.QSize(20, 20) # padding
+        pw, ph = pixmap.width(), pixmap.height()
+        cw, ch = container_size.width(), container_size.height()
+
+        if pw == 0 or ph == 0:
+            return
+
+        fit_scale = min(cw / pw, ch / ph)
+        total_scale = fit_scale * self._zoom_factor
+
+        new_width = int(pw * total_scale)
+        new_height = int(ph * total_scale)
+
+        # Scale and show
         mode = QtCore.Qt.SmoothTransformation if smooth else QtCore.Qt.FastTransformation
         scaled = pixmap.scaled(
-            self._image_container.size(),
+            new_width, new_height,
             QtCore.Qt.KeepAspectRatio,
             mode,
         )
         self.image_label.setPixmap(scaled)
+        # Ensure label matches the pixmap size so scrollbars work correctly
+        self.image_label.setFixedSize(scaled.size())
 
     def _refresh_pixmap(self):
         """Re-scale the cached source pixmap on resize — never reloads from disk."""
@@ -681,16 +761,10 @@ class SingleViewWidget(QtWidgets.QWidget):
         if pm is None or pm.isNull():
             return self._image_container.rect()
 
-        label_size = self._image_container.size()
-        pm_size    = pm.size()
-
-        x_off = (label_size.width()  - pm_size.width())  // 2
-        y_off = (label_size.height() - pm_size.height()) // 2
-
-        return QtCore.QRect(
-            QtCore.QPoint(x_off, y_off),
-            pm_size,
-        )
+        # The image_label's geometry inside _image_container perfectly describes
+        # where the scaled image pixels reside, because we did setFixedSize()
+        # on the label to precisely match the scaled pixmap.
+        return self.image_label.geometry()
 
     # ------------------------------------------------------------------
     # Qt events
@@ -709,8 +783,62 @@ class SingleViewWidget(QtWidgets.QWidget):
             self.nextRequested.emit()
         elif event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Up):
             self.prevRequested.emit()
+        elif event.key() == QtCore.Qt.Key_Space:
+            self.doubleClicked.emit() # space bar toggles back to gallery
         else:
             super().keyPressEvent(event)
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel for zooming towards cursor."""
+        if not self._source_pixmap or self._source_pixmap.isNull():
+            return
+
+        angle = event.angleDelta().y()
+        zoom_step = 1.1 if angle > 0 else 1/1.1
+        
+        # Clamp zoom factor
+        new_factor = self._zoom_factor * zoom_step
+        if not (0.1 <= new_factor <= 20.0):
+            return
+
+        # 1. Capture old mouse positions
+        container_pos = self._image_container.mapFrom(self, event.position().toPoint())
+        old_x, old_y = container_pos.x(), container_pos.y()
+        old_w = max(1, self._image_container.width())
+        old_h = max(1, self._image_container.height())
+
+        viewport = self.scroll_area.viewport()
+        viewport_pos = viewport.mapFrom(self, event.position().toPoint())
+
+        # 2. Apply zoom
+        self._zoom_factor = new_factor
+        self._refresh_pixmap()
+        self._image_container.adjustSize()
+        
+        # Need to force event loop to process layout changes so scrollbars update max values
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents)
+        
+        # 3. Calculate new scrollbar values to keep mouse pointing at the same spot
+        new_w = self._image_container.width()
+        new_h = self._image_container.height()
+        
+        scale_x = new_w / old_w
+        scale_y = new_h / old_h
+        
+        new_x = old_x * scale_x
+        new_y = old_y * scale_y
+
+        h_bar = self.scroll_area.horizontalScrollBar()
+        v_bar = self.scroll_area.verticalScrollBar()
+        
+        h_bar.setValue(int(new_x - viewport_pos.x()))
+        v_bar.setValue(int(new_y - viewport_pos.y()))
+
+        # Update overlay geometry and alignment
+        self.face_overlay.setGeometry(self._image_container.rect())
+        self.face_overlay._img_rect = self._get_image_display_rect()
+        self.face_overlay.raise_()
+        self.face_overlay.update()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
