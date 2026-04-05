@@ -67,7 +67,7 @@ class CaptionService:
         (created by download_model.py) to avoid corporate SSL issues at runtime.
         Falls back to the HuggingFace hub ID if the local copy is absent.
         """
-        if self._model is not None:
+        if self._model is not None and self._processor is not None:
             return
         try:
             import torch
@@ -93,25 +93,27 @@ class CaptionService:
             logger.info(f"CaptionService: model source → {model_id}")
 
             if cuda_available:
-                # device_map="auto" is CUDA-only — lets transformers shard across GPUs
+                # device_map="auto" lets transformers shard across GPUs
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     device_map="auto",
                 )
             elif mps_available:
-                # device_map="auto" is unsupported on MPS; load then move manually
+                # device_map={"": "mps"} places weights on MPS during loading.
+                # Calling .to("mps") after from_pretrained fails on newer transformers
+                # because lazy-loaded meta tensors cannot be copied with .to().
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
+                    device_map={"": "mps"},
                 )
-                self._model.to("mps")
             else:
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.float32,
+                    device_map={"": "cpu"},
                 )
-                self._model.to("cpu")
 
             self._processor = Qwen2_5_VLProcessor.from_pretrained(model_id)
             logger.info("✅ CaptionService: Qwen2.5-VL-3B-Instruct loaded")
@@ -177,19 +179,68 @@ class CaptionService:
         )
         return decoded[0].strip() if decoded else ""
 
+    # Longest side of the pre-resized image fed to the model.
+    # Keeps PIL memory and model input small regardless of original resolution.
+    MAX_SIDE_PX = 1024
+
+    @staticmethod
+    def _prepare_image(img_path: str, max_side: int) -> str:
+        """
+        Return a path to a downscaled copy of the image.
+        If the image already fits within max_side × max_side it is returned as-is.
+        The resized copy is written to a temp file that the caller must delete.
+        Returns (path, is_temp) tuple.
+        """
+        import tempfile
+        from PIL import Image as _Image
+
+        with _Image.open(img_path) as im:
+            w, h = im.size
+            if max(w, h) <= max_side:
+                return img_path, False          # already small enough
+
+            # Resize keeping aspect ratio
+            ratio = max_side / max(w, h)
+            new_w, new_h = max(1, int(w * ratio)), max(1, int(h * ratio))
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGB")
+            resized = im.resize((new_w, new_h), _Image.LANCZOS)
+            if resized.mode != "RGB":
+                resized = resized.convert("RGB")
+
+            tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+            resized.save(tmp.name, "JPEG", quality=88)
+            logger.debug(f"_prepare_image: {w}×{h} → {new_w}×{new_h}, tmp={tmp.name}")
+            return tmp.name, True
+
     def analyse(self, img_path: str) -> CaptionResult:
         """
         Run 4 sequential prompts on the image and return a CaptionResult.
         Blocking — must be called from a QThread worker.
+        The image is pre-resized to MAX_SIDE_PX before being passed to the model
+        so that full-resolution press photos never exhaust GPU/system memory.
         """
+        import os as _os
         result = CaptionResult(img_path=img_path)
-        image_uri = str(Path(img_path).resolve())  # absolute path, qwen-vl-utils handles Windows paths directly
+
+        # Pre-resize outside the lock so PIL work doesn't block other threads
+        try:
+            tmp_path, is_temp = self._prepare_image(img_path, self.MAX_SIDE_PX)
+        except Exception as e:
+            result.error = f"Resim hazırlanamadı: {e}"
+            return result
+
+        image_uri = str(Path(tmp_path).resolve())
 
         with self._lock:
             try:
                 self._load_model()
             except Exception as e:
                 result.error = f"Model yüklenemedi: {e}"
+                return result
+
+            if not self.is_ready():
+                result.error = "Model yüklenemedi (processor eksik)"
                 return result
 
             try:
@@ -200,5 +251,11 @@ class CaptionService:
             except Exception as e:
                 logger.error(f"CaptionService.analyse error for {img_path}: {e}")
                 result.error = str(e)
+            finally:
+                if is_temp:
+                    try:
+                        _os.unlink(tmp_path)
+                    except OSError:
+                        pass
 
         return result
