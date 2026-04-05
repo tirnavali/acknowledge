@@ -187,6 +187,20 @@ class MediaService(BaseService):
             self.logger.error(f"Error saving captions for media {media_id}: {e}")
             raise
 
+    def mark_captioned(self, media_id) -> None:
+        try:
+            self.media_repository.mark_captioned(media_id)
+        except Exception as e:
+            self.logger.error(f"Error marking captioned for media {media_id}: {e}")
+            raise
+
+    def save_star_rating(self, media_id, rating: int) -> None:
+        try:
+            self.media_repository.save_star_rating(media_id, rating)
+        except Exception as e:
+            self.logger.error(f"Error saving star rating for media {media_id}: {e}")
+            raise
+
     def get_gallery_items_for_person(self, person_id):
         """Get GalleryItems for all media linked to a person."""
         try:

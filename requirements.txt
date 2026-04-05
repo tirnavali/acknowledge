@@ -10,8 +10,10 @@ requests
 numpy
 insightface
 opencv-python
-# AI captioning — for CUDA, install torch first from https://pytorch.org with the correct CUDA version
+# AI captioning — for CUDA, install torch+torchvision from https://pytorch.org with the correct CUDA version
 torch>=2.1.0
+torchvision>=0.16.0
 transformers>=4.40.0
 accelerate>=0.28.0
 qwen-vl-utils>=0.0.8
+av

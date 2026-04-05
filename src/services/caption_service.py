@@ -34,6 +34,19 @@ from src.domain.entities.caption_result import CaptionResult
 
 logger = logging.getLogger(__name__)
 
+# Pass HF_TOKEN to huggingface_hub if set in environment / .env
+def _apply_hf_token() -> None:
+    import os
+    token = os.environ.get("HF_TOKEN", "").strip()
+    if token:
+        try:
+            from huggingface_hub import login
+            login(token=token, add_to_git_credential=False)
+        except Exception:
+            pass  # non-fatal — anonymous access still works
+
+_apply_hf_token()
+
 
 class CaptionService:
     _instance = None
@@ -61,7 +74,14 @@ class CaptionService:
             from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
 
             cuda_available = torch.cuda.is_available()
-            self._device = "cuda" if cuda_available else "cpu"
+            mps_available  = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+            if cuda_available:
+                self._device = "cuda"
+            elif mps_available:
+                self._device = "mps"
+            else:
+                self._device = "cpu"
             logger.info(f"CaptionService: loading model on {self._device}")
 
             _candidates = [
@@ -71,12 +91,21 @@ class CaptionService:
             _local = next((p for p in _candidates if (p / "config.json").exists()), None)
             model_id = str(_local) if _local else "Qwen/Qwen2.5-VL-3B-Instruct"
             logger.info(f"CaptionService: model source → {model_id}")
+
             if cuda_available:
+                # device_map="auto" is CUDA-only — lets transformers shard across GPUs
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     device_map="auto",
                 )
+            elif mps_available:
+                # device_map="auto" is unsupported on MPS; load then move manually
+                self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                    model_id,
+                    torch_dtype=torch.bfloat16,
+                )
+                self._model.to("mps")
             else:
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
@@ -95,6 +124,13 @@ class CaptionService:
     def is_ready(self) -> bool:
         return self._model is not None and self._processor is not None
 
+    # Max pixels fed to the model per prompt.
+    # Qwen2.5-VL tiles images dynamically; very large press photos (50 MP+)
+    # can exceed available VRAM/RAM without this cap.
+    # 1280×1280 = ~1.6 M pixels — safe for RTX 3060 (12 GB) and M4 Pro (24 GB).
+    MAX_PIXELS = 1280 * 1280
+    MIN_PIXELS = 224 * 224
+
     def _run_prompt(self, image_uri: str, prompt_text: str) -> str:
         """Run a single vision prompt and return stripped output text."""
         from qwen_vl_utils import process_vision_info
@@ -103,7 +139,12 @@ class CaptionService:
             {
                 "role": "user",
                 "content": [
-                    {"type": "image", "image": image_uri},
+                    {
+                        "type": "image",
+                        "image": image_uri,
+                        "min_pixels": self.MIN_PIXELS,
+                        "max_pixels": self.MAX_PIXELS,
+                    },
                     {"type": "text", "text": prompt_text},
                 ],
             }

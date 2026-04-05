@@ -24,6 +24,9 @@ class GalleryItem(QtGui.QStandardItem):
         # Store DB search rank (set by FTS query; 0 for non-search items)
         self.search_rank = float(db_metadata.get('rank') or 0) if db_metadata else 0.0
 
+        # Star rating (0 = unrated, 1–5)
+        self.star_rating = int(db_metadata.get('star_rating') or 0) if db_metadata else 0
+
         # Pre-populate from DB if available to avoid disk I/O
         if db_metadata:
             self._pop_from_db(db_metadata)
@@ -180,9 +183,10 @@ class GalleryItemModel(QtGui.QStandardItemModel):
         else:
             pixmap = pixmap.scaled(150, 150, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
 
+        painter = QtGui.QPainter(pixmap)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+
         if item.in_db:
-            painter = QtGui.QPainter(pixmap)
-            painter.setRenderHint(QtGui.QPainter.Antialiasing)
             badge_size = 22
             cx, cy = pixmap.width() - badge_size // 2 - 4, badge_size // 2 + 4
             painter.setBrush(QtGui.QColor("#2d7d46"))
@@ -190,7 +194,22 @@ class GalleryItemModel(QtGui.QStandardItemModel):
             painter.drawEllipse(QtCore.QPoint(cx, cy), badge_size // 2, badge_size // 2)
             font = painter.font(); font.setBold(True); font.setPixelSize(13); painter.setFont(font)
             painter.drawText(QtCore.QRect(cx-11, cy-11, 22, 22), QtCore.Qt.AlignCenter, "\u2713")
-            painter.end()
+
+        # Star rating strip at the bottom
+        rating = getattr(item, 'star_rating', 0)
+        if rating and rating > 0:
+            star_font = painter.font()
+            star_font.setPixelSize(14)
+            star_font.setBold(False)
+            painter.setFont(star_font)
+            stars_text = "★" * rating + "☆" * (5 - rating)
+            strip_h = 18
+            strip_rect = QtCore.QRect(0, pixmap.height() - strip_h, pixmap.width(), strip_h)
+            painter.fillRect(strip_rect, QtGui.QColor(0, 0, 0, 160))
+            painter.setPen(QtGui.QColor("#FFD700"))
+            painter.drawText(strip_rect, QtCore.Qt.AlignCenter, stars_text)
+
+        painter.end()
         return pixmap
 
     def start_loading(self):
@@ -215,6 +234,12 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         self._filter_text = ""
         self._filter_date = None
         self._filter_event_id = None   # set during search mode to narrow by event
+        self._filter_min_stars = 0     # 0 = no star filter
+
+    def setStarFilter(self, min_stars: int):
+        """Show only items with star_rating >= min_stars. 0 clears the filter."""
+        self._filter_min_stars = max(0, min(5, int(min_stars)))
+        self.invalidateFilter()
 
     def setEventFilter(self, event_id):
         """Narrow results to a single event (pass None to show all events)."""
@@ -231,13 +256,17 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
             self.sort(-1)
 
     def filterAcceptsRow(self, source_row, source_parent):
-        if not self._filter_text and not self._filter_date and not self._filter_event_id:
+        if not self._filter_text and not self._filter_date and not self._filter_event_id and not self._filter_min_stars:
             return True
-        
+
         model = self.sourceModel()
         index = model.index(source_row, 0, source_parent)
         item = model.itemFromIndex(index)
         if not item: return False
+
+        if self._filter_min_stars:
+            if getattr(item, 'star_rating', 0) < self._filter_min_stars:
+                return False
 
         if self._filter_event_id:
             if not item.event_id or item.event_id != self._filter_event_id:

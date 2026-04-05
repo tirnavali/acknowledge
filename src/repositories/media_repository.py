@@ -195,6 +195,15 @@ class MediaRepository:
             )
             db.commit()
 
+    def mark_captioned(self, media_id: UUID) -> None:
+        """Set captioned_at = now for a media record."""
+        with get_db() as db:
+            db.execute(
+                text("UPDATE medias SET captioned_at = now() WHERE id = :mid"),
+                {"mid": str(media_id)}
+            )
+            db.commit()
+
     def search_across_events(self, query: str) -> list[dict]:
         """PostgreSQL FTS across all IPTC fields + persons. Returns rows with 'rank'.
         Supports prefix wildcard: 'anka' matches 'ankara', 'pol' matches 'polis', etc.
@@ -246,6 +255,16 @@ class MediaRepository:
                 ORDER BY rank DESC
             """), {"tsq": tsq})
             return [dict(row._mapping) for row in result.fetchall()]
+
+    def save_star_rating(self, media_id: UUID, rating: int) -> None:
+        """Persist a star rating (0–5) for a media record."""
+        rating = max(0, min(5, int(rating)))
+        with get_db() as db:
+            db.execute(
+                text("UPDATE medias SET star_rating = :r WHERE id = :id"),
+                {"r": rating, "id": str(media_id)},
+            )
+            db.commit()
 
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""

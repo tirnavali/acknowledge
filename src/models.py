@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Enum, Boolean, Table, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Enum, Boolean, Table, UniqueConstraint, SmallInteger
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -68,6 +68,8 @@ class Media(Base):
     text_content = Column(Text, nullable=True)
     face_encoding = Column(Vector(128), nullable=True)
     face_detected_at = Column(DateTime(timezone=True), nullable=True)
+    captioned_at     = Column(DateTime(timezone=True), nullable=True)
+    star_rating = Column(SmallInteger, nullable=False, default=0)
 
     # IPTC Metadata Columns
     iptc_headline = Column(String(500), nullable=True)
