@@ -1225,7 +1225,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        # Search bar + refresh button
+        # ── Row 1: person name search + refresh + delete ──
         top_bar = QtWidgets.QHBoxLayout()
         self._persons_search = QtWidgets.QLineEdit()
         self._persons_search.setPlaceholderText("İsimde ara…")
@@ -1245,7 +1245,19 @@ class MainWindow(QtWidgets.QMainWindow):
         top_bar.addWidget(delete_btn)
         layout.addLayout(top_bar)
 
-        # Table
+        # ── Row 2: note search ──
+        note_bar = QtWidgets.QHBoxLayout()
+        note_icon = QtWidgets.QLabel("🔍")
+        note_bar.addWidget(note_icon)
+        self._notes_search = QtWidgets.QLineEdit()
+        self._notes_search.setPlaceholderText("Notlarda ara…")
+        self._notes_search.setFixedHeight(30)
+        self._notes_search.textChanged.connect(self._on_notes_search_changed)
+        note_bar.addWidget(self._notes_search)
+        layout.addLayout(note_bar)
+
+        # ── Stacked area: persons table / notes results table ──
+        # Persons table (default view)
         self._persons_table = QtWidgets.QTableWidget()
         self._persons_table.setColumnCount(2)
         self._persons_table.setHorizontalHeaderLabels(["İsim", "Fotoğraf Sayısı"])
@@ -1264,6 +1276,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persons_table.setCursor(QtCore.Qt.PointingHandCursor)
         self._persons_table.cellDoubleClicked.connect(self._on_person_row_clicked)
         layout.addWidget(self._persons_table)
+
+        # Notes results table (shown only during note search)
+        self._notes_table = QtWidgets.QTableWidget()
+        self._notes_table.setColumnCount(3)
+        self._notes_table.setHorizontalHeaderLabels(["Kişi", "Not", "Dosya"])
+        hh = self._notes_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        hh.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        self._notes_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self._notes_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self._notes_table.setAlternatingRowColors(True)
+        self._notes_table.verticalHeader().setVisible(False)
+        self._notes_table.setSortingEnabled(False)
+        self._notes_table.setCursor(QtCore.Qt.PointingHandCursor)
+        self._notes_table.cellDoubleClicked.connect(self._on_note_row_clicked)
+        self._notes_table.hide()
+        layout.addWidget(self._notes_table)
 
         hint = QtWidgets.QLabel("Bir satıra çift tıklayarak o kişiye ait fotoğrafları Etkinlikler sekmesinde görüntüleyin.")
         hint.setStyleSheet("color: #888; font-size: 10px;")
@@ -1294,6 +1324,84 @@ class MainWindow(QtWidgets.QMainWindow):
             item = self._persons_table.item(row, 0)
             visible = text in (item.text().lower() if item else "")
             self._persons_table.setRowHidden(row, not visible)
+
+    def _on_notes_search_changed(self, text: str):
+        query = text.strip()
+        if not query:
+            # Restore persons table
+            self._notes_table.hide()
+            self._persons_table.show()
+            return
+
+        # Show notes results table
+        self._persons_table.hide()
+        self._notes_table.show()
+
+        try:
+            results = self.app_service.get_person_service().search_notes(query)
+        except Exception:
+            results = []
+
+        from src.utils import path_util
+        self._notes_table.setSortingEnabled(False)
+        self._notes_table.setRowCount(len(results))
+        for i, rec in enumerate(results):
+            person_item = QtWidgets.QTableWidgetItem(rec.get("person_name", ""))
+            person_item.setData(QtCore.Qt.UserRole, rec)   # full record for navigation
+
+            note_item = QtWidgets.QTableWidgetItem(rec.get("note", ""))
+            note_item.setToolTip(rec.get("note", ""))
+
+            abs_path = path_util.from_db_path(rec.get("file_path", ""))
+            file_item = QtWidgets.QTableWidgetItem(os.path.basename(abs_path))
+            file_item.setToolTip(abs_path)
+
+            self._notes_table.setItem(i, 0, person_item)
+            self._notes_table.setItem(i, 1, note_item)
+            self._notes_table.setItem(i, 2, file_item)
+
+    def _on_note_row_clicked(self, row: int, _col: int):
+        person_item = self._notes_table.item(row, 0)
+        if person_item is None:
+            return
+        rec = person_item.data(QtCore.Qt.UserRole)
+        if not rec:
+            return
+
+        from src.utils import path_util
+        abs_path = path_util.from_db_path(rec.get("file_path", ""))
+        if not abs_path or not os.path.exists(abs_path):
+            QtWidgets.QMessageBox.warning(self, "Hata", "Dosya bulunamadı.")
+            return
+
+        # Load the single photo in gallery and switch to single view
+        from gallery_item_model import GalleryItem
+        item = GalleryItem(
+            os.path.basename(abs_path),
+            abs_path,
+            in_db=True,
+            db_metadata=rec,
+        )
+        self.gallery_item_model = GalleryItemModel([item])
+        if hasattr(self, "gallery_search_proxy"):
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            self.gallery_search_proxy.setFilterText("")
+        else:
+            self.event_gallery_list_widget.setModel(self.gallery_item_model)
+        self.gallery_item_model.start_loading()
+
+        self._person_filter_label.setText(f"Not araması: {rec.get('person_name', '')}  —  {os.path.basename(abs_path)}")
+        self._person_filter_bar.show()
+
+        # Switch to events tab and open single view for this image
+        self.tab_widget.setCurrentWidget(self.events_tab)
+        self.gallery_stack.setCurrentIndex(1)
+        self.single_view_widget.set_context(
+            event_id=None,
+            media_id=rec.get("media_id"),
+        )
+        self.single_view_widget.set_image(abs_path)
 
     def _delete_selected_person(self):
         selected = self._persons_table.selectedItems()

@@ -131,3 +131,10 @@ class PersonService(BaseService):
         except Exception as e:
             self.logger.error(f"Error getting note for person {person_id} / media {media_id}: {e}")
             return ""
+
+    def search_notes(self, query: str) -> list[dict]:
+        try:
+            return self.person_note_repository.search_notes(query)
+        except Exception as e:
+            self.logger.error(f"Error searching notes for '{query}': {e}")
+            return []
