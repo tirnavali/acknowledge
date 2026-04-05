@@ -182,6 +182,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay.face_named.connect(self._on_face_named)
         self.face_overlay.face_reset.connect(self._on_face_reset)
         self.face_overlay.face_cleared.connect(self._on_face_cleared)
+        self.face_overlay.face_note_saved.connect(self._on_face_note_saved)
         self.face_overlay.hide()
 
         # Scroll area wraps the container
@@ -209,6 +210,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._current_media_id = media_id
         self._face_detected_at = face_detected_at
         self._is_batch_pending = is_batch_pending
+        self.face_overlay.set_media_id(media_id)
 
     def show_context_menu(self, pos):
         """Show context menu for single view"""
@@ -361,11 +363,14 @@ class SingleViewWidget(QtWidgets.QWidget):
             person_id, person_name = None, None
             if not skip_sim and self._face_service and face.embedding is not None:
                 person_id, person_name = self._face_service.find_similar_person(face.embedding)
+            pid_str = str(person_id) if person_id else None
             face_dicts.append({
                 "bbox"        : {"x1": face.x1, "y1": face.y1, "x2": face.x2, "y2": face.y2},
                 "face_id"     : None,
                 "person_name" : person_name,
                 "face_index"  : i,
+                "person_id"   : pid_str,
+                "note"        : self._load_note(pid_str, self._current_media_id),
             })
 
         # Ensure media record exists in DB (create it if needed)
@@ -468,11 +473,14 @@ class SingleViewWidget(QtWidgets.QWidget):
             if isinstance(bbox, str):
                 import json
                 bbox = json.loads(bbox)
+            person_id = str(row["person_id"]) if row.get("person_id") else None
             face_dicts.append({
                 "bbox"        : bbox,
                 "face_id"     : str(row["id"]) if row.get("id") else None,
                 "person_name" : row.get("person_name"),
                 "face_index"  : i,
+                "person_id"   : person_id,
+                "note"        : self._load_note(person_id, self._current_media_id),
             })
 
         self._refresh_person_names()
@@ -481,6 +489,34 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay.setGeometry(self._image_container.rect())
         self.face_overlay.show()
         self.face_overlay.raise_()
+
+    # ------------------------------------------------------------------
+    # Note helpers
+    # ------------------------------------------------------------------
+
+    def _load_note(self, person_id, media_id) -> str:
+        if not person_id or not media_id or not self._person_service:
+            return ""
+        try:
+            from uuid import UUID
+            return self._person_service.get_note(UUID(str(person_id)), media_id)
+        except Exception as e:
+            logger.warning(f"_load_note failed: {e}")
+            return ""
+
+    def _on_face_note_saved(self, face_index: int, note: str):
+        face = next((f for f in self.face_overlay._faces if f["face_index"] == face_index), None)
+        person_id = face.get("person_id") if face else None
+        if not person_id or not self._current_media_id or not self._person_service:
+            return
+        try:
+            from uuid import UUID
+            self._person_service.save_note(UUID(str(person_id)), self._current_media_id, note)
+            # Keep the cached note in the face dict so re-opening the popup shows it
+            if face is not None:
+                face["note"] = note
+        except Exception as e:
+            logger.warning(f"_on_face_note_saved failed: {e}")
 
     # ------------------------------------------------------------------
     # Name assignment
@@ -596,6 +632,11 @@ class SingleViewWidget(QtWidgets.QWidget):
             self._person_service.link_to_media(final_person_id, self._current_media_id)
 
         self.face_overlay.update_person_name(face_index, name)
+        # Update person_id in the face dict so the note textarea is enabled on re-open
+        for f in self.face_overlay._faces:
+            if f["face_index"] == face_index:
+                f["person_id"] = str(final_person_id)
+                break
         self._status_label.setText(f"✅ '{name}' {action}.")
         self.facesChanged.emit()
 

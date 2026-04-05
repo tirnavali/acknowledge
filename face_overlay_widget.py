@@ -88,6 +88,7 @@ class FaceZoomPopup(QtWidgets.QDialog):
     face_named   = QtCore.Signal(int, str)  # (face_index, name)
     face_reset   = QtCore.Signal(int)       # (face_index) — re-detect all faces
     face_cleared = QtCore.Signal(int)       # (face_index) — clear this face's person only
+    note_saved   = QtCore.Signal(int, str)  # (face_index, note_text)
 
     def __init__(
         self,
@@ -96,11 +97,14 @@ class FaceZoomPopup(QtWidgets.QDialog):
         face_index: int,
         parent=None,
         person_names: list[str] | None = None,
+        person_id: str | None = None,
+        existing_note: str = "",
     ):
         super().__init__(parent, QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle("Yüz Zoom")
         self._face_index = face_index
+        self._person_id = person_id
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -136,6 +140,7 @@ class FaceZoomPopup(QtWidgets.QDialog):
         if face_name:
             self._name_edit.setText(face_name)
         self._name_edit.committed.connect(self._on_committed)
+        self._name_edit.textChanged.connect(self._on_name_text_changed)
         if person_names:
             self._name_edit.setCompleter(ContainsCompleter(person_names, self._name_edit))
         row.addWidget(self._name_edit)
@@ -184,6 +189,28 @@ class FaceZoomPopup(QtWidgets.QDialog):
         row.addWidget(reset_btn)
 
         cLayout.addLayout(row)
+
+        # --- Note textarea ---
+        self._note_edit = QtWidgets.QTextEdit()
+        self._note_edit.setPlaceholderText("Bu kişi hakkında not…")
+        self._note_edit.setFixedHeight(72)
+        self._note_edit.setStyleSheet("""
+            QTextEdit {
+                background: rgba(0,0,0,180);
+                color: #fff;
+                border: 1px solid rgba(80,200,255,120);
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 10pt;
+            }
+            QTextEdit:focus { border: 1px solid #50C8FF; }
+        """)
+        if existing_note:
+            self._note_edit.setPlainText(existing_note)
+        if not person_id:
+            self._note_edit.setEnabled(False)
+            self._note_edit.setPlaceholderText("Not eklemek için önce kişi adı girin…")
+        cLayout.addWidget(self._note_edit)
 
         # Confirm button
         confirm_btn = QtWidgets.QPushButton("✔ Kaydet")
@@ -238,9 +265,17 @@ class FaceZoomPopup(QtWidgets.QDialog):
         # Focus the input immediately
         self._name_edit.setFocus()
 
+    def _on_name_text_changed(self, text: str) -> None:
+        if not self._person_id and text.strip():
+            self._note_edit.setEnabled(True)
+            self._note_edit.setPlaceholderText("Bu kişi hakkında not…")
+
     def _on_committed(self, name: str) -> None:
         if name:
             self.face_named.emit(self._face_index, name)
+        note_text = self._note_edit.toPlainText().strip()
+        if note_text and (self._person_id or name):
+            self.note_saved.emit(self._face_index, note_text)
         self.close()
 
     def _on_clear(self) -> None:
@@ -276,11 +311,13 @@ class FaceOverlayWidget(QtWidgets.QWidget):
     """
 
     # Emitted when user types a name and presses Enter in the zoom popup
-    face_named   = QtCore.Signal(int, str)
+    face_named      = QtCore.Signal(int, str)
     # Emitted when user clicks the reset button (re-detect all)
-    face_reset   = QtCore.Signal(int)
+    face_reset      = QtCore.Signal(int)
     # Emitted when user clicks the clear button (clear this face's person only)
-    face_cleared = QtCore.Signal(int)
+    face_cleared    = QtCore.Signal(int)
+    # Emitted when user saves a note in the zoom popup — (face_index, note_text)
+    face_note_saved = QtCore.Signal(int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -293,6 +330,7 @@ class FaceOverlayWidget(QtWidgets.QWidget):
         self._source_pixmap: QtGui.QPixmap | None = None
         self._zoom_popup: FaceZoomPopup | None = None
         self._person_names: list[str] = []
+        self._media_id: str | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -301,6 +339,10 @@ class FaceOverlayWidget(QtWidgets.QWidget):
     def set_source_pixmap(self, pixmap: QtGui.QPixmap | None):
         """Provide the full-res pixmap for zoom crops."""
         self._source_pixmap = pixmap
+
+    def set_media_id(self, media_id) -> None:
+        """Store the current media id so popups can pass it through for note saving."""
+        self._media_id = str(media_id) if media_id else None
 
     def set_person_names(self, names: list[str]) -> None:
         """Store person names for autocomplete in the zoom popup."""
@@ -325,6 +367,8 @@ class FaceOverlayWidget(QtWidgets.QWidget):
                 "face_id"     : face.get("face_id"),
                 "person_name" : existing,
                 "face_index"  : idx,
+                "person_id"   : face.get("person_id"),
+                "note"        : face.get("note", ""),
             })
 
         self.update()
@@ -394,10 +438,13 @@ class FaceOverlayWidget(QtWidgets.QWidget):
             face["face_index"],
             self.window(),
             person_names=self._person_names,
+            person_id=face.get("person_id"),
+            existing_note=face.get("note", ""),
         )
         popup.face_named.connect(self.face_named)
         popup.face_reset.connect(self.face_reset)
         popup.face_cleared.connect(self.face_cleared)
+        popup.note_saved.connect(self.face_note_saved)
 
         # Position near the click, but keep on screen
         screen = QtWidgets.QApplication.screenAt(global_pos)
