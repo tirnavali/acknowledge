@@ -605,9 +605,9 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             media_row = self.app_service.get_media_service().get_by_file_path(file_path)
             if media_row:
-                self._ai_caption_en.setPlainText(media_row.get('caption_en') or '')
-                self._ai_caption_tr.setPlainText(media_row.get('caption_tr') or '')
-                self._ai_tags_en.setText(media_row.get('tags_en') or '')
+                self._ai_caption_en.setPlainText(media_row.get('caption_tr') or '')
+                self._ai_caption_tr.setPlainText('')
+                self._ai_tags_en.setText(media_row.get('tags_tr') or '')
         except Exception:
             pass
 
@@ -879,9 +879,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_star_display(rating)
 
             # AI caption fields (always from media_row; clear if not yet captioned)
-            self._ai_caption_en.setPlainText((media_row.get('caption_en') or '') if media_row else '')
-            self._ai_caption_tr.setPlainText((media_row.get('caption_tr') or '') if media_row else '')
-            self._ai_tags_en.setText((media_row.get('tags_en') or '') if media_row else '')
+            self._ai_caption_en.setPlainText((media_row.get('caption_tr') or '') if media_row else '')
+            self._ai_caption_tr.setPlainText('')
+            self._ai_tags_en.setText((media_row.get('tags_tr') or '') if media_row else '')
 
 
     def save_media_iptc(self, silent=False):
@@ -1424,8 +1424,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ai_tags_en.setPlaceholderText("(AI etiketler…)")
         self._ai_tags_en.setStyleSheet(_ai_style)
 
-        self.media_details_form.addRow(QtWidgets.QLabel("🤖 AI (EN):"), self._ai_caption_en)
-        self.media_details_form.addRow(QtWidgets.QLabel("🤖 AI (TR):"), self._ai_caption_tr)
+        self._ai_caption_tr.hide()
+        self.media_details_form.addRow(QtWidgets.QLabel("🤖 AI Açıklama:"), self._ai_caption_en)
         self.media_details_form.addRow(QtWidgets.QLabel("🏷 AI Etiket:"), self._ai_tags_en)
 
         self.media_details_form.addRow(QtWidgets.QLabel("💳 Credit:"), self.media_credit_input)

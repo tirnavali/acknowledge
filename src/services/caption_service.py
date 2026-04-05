@@ -167,7 +167,11 @@ class CaptionService:
 
         import torch
         with torch.no_grad():
-            generated_ids = self._model.generate(**inputs, max_new_tokens=256)
+            generated_ids = self._model.generate(
+                **inputs,
+                max_new_tokens=256,
+                repetition_penalty=1.15,
+            )
 
         # Strip input tokens — Qwen canonical pattern
         trimmed = [
@@ -181,7 +185,7 @@ class CaptionService:
 
     # Longest side of the pre-resized image fed to the model.
     # Keeps PIL memory and model input small regardless of original resolution.
-    MAX_SIDE_PX = 1024
+    MAX_SIDE_PX = 768
 
     @staticmethod
     def _prepare_image(img_path: str, max_side: int) -> str:
@@ -213,12 +217,36 @@ class CaptionService:
             logger.debug(f"_prepare_image: {w}×{h} → {new_w}×{new_h}, tmp={tmp.name}")
             return tmp.name, True
 
+    def _parse_combined_response(self, raw: str) -> tuple[str, str]:
+        """Extract caption_tr and tags_tr from a JSON model response.
+
+        Falls back to using the raw text as caption with no tags if JSON parsing fails.
+        """
+        import json
+        import re
+
+        def _coerce_str(val) -> str:
+            if isinstance(val, list):
+                return ", ".join(str(v) for v in val)
+            return str(val) if val is not None else ""
+
+        try:
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                return _coerce_str(data.get("caption_tr", "")).strip(), _coerce_str(data.get("tags_tr", "")).strip()
+        except (json.JSONDecodeError, ValueError):
+            pass
+        logger.warning("CaptionService: JSON parse failed, raw response: %s", raw[:200])
+        return "", ""
+
     def analyse(self, img_path: str) -> CaptionResult:
         """
-        Run 4 sequential prompts on the image and return a CaptionResult.
+        Run a single combined Turkish JSON prompt and return a CaptionResult.
         Blocking — must be called from a QThread worker.
         The image is pre-resized to MAX_SIDE_PX before being passed to the model
         so that full-resolution press photos never exhaust GPU/system memory.
+        caption_en and tags_en are left empty (Turkish-only output).
         """
         import os as _os
         result = CaptionResult(img_path=img_path)
@@ -244,10 +272,13 @@ class CaptionService:
                 return result
 
             try:
-                result.caption_en = self._run_prompt(image_uri, "Describe this image in detail.")
-                result.caption_tr = self._run_prompt(image_uri, "Bu resmi detaylı bir şekilde Türkçe açıkla.")
-                result.tags_en = self._run_prompt(image_uri, "List objects in this image as comma-separated values.")
-                result.tags_tr = self._run_prompt(image_uri, "Bu resimdeki nesneleri virgülle ayrılmış değerler olarak listele.")
+                combined_prompt = (
+                    "Bu fotoğrafı Türkçe analiz et ve aşağıdaki JSON formatında yanıt ver "
+                    "(başka hiçbir şey yazma):\n"
+                    '{"caption_tr": "Detaylı Türkçe açıklama", "tags_tr": "nesne1, nesne2, nesne3"}'
+                )
+                raw = self._run_prompt(image_uri, combined_prompt)
+                result.caption_tr, result.tags_tr = self._parse_combined_response(raw)
             except Exception as e:
                 logger.error(f"CaptionService.analyse error for {img_path}: {e}")
                 result.error = str(e)
