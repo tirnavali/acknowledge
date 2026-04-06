@@ -601,9 +601,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if not disk_files:
             return
 
+        from src.utils.path_util import from_db_path
         db_records = self.app_service.get_media_service().get_all_for_event(event.id)
         captioned = {
-            os.path.normpath(r['file_path'])
+            from_db_path(r['file_path'])
             for r in db_records
             if r.get('captioned_at')
         }
