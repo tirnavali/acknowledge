@@ -253,6 +253,10 @@ class MediaRepository:
                             COALESCE(m.iptc_writer, '')                 || ' ' ||
                             COALESCE(m.iptc_copyright, '')              || ' ' ||
                             COALESCE(m.iptc_supplemental_categories,'') || ' ' ||
+                            COALESCE(m.caption_tr, '')                  || ' ' ||
+                            COALESCE(m.caption_en, '')                  || ' ' ||
+                            COALESCE(m.tags_tr, '')                     || ' ' ||
+                            COALESCE(m.tags_en, '')                     || ' ' ||
                             COALESCE(pn.names, '')                      || ' ' ||
                             COALESCE(e.name, '')                        || ' ' ||
                             COALESCE(m.file_path, '')

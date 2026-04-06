@@ -64,6 +64,17 @@ class GalleryItem(QtGui.QStandardItem):
         if pnames:
             self.iptc_data['People'] = pnames
 
+        # AI-generated captions and tags
+        for db_key, display_name in (
+            ('caption_tr', 'AI Açıklama (TR)'),
+            ('caption_en', 'AI Caption (EN)'),
+            ('tags_tr',    'AI Etiketler (TR)'),
+            ('tags_en',    'AI Tags (EN)'),
+        ):
+            val = db_metadata.get(db_key)
+            if val:
+                self.iptc_data[display_name] = str(val)
+
     def load_from_file(self):
         """Heavy I/O: Read EXIF/IPTC from file. Called from background thread."""
         if not self.exif_data:
@@ -314,6 +325,10 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
             (iptc.get('People', ''), 10), (item.text(), 8),
             (iptc.get('Headline', ''), 5), (iptc.get('Caption', ''), 4),
             (iptc.get('Keywords', ''), 3),
+            (iptc.get('AI Açıklama (TR)', ''), 4),
+            (iptc.get('AI Caption (EN)', ''), 4),
+            (iptc.get('AI Etiketler (TR)', ''), 3),
+            (iptc.get('AI Tags (EN)', ''), 3),
             (" ".join(str(v) for v in iptc.values()), 1),
             (" ".join(str(v) for v in exif.values()), 0.5)
         ]
