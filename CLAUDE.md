@@ -20,19 +20,39 @@ python init_db.py
 
 There are no test or lint commands configured in this project.
 
+## Installing Dependencies
+
+Three requirements files exist for different hardware:
+
+```bash
+pip install -r requirements.txt           # CPU / MPS (default)
+pip install -r requirements-cuda.txt      # NVIDIA CUDA (uses --index-url for torch)
+pip install -r requirements-mps.txt       # Apple Silicon MPS
+```
+
+## AI Model Setup (Qwen2.5-VL-3B-Instruct)
+
+On corporate networks with MITM SSL proxies, download the model manually before first run:
+
+```bash
+python download_model.py   # downloads ~3 GB to ./models/Qwen2.5-VL-3B-Instruct
+```
+
+If the local copy exists at `./models/Qwen2.5-VL-3B-Instruct` or `./src/models/Qwen2.5-VL-3B-Instruct`, `CaptionService` loads from disk automatically; otherwise it falls back to HuggingFace Hub. Set `HF_TOKEN` in `.env` for authenticated hub access.
+
 ## Architecture Overview
 
-**Acknowledge** is a PySide6 desktop application for media archiving, IPTC metadata editing, and face detection, backed by PostgreSQL with pgvector.
+**Acknowledge** is a PySide6 desktop application for media archiving, IPTC metadata editing, face detection, and AI-powered captioning, backed by PostgreSQL with pgvector.
 
 ### Layer Structure
 
 ```
-UI Layer       → app.py (MainWindow), root-level widget files
-Service Layer  → src/services/  (business logic, orchestration)
+UI Layer         → app.py (MainWindow), root-level widget files
+Service Layer    → src/services/  (business logic, orchestration)
 Repository Layer → src/repositories/  (data access via SQLAlchemy)
-Domain Layer   → src/domain/entities/, src/domain/value_objects/
-ORM Models     → src/models.py  (SQLAlchemy table definitions)
-DB Setup       → src/database.py  (engine, session, connection management)
+Domain Layer     → src/domain/entities/, src/domain/value_objects/
+ORM Models       → src/models.py  (SQLAlchemy table definitions)
+DB Setup         → src/database.py  (engine, session, connection management)
 ```
 
 ### Key Architectural Decisions
@@ -45,11 +65,15 @@ DB Setup       → src/database.py  (engine, session, connection management)
 
 **Face Detection Pipeline** — `FaceAnalysisService` (`src/services/face_analysis_service.py`) uses insightface `buffalo_l` model (ArcFace, 512-dim embeddings). Detection results are stored in `face_detections` table (normalised bbox + `Vector(512)` embedding) and linked to `Person` records via `media_persons`. Bounding boxes rendered via `FaceOverlayWidget`. `medias.face_encoding` (`Vector(128)`) is a legacy unused column.
 
+**Caption Service** — `CaptionService` (`src/services/caption_service.py`) is a singleton wrapping Qwen2.5-VL-3B-Instruct. It loads lazily on first call, auto-selects CUDA > MPS > CPU, and outputs Turkish-only JSON (`caption_tr`, `tags_tr`). Images are pre-resized to 768 px on the longest side before inference. `caption_en` / `tags_en` columns exist in the DB but are currently left empty. All caption work runs in `QThread` workers (`CaptionTabWidget`) to keep the UI responsive.
+
 **Search/Filter** — `GallerySearchProxyModel` (in `gallery_item_model.py`) wraps the gallery model as a Qt proxy model, enabling keyword filtering and relevance-based sorting without reloading from DB.
 
 **Path Storage** — `src/utils/path_util.py` stores file paths in the DB as relative paths from the project root (forward slashes). `to_db_path()` converts absolute → relative on write; `from_db_path()` converts back on read. Absolute legacy paths are handled as a fallback. Always use these helpers when reading/writing `file_path` columns to avoid cross-machine path breakage.
 
 **Thumbnail Caching** — Thumbnails are pre-generated into a `.thumbnails/` subdirectory inside each event's vault folder (e.g. `vault/EventName/.thumbnails/photo.jpg.thumb.jpg`). Generated during import in `EventService.create_and_import_event()` and lazily on first gallery load via `GalleryItemModel.generate_pixmap()`.
+
+**Corporate SSL Bypass** — Both `FaceAnalysisService` and `CaptionService` patch `requests.Session` at import time to disable SSL verification globally. This is intentional for environments with MITM proxies. Do not remove these patches.
 
 ### Database
 
@@ -70,6 +94,10 @@ Key tables: `events` → `medias` (cascade delete) ↔ `persons` (via `media_per
 - Center: gallery grid (`QListView` + `GalleryItemModel`) — `gallery_item_model.py`
 - Right panel: IPTC metadata form + face detection controls
 - Bottom: `SingleViewWidget` for full-size image with `FaceOverlayWidget` overlay — `single_view_widget.py`, `face_overlay_widget.py`
-- Tab widget: Events tab (main view) + Settings tab
+- Tab widget: Events tab (main view) + Settings tab + Caption (Altyazı) tab
+
+Caption tab (`caption_tab_widget.py`) hosts single-image and batch captioning modes with `ModelLoadWorker`, `CaptionWorker`, and `BatchCaptionWorker` QThread subclasses. After each run it attempts to persist results to the DB via `MediaService.save_captions()`. Batch results are also auto-saved to `batch_results.json` in the working directory.
+
+`CaptionStatsWidget` (`caption_stats_widget.py`) is a separate stats panel showing the last 5 inference runs and overall averages. It receives `CaptionResult` objects via the `stats_updated` signal on `CaptionTabWidget`.
 
 Event import dialog is `add_event_window.py`. `BatchFaceWorker` (QThread subclass in `app.py`) runs face detection + auto-person-matching in the background.

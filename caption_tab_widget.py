@@ -336,6 +336,7 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._spinner.setVisible(False)
         self._btn_analyse.setEnabled(True)
         self._single_result = result
+        self.stats_updated.emit(result)
 
         if result.error:
             self._status_label.setText(f"Hata: {result.error}")
@@ -348,7 +349,6 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._status_label.setText("Analiz tamamlandı.")
         self._lbl_stats.setText(f"⏱ İşlem süresi: {result.duration:.2f} sn")
         self._btn_export.setVisible(True)
-        self.stats_updated.emit(result)
         self._try_save_to_db(result)
 
     # ------------------------------------------------------------------

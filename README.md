@@ -1,6 +1,6 @@
 # Tirnavali Acknowledge
 
-A desktop application designed for managing, searching, and recognizing faces in large media archives. Built with Python, PySide6 (Qt), SQLAlchemy, and ONNX Runtime for high-performance facial feature extraction.
+A desktop application for managing large media archives with IPTC metadata editing, face detection & recognition, and AI-powered Turkish captioning. Built with Python, PySide6 (Qt), SQLAlchemy, and PostgreSQL (pgvector).
 
 ## Features
 
@@ -8,197 +8,110 @@ A desktop application designed for managing, searching, and recognizing faces in
 - **Embedded Metadata**: Read and write IPTC metadata directly into image files (Headline, Caption, Keywords, Credit, Source, etc.).
 - **Face Detection & Recognition**:
   - Uses **InsightFace (buffalo_l)** for face detection and 512-dimensional ArcFace embedding extraction.
-  - Applies a **Variance of the Laplacian** blur filter before saving — completely unrecognizable faces
-    (score < 20.0) are skipped to keep the pgvector index clean. Slightly blurry faces still pass through.
+  - Applies a **Variance of the Laplacian** blur filter — faces with a score below 5.0 are skipped to keep the pgvector index clean.
   - Stores vectors in PostgreSQL using the `pgvector` extension for rapid similarity search and auto-tagging.
-- **Database synchronization**: Seamlessly syncs manual file metadata blocks with the robust PostgreSQL backend.
+- **AI Captioning**: Uses **Qwen2.5-VL-3B-Instruct** to automatically generate Turkish captions and keyword tags for images. Runs in the background; results are saved to the database. Auto-detects CUDA → MPS → CPU.
+- **Database synchronization**: Seamlessly syncs manual file metadata with the PostgreSQL backend.
 
 ---
 
-## 🚀 Prerequisites
+## Prerequisites
 
-To run this application, you will need the following installed on your system:
-
-1. **Python 3.10+**: Make sure Python is in your system's PATH.
-2. **Docker Desktop**: Required to run the PostgreSQL database with the `pgvector` extension.
-3. **Git** (optional, for cloning the repository).
+1. **Python 3.10+** in your system PATH.
+2. **Docker Desktop** — required to run the PostgreSQL database.
 
 ---
 
-## 🛠️ Installation & Setup
+## Installation & Setup
 
-Installation instructions vary slightly depending on your operating system. The process involves starting the database, setting up a Python virtual environment, and installing dependencies.
+### Step 1: Python Environment
 
-### Step 1: Start the Database (All Platforms)
+Follow the option for your hardware:
 
-The application requires a PostgreSQL database with Vector support. A `docker-compose.yml` file is provided to set this up instantly.
+#### Windows (NVIDIA GPU)
+```powershell
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements-cuda.txt
+```
 
-1. Open a terminal in the project root folder.
-2. Run the following command:
-   ```bash
-   docker-compose up -d
-   ```
-3. Copy the `.env.example` file to `.env` (or create a new `.env` file) and configure your database endpoint (it should match the docker-compose settings by default).
+#### macOS (Apple Silicon)
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements-mps.txt
+```
 
-### Step 2: Python Environment Setup
+#### CPU-only / Generic
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-The application supports hardware acceleration on both Windows (NVIDIA CUDA) and macOS (Apple Silicon). Since the dependencies differ, please follow the specific instructions for your machine.
+### Step 2: Environment Configuration
 
-#### Option A: Windows 11 with NVIDIA GPU (RTX 30 series, etc.)
+Copy `.env.example` to `.env` (or create `.env`) and confirm it matches the docker-compose defaults:
+```
+DB_USER=tirnavali
+DB_PASSWORD=tbmm1920
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=tirnavali_acknowledge_db
+MEDIA_VAULT_PATH=image_vault
+```
 
-1. **Create a virtual environment:**
-   ```powershell
-   python -m venv venv
-   ```
-2. **Activate the virtual environment:**
-   ```powershell
-   .\venv\Scripts\activate
-   ```
-3. **Install GPU-optimized dependencies:**  
-   This uses `onnxruntime-gpu` and the CUDA-specific PyTorch builds.
-   ```powershell
-   pip install -r requirements-cuda.txt
-   ```
+### Step 3 (optional): Download the AI captioning model
 
-#### Option B: macOS (Apple Silicon M1/M2/M3/M4)
-
-1. **Create a virtual environment:**
-   ```bash
-   python3 -m venv venv
-   ```
-2. **Activate the virtual environment:**
-   ```bash
-   source venv/bin/activate
-   ```
-3. **Install Apple Silicon optimized dependencies:**  
-   This uses standard PyTorch (which supports MPS) and ONNX Runtime (which supports CoreML).
-   ```bash
-   pip install -r requirements-mps.txt
-   ```
-
-#### Option C: standard / CPU-only (Linux/Generic)
-
-1. **Create and activate environment:**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-2. **Install base dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+On corporate networks with MITM SSL proxies, pre-download the Qwen model before first launch:
+```bash
+python download_model.py   # downloads ~3 GB to ./models/Qwen2.5-VL-3B-Instruct
+```
+If skipped, the model is downloaded automatically from HuggingFace Hub on first use.
 
 ---
 
-## ⚡ Hardware Acceleration
+## Running the Application
 
-The application automatically detects and utilizes the best available hardware accelerator:
+Use `run.py` — it starts Docker Desktop and the database automatically if they are not already running:
+
+```bash
+python run.py
+```
+
+To stop the database containers when you are done:
+```bash
+python run.py --stop
+```
+
+> **Manual start** (advanced): If Docker Desktop is already running you can also start with `docker-compose up -d` and then `python app.py` directly.
+
+---
+
+## Hardware Acceleration
+
+The application automatically selects the best available accelerator:
 
 | Feature | Windows (NVIDIA) | macOS (M-Series) | Fallback |
 | :--- | :--- | :--- | :--- |
 | **Face Detection** | `CUDAExecutionProvider` | `CoreMLExecutionProvider` | `CPUExecutionProvider` |
-| **VLM Captioning** | `cuda` (bfloat16) | `mps` (bfloat16) | `cpu` (float32) |
-
-
-The project relies on a lightweight, highly compatible stack:
-
-- `PySide6>=6.5.0`: The official Python module for the Qt framework (UI).
-- `sqlalchemy>=2.0.0`: Python SQL toolkit and Object Relational Mapper.
-- `python-dotenv>=1.0.0`: Reads key-value pairs from a `.env` file into environment variables.
-- `iptcinfo3>=2.0.0`: Python port for reading and writing IPTC image metadata.
-- `mediapipe`: Google's robust framework for media processing (used for face detection).
-- `onnxruntime`: High-performance inference engine for ML models (used to run ArcFace).
-
----
-
-## 🛠️ Troubleshooting
-
-### SSL Certificate Errors during Installation
-If you see `[SSL: CERTIFICATE_VERIFY_FAILED]` while running `pip install` (common on corporate networks with MITM proxies), use the `--trusted-host` flags:
-
-```bash
-# For Windows/CUDA
-pip install -r requirements-cuda.txt --trusted-host download.pytorch.org --trusted-host download-r2.pytorch.org --trusted-host pypi.org --trusted-host files.pythonhosted.org
-
-# For macOS/MPS
-pip install -r requirements-mps.txt --trusted-host pypi.org --trusted-host files.pythonhosted.org
-```
-
----
-
-## 🏃 Running the Application
-
-Once your database is running and your virtual environment is activated, you can start the application:
-
-```bash
-python app.py
-```
-
-*Note: On the first run, the system will automatically download a ~30MB ArcFace ONNX model into a `models/` directory for face recognition tasks.*
-
----
-
-## 🏗️ Project Structure
-
-The project strictly follows a **Service-Repository Pattern** to separate UI logic, business logic, and database access.
-
-```text
-acknowledge/
-├── .env                    # Environment variables (Database URL, vault paths)
-├── docker-compose.yml      # Docker configs for PostgreSQL (pgvector) & pgAdmin
-├── requirements.txt        # Python package dependencies
-├── app.py                  # Main application entry point & MainWindow UI
-├── add_event_window.py     # UI for creating new media events
-├── event_card_widget.py    # UI widget for displaying events in the dashboard
-├── gallery_item_model.py   # Qt Model for efficiently loading large image galleries
-├── single_view_widget.py   # UI for full-screen image view & face detection overlay
-├── init_db.py              # Database initialization & migration script
-├── src/                    # Core Application Logic
-│   ├── database.py         # SQLAlchemy engine & session management
-│   ├── models.py           # SQLAlchemy ORM models (Event, Media, Face, Person)
-│   ├── domain/             # Domain entities and business objects
-│   ├── repositories/       # Database access layer (CRUD operations)
-│   │   ├── base_repository.py
-│   │   ├── event_repository.py
-│   │   ├── face_repository.py
-│   │   ├── media_repository.py
-│   │   └── person_repository.py
-│   └── services/           # Business logic and coordination layer
-│       ├── application_service.py   # Service registry/locator
-│       ├── base_service.py
-│       ├── event_service.py
-│       ├── face_analysis_service.py # Core ML logic (MediaPipe + ONNX)
-│       ├── face_service.py
-│       ├── media_service.py
-│       └── person_service.py
-└── media_vault/            # Default directory where physical media files are stored
-```
-
----
-
-## 📝 Coding Best Practices & Architecture
-
-When contributing to this project, adhere to the following architectural guidelines:
-
-### 1. The Service-Repository Pattern
-- **UI Layer (`app.py`, `*_widget.py`)**: Must **never** execute raw SQL or use SQLAlchemy sessions directly. UI components should only communicate with the `src/services/` layer via the `ApplicationService`.
-- **Service Layer (`src/services/`)**: Contains all business logic, orchestrates cross-repository actions, and handles error logging.
-- **Repository Layer (`src/repositories/`)**: The only place where database queries (SQLAlchemy `session` or `text()`) should occur. Responsible for basic CRUD operations.
-
-### 2. Threading for Heavy Operations
-UI freezes are unacceptable. Heavy operations like parsing EXIF/IPTC data on hundreds of images or running ML inference (Face Detection) must be delegated to background threads.
-- Example: `FaceDetectionWorker` (a `QThread`) in `single_view_widget.py` runs the `FaceAnalysisService` asynchronously so the UI remains responsive.
-
-### 3. Graceful Error Handling
-Network dependencies (Database via Docker) and IO operations (reading corrupted images) will fail. Always wrap these in `try/except` blocks at the Service level. The Service layer should catch specific errors and inform the UI layer gracefully.
-
-### 4. Dependency Management
-Always ensure that new features work on both Windows and Linux without requiring strict C++ compilation if possible. This is why we rely on `onnxruntime` + `mediapipe` rather than `dlib` or `insightface`.
+| **AI Captioning** | `cuda` (bfloat16) | `mps` (bfloat16) | `cpu` (float32) |
 
 ---
 
 ## Troubleshooting
 
-- **`module 'mediapipe' has no attribute 'solutions'`**: Ensure you are not running an extremely old or broken installation of MediaPipe. Rely on the specific imports used in `face_analysis_service.py` to bypass Windows-specific loading quirks.
-- **`InvalidTextRepresentation` (psycopg2)**: This occurs when PostgreSQL expects a UUID but receives a standard string (like a file path). Ensure you are using `get_by_file_path()` instead of `get_by_id()` in repositories when dealing with paths.
-- **Database Connection Failed**: Ensure Docker Desktop is running and the `docker-compose up -d` command executed successfully. Verify that ports `5432` are not blocked by local firewalls or other postgres instances.
+**SSL errors during `pip install`** (corporate MITM proxies):
+```bash
+# Windows/CUDA
+pip install -r requirements-cuda.txt --trusted-host download.pytorch.org --trusted-host pypi.org --trusted-host files.pythonhosted.org
+
+# macOS/MPS
+pip install -r requirements-mps.txt --trusted-host pypi.org --trusted-host files.pythonhosted.org
+```
+
+**Docker Desktop does not start via `run.py`**: Verify that Docker Desktop is installed at `C:\Program Files\Docker\Docker\Docker Desktop.exe`. If it is in a different location, update the `DOCKER_DESKTOP_EXE` constant at the top of `run.py`.
+
+**Database connection failed**: Ensure Docker Desktop is running, ports 5432 are not blocked by a firewall, and no other PostgreSQL instance is using the same port.
+
+**AI captioning model not found**: Run `python download_model.py` once to download the model locally. Set `HF_TOKEN` in `.env` if the HuggingFace Hub requires authentication.

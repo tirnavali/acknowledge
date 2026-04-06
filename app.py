@@ -89,6 +89,7 @@ class BackgroundCaptionWorker(QtCore.QThread):
     progress        = QtCore.Signal(int, int)   # (current, total)
     finished        = QtCore.Signal()
     image_captioned = QtCore.Signal(str)        # file_path when one image is done
+    result_ready    = QtCore.Signal(object)     # CaptionResult after each image
 
     def __init__(self, file_paths, event_id, caption_service, media_service, parent=None):
         super().__init__(parent)
@@ -108,6 +109,9 @@ class BackgroundCaptionWorker(QtCore.QThread):
                     self._media_svc.mark_captioned(media_id)
             except Exception as e:
                 logger.warning(f"BackgroundCaptionWorker: error on {file_path}: {e}")
+                from src.domain.entities.caption_result import CaptionResult
+                result = CaptionResult(img_path=file_path, error=str(e))
+            self.result_ready.emit(result)
             self.image_captioned.emit(file_path)
             self.progress.emit(i, total)
         self.finished.emit()
@@ -630,6 +634,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._caption_worker.progress.connect(self._on_caption_progress)
         self._caption_worker.finished.connect(self._on_caption_finished)
         self._caption_worker.image_captioned.connect(self._on_caption_image_done)
+        self._caption_worker.result_ready.connect(self._caption_stats.add_result)
         self._caption_worker.start()
         queue_info = f" (+{len(self._caption_queue)} kuyrukta)" if self._caption_queue else ""
         self.statusBar().showMessage(f"🤖 Altyazı: 0/{len(file_paths)}{queue_info}")
