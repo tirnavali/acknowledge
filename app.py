@@ -19,6 +19,7 @@ from src.services.face_service import FaceAnalysisService
 from single_view_widget import SingleViewWidget
 from src.services.application_service import ApplicationService
 from caption_tab_widget import CaptionTabWidget
+from caption_stats_widget import CaptionStatsWidget
 import os
 
 logging.basicConfig(level=logging.WARNING, format="%(name)s %(levelname)s: %(message)s")
@@ -142,6 +143,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._batch_face_worker = None
         self._caption_queue: list = []          # list of (file_paths, event)
         self._caption_worker = None
+        self._media_status_bar = QtWidgets.QLabel("📂 Etkinlik Seçilmedi")
+        self._media_status_bar.setStyleSheet("""
+            background-color: #2d2d30;
+            color: #8ecfff;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: bold;
+            border-top: 1px solid #3f3f46;
+        """)
+        self.statusBar()
         self._search_worker = None              # background FTS worker
         self._search_mode = False               # True while cross-event search is active
         self._selected_event_card = None        # currently highlighted EventCardWidget
@@ -328,7 +339,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def tabWidget(self):
         self.tab_widget = QtWidgets.QTabWidget()
-        self.setCentralWidget(self.tab_widget)
+        
+        # Central container to hold tab widget + new media status bar
+        self._central_container = QtWidgets.QWidget()
+        self._central_layout = QtWidgets.QVBoxLayout(self._central_container)
+        self._central_layout.setContentsMargins(0,0,0,0)
+        self._central_layout.setSpacing(0)
+        self._central_layout.addWidget(self.tab_widget)
+        self._central_layout.addWidget(self._media_status_bar)
+        
+        self.setCentralWidget(self._central_container)
         self.events_tab = QtWidgets.QWidget()
         self.tab_widget.addTab(self.events_tab, "Etkinlikler")
 
@@ -344,6 +364,9 @@ class MainWindow(QtWidgets.QMainWindow):
             parent=self,
         )
         self.tab_widget.addTab(self.caption_tab, "Altyazı")
+        self._caption_stats = CaptionStatsWidget(parent=self)
+        self.caption_tab.stats_updated.connect(self._caption_stats.add_result)
+        self.tab_widget.addTab(self._caption_stats, "Altyazı Ekranı")
 
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.show()
@@ -355,6 +378,16 @@ class MainWindow(QtWidgets.QMainWindow):
         """Load events from database or provided list and populate the list widget"""
         if events is None:
             events = self.fetch_events()
+        
+        # Update media status bar with total for these events
+        total_media = 0
+        for ev in events:
+            # Note: This might be slightly slow for very large databases, 
+            # but usually get_all_for_event is fast.
+            items = self.app_service.get_media_service().get_all_for_event(ev.id)
+            total_media += len(items)
+        
+        self._media_status_bar.setText(f"📁 {len(events)} Etkinlik — Toplam {total_media} Medya")
             
         for event in events:
             item = QtWidgets.QListWidgetItem(self.event_card_list_widget)
@@ -394,8 +427,15 @@ class MainWindow(QtWidgets.QMainWindow):
             if results:
                 self.load_events(results)
                 self.statusBar().showMessage(f"🔍 '{query}' için {len(results)} sonuç bulundu.", 3000)
+                # Count total media in these events for the new bar
+                total_media = 0
+                for ev in results:
+                    items = self.app_service.get_media_service().get_all_for_event(ev.id)
+                    total_media += len(items)
+                self._media_status_bar.setText(f"🔍 Arama Sonucu: {len(results)} Etkinlik — Toplam {total_media} Medya")
             else:
                 self.statusBar().showMessage(f"❌ '{query}' için sonuç bulunamadı.", 3000)
+                self._media_status_bar.setText("❌ Sonuç Bulunamadı")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Arama Hatası", f"Etkinlik araması sırasında hata oluştu: {e}")
 
@@ -644,6 +684,7 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QApplication.processEvents()
 
         items = self.app_service.get_media_service().get_gallery_items(event.id)
+        self._media_status_bar.setText(f"📂 Etkinlik: {event.name} — Toplam {len(items)} Medya")
         self.gallery_item_model = GalleryItemModel(items)
         if hasattr(self, 'gallery_search_proxy'):
             self.gallery_search_proxy.setSourceModel(self.gallery_item_model)

@@ -12,6 +12,8 @@ import logging
 import os
 import ssl
 import threading
+import time
+import torch
 from pathlib import Path
 
 # Bypass SSL verification for corporate networks with MITM proxies.
@@ -70,8 +72,11 @@ class CaptionService:
         if self._model is not None and self._processor is not None:
             return
         try:
-            import torch
-            from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
+            try:
+                from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
+            except ImportError:
+                # Direct import fallback for environments where top-level exports might be missing
+                from transformers.models.qwen2_5_vl import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
 
             cuda_available = torch.cuda.is_available()
             mps_available  = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
@@ -166,17 +171,19 @@ class CaptionService:
         )
         inputs = inputs.to(self._device)
 
-        import torch
         # Fix: ensure vision inputs are the same dtype as the model (prevents mat1/mat2 dtype mismatch)
         if self._model.dtype != torch.float32:
             inputs = inputs.to(self._model.dtype)
 
+        start_time = time.perf_counter()
         with torch.no_grad():
             generated_ids = self._model.generate(
                 **inputs,
                 max_new_tokens=256,
                 repetition_penalty=1.15,
             )
+        generation_time = time.perf_counter() - start_time
+        logger.info(f"CaptionService: generation took {generation_time:.2f}s")
 
         # Strip input tokens — Qwen canonical pattern
         trimmed = [
@@ -277,6 +284,7 @@ class CaptionService:
                 return result
 
             try:
+                full_start = time.perf_counter()
                 combined_prompt = (
                     "Bu fotoğrafı Türkçe analiz et. "
                     "Sadece aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma. "
@@ -297,6 +305,9 @@ class CaptionService:
                 )
                 raw = self._run_prompt(image_uri, combined_prompt)
                 result.caption_tr, result.tags_tr = self._parse_combined_response(raw)
+                total_duration = time.perf_counter() - full_start
+                result.duration = total_duration
+                logger.info(f"CaptionService: total analysis for {os.path.basename(img_path)} took {total_duration:.2f}s")
             except Exception as e:
                 logger.error(f"CaptionService.analyse error for {img_path}: {e}")
                 result.error = str(e)

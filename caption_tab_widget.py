@@ -89,6 +89,8 @@ class BatchCaptionWorker(QtCore.QThread):
 # ---------------------------------------------------------------------------
 
 class CaptionTabWidget(QtWidgets.QWidget):
+    stats_updated = QtCore.Signal(object)  # Emitted with CaptionResult
+
     def __init__(self, caption_service, media_service, parent=None):
         super().__init__(parent)
         self._svc         = caption_service
@@ -236,6 +238,11 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._btn_export = QtWidgets.QPushButton("JSON Dışa Aktar")
         self._btn_export.setVisible(False)
         right_layout.addWidget(self._btn_export)
+
+        self._lbl_stats = QtWidgets.QLabel("")
+        self._lbl_stats.setStyleSheet("color: #888; font-size: 11px; margin-top: 10px;")
+        right_layout.addWidget(self._lbl_stats)
+
         right_layout.addStretch()
 
         splitter.addWidget(right)
@@ -339,7 +346,9 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._le_tags_en.setText(result.tags_en)
         self._le_tags_tr.setText(result.tags_tr)
         self._status_label.setText("Analiz tamamlandı.")
+        self._lbl_stats.setText(f"⏱ İşlem süresi: {result.duration:.2f} sn")
         self._btn_export.setVisible(True)
+        self.stats_updated.emit(result)
         self._try_save_to_db(result)
 
     # ------------------------------------------------------------------
@@ -390,6 +399,7 @@ class CaptionTabWidget(QtWidgets.QWidget):
 
     def _on_batch_one_done(self, result):
         self._try_save_to_db(result)
+        self.stats_updated.emit(result)
 
     def _on_batch_finished(self, results: list):
         self._btn_batch_start.setEnabled(True)

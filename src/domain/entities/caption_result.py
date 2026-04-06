@@ -9,6 +9,7 @@ class CaptionResult:
     caption_tr: str = ""
     tags_en: str = ""    # comma-separated
     tags_tr: str = ""    # comma-separated
+    duration: float = 0.0
     error: str = ""
 
     @property
@@ -22,5 +23,6 @@ class CaptionResult:
             "caption_tr": self.caption_tr,
             "tags_en": self.tags_en,
             "tags_tr": self.tags_tr,
+            "duration": self.duration,
             "error": self.error,
         }
