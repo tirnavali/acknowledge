@@ -241,6 +241,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.media_details_form_widget()
         self.layouts()
         self._init_persons_tab()
+        self._init_settings_tab()
         self.apply_style()
 
     def init_menubar(self):
@@ -532,6 +533,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _resume_batch_captioning(self, event):
         """Queue uncaptioned images in this event for background AI captioning."""
+        from src.utils import config_util
+        if not config_util.get_setting("auto_captioning_enabled", False):
+            return
+
         vault_path = event.vault_folder_path
         if not vault_path or not os.path.exists(vault_path):
             return
@@ -1571,7 +1576,37 @@ class MainWindow(QtWidgets.QMainWindow):
         hint.setStyleSheet("color: #888; font-size: 10px;")
         layout.addWidget(hint)
 
+    def _init_settings_tab(self):
+        layout = QtWidgets.QVBoxLayout(self.settings_tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setAlignment(QtCore.Qt.AlignTop)
+
+        from src.utils import config_util
+
+        # Auto Captioning Checkbox
+        self.auto_caption_cb = QtWidgets.QCheckBox("Otomatik Altyazı (Auto Captioning) Aktif")
+        self.auto_caption_cb.setChecked(config_util.get_setting("auto_captioning_enabled", False))
+        self.auto_caption_cb.toggled.connect(self._on_auto_caption_toggled)
+        self.auto_caption_cb.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 5px;")
+        
+        info_label = QtWidgets.QLabel("Not: Düşük donanımlı cihazlarda (ör. GT730 GPU vb.) otomatik altyazı (Qwen2.5:3b VLM) üretiminin kapalı olması tavsiye edilir.")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #aaa; font-style: italic; font-size: 12px; margin-bottom: 20px;")
+
+        layout.addWidget(self.auto_caption_cb)
+        layout.addWidget(info_label)
+        layout.addStretch()
+
+    def _on_auto_caption_toggled(self, checked):
+        from src.utils import config_util
+        config_util.set_setting("auto_captioning_enabled", checked)
+        if checked:
+            self.statusBar().showMessage("✅ Otomatik altyazı aktifleştirildi.", 3000)
+        else:
+            self.statusBar().showMessage("❌ Otomatik altyazı devre dışı bırakıldı.", 3000)
+
     def _load_persons_table(self):
+
         try:
             rows = self.app_service.get_person_service().get_all_with_counts()
         except Exception:
@@ -1773,14 +1808,13 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.events_tab.setLayout(self.events_layout)
 
-        self.settings_layout = QtWidgets.QVBoxLayout()
-        self.settings_tab.setLayout(self.settings_layout)
+        pass
 
     def apply_style(self):
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e1e; color: #ffffff; }
             QTabWidget::pane { border: 1px solid #3f3f46; background-color: #1e1e1e; }
-            QTabBar::tab { background: #252526; color: #ffffff; padding: 10px 20px; border: 1px solid #3f3f46; border-bottom: none; margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px;}
+            QTabBar::tab { background: #252526; color: #ffffff; padding: 10px 20px; border: 1px solid #3f3f46; border-bottom: none; margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
             QTabBar::tab:selected { background: #1e1e1e; color: #ffffff; font-weight: bold; border-bottom: 2px solid #0078D7; }
             QListView, QListWidget { background-color: #252526; border: 1px solid #3f3f46; color: #ffffff; border-radius: 4px; }
             QLineEdit, QTextEdit, QDateEdit, QDateTimeEdit { background-color: #333333; border: 1px solid #555555; color: #ffffff; padding: 4px; border-radius: 4px; }
@@ -1796,7 +1830,17 @@ class MainWindow(QtWidgets.QMainWindow):
             QPushButton:hover { background-color: #3f3f46; border: 1px solid #0078D7; }
             QPushButton:pressed { background-color: #0078D7; border: 1px solid #0078D7; }
             QCheckBox { color: #ffffff; }
+            QCheckBox::indicator { width: 18px; height: 18px; }
         """)
+
+    def closeEvent(self, event):
+        """Cleanup running threads before closing."""
+        print("⏳ Uygulama kapatılıyor, arka plan işlemleri durduruluyor...")
+        for worker in [self._batch_face_worker, self._caption_worker, self._search_worker]:
+            if worker and worker.isRunning():
+                worker.quit()
+                worker.wait(2000) # Wait up to 2 seconds for clean exit
+        event.accept()
 
 
 

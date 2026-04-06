@@ -54,6 +54,7 @@ def reveal_in_explorer(path: str):
     """
     import platform
     import subprocess
+    import os
     
     path = os.path.normpath(path)
     if not os.path.exists(path):

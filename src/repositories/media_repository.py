@@ -141,29 +141,42 @@ class MediaRepository:
         """Ensure a media record exists for the given file_path. Returns the media_id."""
         clean_path = _abs(sanitize_str(file_path))
         with get_db() as db:
-            # Check if it already exists
-            result = db.execute(
-                text("SELECT id FROM medias WHERE file_path = :file_path"),
-                {"file_path": clean_path}
-            )
-            row = result.fetchone()
-            if row:
-                return row.id if isinstance(row.id, UUID) else UUID(str(row.id))
-            
-            # Create new record
+            # We use PostgreSQL's ON CONFLICT to avoid race conditions.
+            # 1. Try to INSERT. If file_path exists, DO NOTHING.
             import uuid
             new_id = uuid.uuid4()
-            db.execute(text("""
+            
+            result = db.execute(text("""
                 INSERT INTO medias (id, event_id, file_path, media_type)
                 VALUES (:id, :event_id, :file_path, :media_type)
+                ON CONFLICT (file_path) DO NOTHING
+                RETURNING id
             """), {
                 "id": str(new_id),
                 "event_id": str(event_id),
                 "file_path": clean_path,
                 "media_type": media_type,
             })
+            
+            row = result.fetchone()
+            if row:
+                db.commit()
+                # Return the ID from the INSERT
+                val = row[0] if hasattr(row, "__getitem__") else row.id
+                return val if isinstance(val, UUID) else UUID(str(val))
+            
+            # 2. If INSERT returned nothing (conflict), fetch the existing ID.
+            result = db.execute(
+                text("SELECT id FROM medias WHERE file_path = :file_path"),
+                {"file_path": clean_path}
+            )
+            row = result.fetchone()
             db.commit()
-            return new_id
+            if row:
+                val = row[0] if hasattr(row, "__getitem__") else row.id
+                return val if isinstance(val, UUID) else UUID(str(val))
+            
+            raise RuntimeError(f"Failed to ensure media exists: {clean_path}")
 
     def get_all_for_event(self, event_id: UUID) -> list[dict]:
         """Return all media records and their metadata for a given event."""

@@ -53,28 +53,43 @@ def init_db():
         # Migrate absolute file_path values to relative (for cross-platform support)
         with get_db() as db:
             rows = db.execute(text("SELECT id, file_path FROM medias")).fetchall()
-            existing_rel = set()
+            seen_in_loop = set()
             migrated = deleted = 0
             for row in rows:
                 fp = row.file_path or ""
-                if fp:
-                    # Always try to convert to DB (relative) format
-                    rel_fp = path_util.to_db_path(fp)
-                    if rel_fp in existing_rel:
-                        # Duplicate record (maybe from previous interrupted migration or OS switch)
+                if not fp:
+                    continue
+                
+                # Always try to convert to DB (relative) format
+                rel_fp = path_util.to_db_path(fp)
+                
+                # 1. Check if we've already processed this path in this loop
+                # 2. Check if another record already has this relative path in the DB
+                is_duplicate = rel_fp in seen_in_loop
+                if not is_duplicate:
+                    # Check DB for pre-existing relative path (from another record)
+                    overlap = db.execute(
+                        text("SELECT id FROM medias WHERE file_path = :p AND id != :id"),
+                        {"p": rel_fp, "id": str(row.id)}
+                    ).fetchone()
+                    if overlap:
+                        is_duplicate = True
+
+                if is_duplicate:
+                    # Duplicate record (e.g. from interrupted migration, OS switch, or normalization overlap)
+                    db.execute(
+                        text("DELETE FROM medias WHERE id = :id"),
+                        {"id": str(row.id)}
+                    )
+                    deleted += 1
+                else:
+                    if rel_fp != fp:
                         db.execute(
-                            text("DELETE FROM medias WHERE id = :id"),
-                            {"id": str(row.id)}
+                            text("UPDATE medias SET file_path = :p WHERE id = :id"),
+                            {"p": rel_fp, "id": str(row.id)}
                         )
-                        deleted += 1
-                    else:
-                        if rel_fp != fp:
-                            db.execute(
-                                text("UPDATE medias SET file_path = :p WHERE id = :id"),
-                                {"p": rel_fp, "id": str(row.id)}
-                            )
-                            migrated += 1
-                        existing_rel.add(rel_fp)
+                        migrated += 1
+                    seen_in_loop.add(rel_fp)
             db.commit()
             print(f"✅ {migrated} kayıt bağıl yola dönüştürüldü (cross-platform), {deleted} yinelenen kayıt silindi.")
 
