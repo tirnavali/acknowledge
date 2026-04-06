@@ -68,15 +68,38 @@ class FaceAnalysisService:
             cls._instance = super().__new__(cls)
         return cls._instance
 
+    def _load_best_providers(self):
+        """Detect and return a list of best execution providers for the current hardware."""
+        import onnxruntime as ort
+        available = ort.get_available_providers()
+        
+        # Priority: CUDA (NVIDIA) > CoreML (Apple Silicon) > CPU
+        # DirectML (Windows/AMD) can also be added here if needed
+        providers = []
+        if "CUDAExecutionProvider" in available:
+            providers.append("CUDAExecutionProvider")
+        if "CoreMLExecutionProvider" in available:
+            providers.append("CoreMLExecutionProvider")
+        
+        # Fallback to CPU
+        providers.append("CPUExecutionProvider")
+        return providers
+
     def _load_model(self):
         """Lazy load the insightface model (only once)."""
         if self._app is not None:
             return
+        
+        providers = self._load_best_providers()
+        logger.info(f"InsightFace: using providers {providers}")
+        
         try:
             from insightface.app import FaceAnalysis
-            self._app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+            # Buffalo_l is the 512-dim ArcFace model
+            self._app = FaceAnalysis(name="buffalo_l", providers=providers)
+            # det_size=(640, 640) is a good balance of speed vs accuracy for press photos
             self._app.prepare(ctx_id=0, det_size=(640, 640))
-            logger.info("✅ InsightFace model loaded (buffalo_l)")
+            logger.info(f"✅ InsightFace model loaded (buffalo_l) with {providers[0]}")
         except Exception as e:
             logger.error(f"❌ InsightFace model load failed: {e}")
             self._app = None
@@ -99,7 +122,16 @@ class FaceAnalysisService:
             if self._app is None:
                 return []
 
-            img = cv2.imread(img_path)
+            # Read file into memory as bytes before decoding to avoid file locks on Windows
+            try:
+                import numpy as np
+                with open(img_path, "rb") as f:
+                    data = f.read()
+                img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            except Exception as e:
+                logger.error(f"Could not read/decode image: {img_path}: {e}")
+                img = None
+
             if img is None:
                 logger.warning(f"Could not read image: {img_path}")
                 return []

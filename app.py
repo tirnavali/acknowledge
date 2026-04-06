@@ -1015,7 +1015,17 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             info['keywords'] = []
         
-        info.save_as(img_path)
+        # Save directly back to the file
+        try:
+            info.save()
+        except OSError as e:
+            if getattr(e, 'winerror', None) == 32:
+                # If we still hit a lock, wait a tiny bit and try one more time
+                import time
+                time.sleep(0.1)
+                info.save()
+            else:
+                raise
 
 
     def event_widgets(self):

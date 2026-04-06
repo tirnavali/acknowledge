@@ -98,21 +98,22 @@ class CaptionService:
                     model_id,
                     torch_dtype=torch.bfloat16,
                     device_map="auto",
+                    low_cpu_mem_usage=True,
                 )
             elif mps_available:
                 # device_map={"": "mps"} places weights on MPS during loading.
-                # Calling .to("mps") after from_pretrained fails on newer transformers
-                # because lazy-loaded meta tensors cannot be copied with .to().
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
                     device_map={"": "mps"},
+                    low_cpu_mem_usage=True,
                 )
             else:
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.float32,
                     device_map={"": "cpu"},
+                    low_cpu_mem_usage=True,
                 )
 
             self._processor = Qwen2_5_VLProcessor.from_pretrained(model_id)
@@ -166,6 +167,10 @@ class CaptionService:
         inputs = inputs.to(self._device)
 
         import torch
+        # Fix: ensure vision inputs are the same dtype as the model (prevents mat1/mat2 dtype mismatch)
+        if self._model.dtype != torch.float32:
+            inputs = inputs.to(self._model.dtype)
+
         with torch.no_grad():
             generated_ids = self._model.generate(
                 **inputs,
@@ -273,9 +278,22 @@ class CaptionService:
 
             try:
                 combined_prompt = (
-                    "Bu fotoğrafı Türkçe analiz et ve aşağıdaki JSON formatında yanıt ver "
-                    "(başka hiçbir şey yazma):\n"
-                    '{"caption_tr": "Detaylı Türkçe açıklama", "tags_tr": "nesne1, nesne2, nesne3"}'
+                    "Bu fotoğrafı Türkçe analiz et. "
+                    "Sadece aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma. "
+                    "Emin olmadığın kişilerin adını yazma, kişi isimlerini tahmin etme. "
+                    "Kurallar: "
+                    "- Fotoğraf bir parlamento veya meclis ortamını gösteriyorsa, caption_tr içinde bunu açıkça belirt. "
+                    "- Kravat renkleri görünüyorsa mutlaka belirt (örneğin: mavi kravat, kırmızı kravat). "
+                    "- El sıkışma varsa mutlaka belirt. "
+                    "- Bir kişi kürsüde konuşma yapıyorsa mutlaka belirt. "
+                    "- Arka planda ülke bayrakları varsa mutlaka belirt. "
+                    "- caption_tr alanında 25–40 kelimelik, tek cümlelik ayrıntılı bir açıklama yaz. "
+                    "- Mekanı, rolleri (konuşmacı, milletvekili, dinleyici vb.) ve önemli görsel ayrıntıları belirt. "
+                    "- Emin değilsen ‘bir konuşmacı’, ‘bir milletvekili’ gibi genel ifadeler kullan. "
+                    "- tags_tr alanında en fazla 8 adet, virgülle ayrılmış kısa etiketler yaz (mekan, rol, nesne, renk vb.). "
+                    "JSON dışında hiçbir metin yazma.\n"
+                    '{"caption_tr": "Detaylı Türkçe açıklama cümlesi", '
+                    '"tags_tr": "etiket1, etiket2, etiket3, etiket4, etiket5"}'
                 )
                 raw = self._run_prompt(image_uri, combined_prompt)
                 result.caption_tr, result.tags_tr = self._parse_combined_response(raw)

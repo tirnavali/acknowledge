@@ -42,7 +42,9 @@ The application requires a PostgreSQL database with Vector support. A `docker-co
 
 ### Step 2: Python Environment Setup
 
-#### Windows 11
+The application supports hardware acceleration on both Windows (NVIDIA CUDA) and macOS (Apple Silicon). Since the dependencies differ, please follow the specific instructions for your machine.
+
+#### Option A: Windows 11 with NVIDIA GPU (RTX 30 series, etc.)
 
 1. **Create a virtual environment:**
    ```powershell
@@ -52,35 +54,51 @@ The application requires a PostgreSQL database with Vector support. A `docker-co
    ```powershell
    .\venv\Scripts\activate
    ```
-3. **Install dependencies:**
+3. **Install GPU-optimized dependencies:**  
+   This uses `onnxruntime-gpu` and the CUDA-specific PyTorch builds.
    ```powershell
-   pip install -r requirements.txt
+   pip install -r requirements-cuda.txt
    ```
-   *(Note: The face analysis module uses MediaPipe and ONNX Runtime, avoiding the complex C++ build tools typically required by dlib or InsightFace on Windows).*
 
-#### Linux (Ubuntu/Debian)
+#### Option B: macOS (Apple Silicon M1/M2/M3/M4)
 
-1. **Install system dependencies:** (PySide6 may require some system-level Qt libraries)
-   ```bash
-   sudo apt-get update
-   sudo apt-get install python3-venv libgl1-mesa-glx
-   ```
-2. **Create a virtual environment:**
+1. **Create a virtual environment:**
    ```bash
    python3 -m venv venv
    ```
-3. **Activate the virtual environment:**
+2. **Activate the virtual environment:**
    ```bash
    source venv/bin/activate
    ```
-4. **Install dependencies:**
+3. **Install Apple Silicon optimized dependencies:**  
+   This uses standard PyTorch (which supports MPS) and ONNX Runtime (which supports CoreML).
+   ```bash
+   pip install -r requirements-mps.txt
+   ```
+
+#### Option C: standard / CPU-only (Linux/Generic)
+
+1. **Create and activate environment:**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+2. **Install base dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
 ---
 
-## 📦 Requirements (`requirements.txt`)
+## ⚡ Hardware Acceleration
+
+The application automatically detects and utilizes the best available hardware accelerator:
+
+| Feature | Windows (NVIDIA) | macOS (M-Series) | Fallback |
+| :--- | :--- | :--- | :--- |
+| **Face Detection** | `CUDAExecutionProvider` | `CoreMLExecutionProvider` | `CPUExecutionProvider` |
+| **VLM Captioning** | `cuda` (bfloat16) | `mps` (bfloat16) | `cpu` (float32) |
+
 
 The project relies on a lightweight, highly compatible stack:
 
@@ -90,6 +108,21 @@ The project relies on a lightweight, highly compatible stack:
 - `iptcinfo3>=2.0.0`: Python port for reading and writing IPTC image metadata.
 - `mediapipe`: Google's robust framework for media processing (used for face detection).
 - `onnxruntime`: High-performance inference engine for ML models (used to run ArcFace).
+
+---
+
+## 🛠️ Troubleshooting
+
+### SSL Certificate Errors during Installation
+If you see `[SSL: CERTIFICATE_VERIFY_FAILED]` while running `pip install` (common on corporate networks with MITM proxies), use the `--trusted-host` flags:
+
+```bash
+# For Windows/CUDA
+pip install -r requirements-cuda.txt --trusted-host download.pytorch.org --trusted-host download-r2.pytorch.org --trusted-host pypi.org --trusted-host files.pythonhosted.org
+
+# For macOS/MPS
+pip install -r requirements-mps.txt --trusted-host pypi.org --trusted-host files.pythonhosted.org
+```
 
 ---
 

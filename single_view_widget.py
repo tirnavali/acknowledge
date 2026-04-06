@@ -32,7 +32,14 @@ class ImageLoaderWorker(QtCore.QThread):
         self._img_path = img_path
 
     def run(self):
-        image = QtGui.QImage(self._img_path)
+        # Read file into memory first to avoid file-mapping locks on Windows
+        try:
+            with open(self._img_path, "rb") as f:
+                data = f.read()
+            image = QtGui.QImage.fromData(data)
+        except Exception as e:
+            logger.error(f"Failed to load image from buffer: {e}")
+            image = QtGui.QImage()
         self.loaded.emit(self._img_path, image)
 
 
