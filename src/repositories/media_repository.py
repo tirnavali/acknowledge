@@ -14,8 +14,13 @@ def sanitize_str(value):
 
 
 def _build_prefix_tsquery(query: str) -> str:
-    """Convert a plain query into a prefix tsquery: 'anka pol' → 'anka:* & pol:*'."""
-    words = [w for w in query.strip().split() if w]
+    """Convert a plain query into a prefix tsquery: 'anka pol' → 'anka:* & pol:*'.
+    Strips non-alphanumeric characters so 'KURT0942.jpg' becomes 'KURT0942:*' without error.
+    Returns empty string if no valid words remain (caller must handle this).
+    """
+    import re
+    words = [re.sub(r'[^a-zA-Z0-9\u00C0-\u024F]', '', w) for w in query.strip().split()]
+    words = [w for w in words if w]
     return ' & '.join(f'{w}:*' for w in words)
 
 
@@ -218,59 +223,83 @@ class MediaRepository:
             db.commit()
 
     def search_across_events(self, query: str) -> list[dict]:
-        """PostgreSQL FTS across all IPTC fields + persons. Returns rows with 'rank'.
-        Supports prefix wildcard: 'anka' matches 'ankara', 'pol' matches 'polis', etc.
+        """PostgreSQL FTS across all metadata fields + filename ILIKE fallback.
+        Supports prefix wildcard: 'anka' matches 'ankara'.
+        Filenames like 'KURT0942.jpg' are matched via ILIKE even when FTS tokenisation
+        would miss them.
         """
         clean = sanitize_str(query)
         tsq = _build_prefix_tsquery(clean)
         with get_db() as db:
-            result = db.execute(text("""
-                WITH person_names AS (
-                    SELECT mp.media_id, STRING_AGG(p.name, ' ') AS names
-                    FROM media_persons mp
-                    JOIN persons p ON mp.person_id = p.id
-                    GROUP BY mp.media_id
-                ),
-                docs AS (
-                    SELECT
-                        m.*,
-                        e.name  AS event_name,
-                        COALESCE(pn.names, '') AS person_names,
-                        to_tsvector('simple',
-                            COALESCE(m.title, '')                      || ' ' ||
-                            COALESCE(m.iptc_headline, '')               || ' ' ||
-                            COALESCE(m.iptc_caption, '')                || ' ' ||
-                            COALESCE(m.iptc_keywords, '')               || ' ' ||
-                            COALESCE(m.iptc_object_name, '')            || ' ' ||
-                            COALESCE(m.iptc_city, '')                   || ' ' ||
-                            COALESCE(m.iptc_state, '')                  || ' ' ||
-                            COALESCE(m.iptc_country, '')                || ' ' ||
-                            COALESCE(m.iptc_credit, '')                 || ' ' ||
-                            COALESCE(m.iptc_source, '')                 || ' ' ||
-                            COALESCE(m.iptc_byline, '')                 || ' ' ||
-                            COALESCE(m.iptc_byline_title, '')           || ' ' ||
-                            COALESCE(m.iptc_category, '')               || ' ' ||
-                            COALESCE(m.iptc_writer, '')                 || ' ' ||
-                            COALESCE(m.iptc_copyright, '')              || ' ' ||
-                            COALESCE(m.iptc_supplemental_categories,'') || ' ' ||
-                            COALESCE(m.caption_tr, '')                  || ' ' ||
-                            COALESCE(m.caption_en, '')                  || ' ' ||
-                            COALESCE(m.tags_tr, '')                     || ' ' ||
-                            COALESCE(m.tags_en, '')                     || ' ' ||
-                            COALESCE(pn.names, '')                      || ' ' ||
-                            COALESCE(e.name, '')                        || ' ' ||
-                            COALESCE(m.file_path, '')
-                        ) AS doc
+            if not tsq:
+                # Query contains only punctuation/special chars — ILIKE only (e.g. ".jpg")
+                result = db.execute(text("""
+                    SELECT m.*, e.name AS event_name,
+                           COALESCE(pn.names, '') AS person_names,
+                           0.05::float AS rank
                     FROM medias m
                     JOIN events e ON m.event_id = e.id
-                    LEFT JOIN person_names pn ON m.id = pn.media_id
-                )
-                SELECT *,
-                    ts_rank(doc, to_tsquery('simple', :tsq)) AS rank
-                FROM docs
-                WHERE doc @@ to_tsquery('simple', :tsq)
-                ORDER BY rank DESC
-            """), {"tsq": tsq})
+                    LEFT JOIN (
+                        SELECT mp.media_id, STRING_AGG(p.name, ' ') AS names
+                        FROM media_persons mp
+                        JOIN persons p ON mp.person_id = p.id
+                        GROUP BY mp.media_id
+                    ) pn ON m.id = pn.media_id
+                    WHERE m.file_path ILIKE '%' || :raw || '%'
+                    ORDER BY m.file_path
+                """), {"raw": clean})
+            else:
+                result = db.execute(text("""
+                    WITH person_names AS (
+                        SELECT mp.media_id, STRING_AGG(p.name, ' ') AS names
+                        FROM media_persons mp
+                        JOIN persons p ON mp.person_id = p.id
+                        GROUP BY mp.media_id
+                    ),
+                    docs AS (
+                        SELECT
+                            m.*,
+                            e.name  AS event_name,
+                            COALESCE(pn.names, '') AS person_names,
+                            to_tsvector('simple',
+                                COALESCE(m.title, '')                      || ' ' ||
+                                COALESCE(m.iptc_headline, '')               || ' ' ||
+                                COALESCE(m.iptc_caption, '')                || ' ' ||
+                                COALESCE(m.iptc_keywords, '')               || ' ' ||
+                                COALESCE(m.iptc_object_name, '')            || ' ' ||
+                                COALESCE(m.iptc_city, '')                   || ' ' ||
+                                COALESCE(m.iptc_state, '')                  || ' ' ||
+                                COALESCE(m.iptc_country, '')                || ' ' ||
+                                COALESCE(m.iptc_credit, '')                 || ' ' ||
+                                COALESCE(m.iptc_source, '')                 || ' ' ||
+                                COALESCE(m.iptc_byline, '')                 || ' ' ||
+                                COALESCE(m.iptc_byline_title, '')           || ' ' ||
+                                COALESCE(m.iptc_category, '')               || ' ' ||
+                                COALESCE(m.iptc_writer, '')                 || ' ' ||
+                                COALESCE(m.iptc_copyright, '')              || ' ' ||
+                                COALESCE(m.iptc_supplemental_categories,'') || ' ' ||
+                                COALESCE(m.caption_tr, '')                  || ' ' ||
+                                COALESCE(m.caption_en, '')                  || ' ' ||
+                                COALESCE(m.tags_tr, '')                     || ' ' ||
+                                COALESCE(m.tags_en, '')                     || ' ' ||
+                                COALESCE(pn.names, '')                      || ' ' ||
+                                COALESCE(e.name, '')                        || ' ' ||
+                                COALESCE(m.file_path, '')
+                            ) AS doc
+                        FROM medias m
+                        JOIN events e ON m.event_id = e.id
+                        LEFT JOIN person_names pn ON m.id = pn.media_id
+                    )
+                    SELECT *,
+                        CASE WHEN doc @@ to_tsquery('simple', :tsq)
+                             THEN ts_rank(doc, to_tsquery('simple', :tsq))
+                             ELSE 0.05
+                        END AS rank
+                    FROM docs
+                    WHERE doc @@ to_tsquery('simple', :tsq)
+                       OR file_path ILIKE '%' || :raw || '%'
+                    ORDER BY rank DESC
+                """), {"tsq": tsq, "raw": clean})
             return [dict(row._mapping) for row in result.fetchall()]
 
     def save_star_rating(self, media_id: UUID, rating: int) -> None:

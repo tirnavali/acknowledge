@@ -689,15 +689,21 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QApplication.processEvents()
 
         items = self.app_service.get_media_service().get_gallery_items(event.id)
-        self._media_status_bar.setText(f"📂 Etkinlik: {event.name} — Toplam {len(items)} Medya")
         self.gallery_item_model = GalleryItemModel(items)
         if hasattr(self, 'gallery_search_proxy'):
             self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
             self.gallery_search_proxy.setEventFilter(None)
             self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
             self.gallery_search_proxy.setFilterText(self.event_gallery_search.text())
+            txt = self.event_gallery_search.text().strip()
+            if txt:
+                count = self.gallery_search_proxy.rowCount()
+                self._media_status_bar.setText(f"📂 {event.name} — {count} / {len(items)} Medya")
+            else:
+                self._media_status_bar.setText(f"📂 Etkinlik: {event.name} — Toplam {len(items)} Medya")
         else:
             self.event_gallery_list_widget.setModel(self.gallery_item_model)
+            self._media_status_bar.setText(f"📂 Etkinlik: {event.name} — Toplam {len(items)} Medya")
 
         self.gallery_item_model.start_loading()
         self._resume_batch_face_detection(event)
@@ -1099,7 +1105,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Gallery search section
         self.gallery_search_layout = QtWidgets.QHBoxLayout()
         self.event_gallery_search = QtWidgets.QLineEdit()
-        self.event_gallery_search.setPlaceholderText("EXIF İçinde Ara...")
+        self.event_gallery_search.setPlaceholderText("Metadata veya Dosya Adı Ara...")
         self.event_gallery_search.setFixedHeight(30)
         self.event_gallery_search.setMinimumWidth(300)
         
@@ -1352,7 +1358,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
         self.gallery_item_model.start_loading()
         self.gallery_stack.setCurrentIndex(0)
-        self.statusBar().showMessage(f"🔍 {len(items)} sonuç bulundu.", 4000)
+        count = self.gallery_search_proxy.rowCount()
+        self._media_status_bar.setText(f"🔍 '{query_text}' — {count} Medya Bulundu")
 
     def _on_search_error(self, message):
         self.gallery_stack.setCurrentIndex(0)

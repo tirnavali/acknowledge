@@ -323,6 +323,7 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         
         text_blocks = [
             (iptc.get('People', ''), 10), (item.text(), 8),
+            (os.path.basename(item.img_path), 8),
             (iptc.get('Headline', ''), 5), (iptc.get('Caption', ''), 4),
             (iptc.get('Keywords', ''), 3),
             (iptc.get('AI Açıklama (TR)', ''), 4),
