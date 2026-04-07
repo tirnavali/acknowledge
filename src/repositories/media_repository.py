@@ -131,7 +131,8 @@ class MediaRepository:
             db.execute(text("""
                 UPDATE medias
                 SET caption_en = :caption_en, caption_tr = :caption_tr,
-                    tags_en    = :tags_en,    tags_tr    = :tags_tr
+                    tags_en    = :tags_en,    tags_tr    = :tags_tr,
+                    captioned_at = now()
                 WHERE id = :media_id
             """), {
                 "media_id": str(media_id),
@@ -190,6 +191,14 @@ class MediaRepository:
                 text("SELECT * FROM medias WHERE event_id = :event_id"),
                 {"event_id": str(event_id)}
             )
+            return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_all_ordered_by_date(self) -> list[dict]:
+        """Return all media records across all events ordered by date_taken."""
+        with get_db() as db:
+            result = db.execute(text(
+                "SELECT * FROM medias ORDER BY date_taken ASC NULLS LAST, file_path ASC"
+            ))
             return [dict(row._mapping) for row in result.fetchall()]
 
     def get_all_for_person(self, person_id: UUID) -> list[dict]:

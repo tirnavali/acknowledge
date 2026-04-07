@@ -100,7 +100,31 @@ class MediaService(BaseService):
         except Exception as e:
             self.logger.error(f"Error getting gallery items for event {event_id}: {e}")
             raise
-    
+
+    def get_all_gallery_items(self):
+        """Get GalleryItems for all media across all events, ordered by date_taken."""
+        try:
+            from gallery_item_model import GalleryItem
+            records = self.media_repository.get_all_ordered_by_date()
+            items = []
+            for r in records:
+                if not r.get('file_path'):
+                    continue
+                abs_path = path_util.from_db_path(r['file_path'])
+                if not os.path.exists(abs_path):
+                    continue
+                item = GalleryItem(
+                    os.path.basename(abs_path),
+                    abs_path,
+                    in_db=True,
+                    db_metadata=r
+                )
+                items.append(item)
+            return items
+        except Exception as e:
+            self.logger.error(f"Error getting all gallery items: {e}")
+            raise
+
     def save_iptc_data(self, media_id, iptc_data):
         """Save IPTC data to both the image file and the database."""
         try:

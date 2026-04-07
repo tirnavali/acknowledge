@@ -106,19 +106,17 @@ class CaptionService:
                     low_cpu_mem_usage=True,
                 )
             elif mps_available:
-                # device_map={"": "mps"} places weights on MPS during loading.
+                # Load on CPU first to avoid meta-tensor errors, then move to MPS.
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
-                    device_map={"": "mps"},
-                    low_cpu_mem_usage=True,
                 )
+                self._model.to("mps")
             else:
+                # No device_map on CPU — avoids "cannot copy out of meta tensor" from accelerate.
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.float32,
-                    device_map={"": "cpu"},
-                    low_cpu_mem_usage=True,
                 )
 
             self._processor = Qwen2_5_VLProcessor.from_pretrained(model_id)

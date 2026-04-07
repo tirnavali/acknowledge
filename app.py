@@ -106,7 +106,6 @@ class BackgroundCaptionWorker(QtCore.QThread):
                 result = self._caption_svc.analyse(file_path)
                 if result.has_data and not result.error:
                     self._media_svc.save_captions(media_id, result)
-                    self._media_svc.mark_captioned(media_id)
             except Exception as e:
                 logger.warning(f"BackgroundCaptionWorker: error on {file_path}: {e}")
                 from src.domain.entities.caption_result import CaptionResult
@@ -606,7 +605,7 @@ class MainWindow(QtWidgets.QMainWindow):
         captioned = {
             from_db_path(r['file_path'])
             for r in db_records
-            if r.get('captioned_at')
+            if r.get('captioned_at') or (r.get('caption_tr') and r.get('tags_tr'))
         }
         uncaptioned = [f for f in disk_files if os.path.normpath(f) not in captioned]
         if not uncaptioned:
@@ -728,7 +727,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def eventFilter(self, obj, event):
         if obj is self.event_gallery_search and event.type() == QtCore.QEvent.FocusIn:
-            self._clear_event_card_selection()
+            if not hasattr(self, 'event_gallery_search_all_cb') or self.event_gallery_search_all_cb.isChecked():
+                self._clear_event_card_selection()
         
         # Override default Space bar selection in the list widget to open the image instead
         if obj is self.event_gallery_list_widget and event.type() == QtCore.QEvent.KeyPress:
@@ -1120,10 +1120,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_search_btn = QtWidgets.QPushButton("Ara")
         self.event_gallery_search_btn.setFixedHeight(30)
         
+        self.event_gallery_search_all_cb = QtWidgets.QCheckBox("Tüm Etkinliklerde Ara")
+        self.event_gallery_search_all_cb.setToolTip("İşaretliyse arama tüm etkinliklerde yapılır; aksi hâlde yalnızca seçili etkinlikte aranır")
+
         self.gallery_search_layout.addWidget(self.event_gallery_search)
+        self.gallery_search_layout.addWidget(self.event_gallery_search_all_cb)
         self.gallery_search_layout.addWidget(self.event_gallery_date_cb)
         self.gallery_search_layout.addWidget(self.event_gallery_date)
         self.gallery_search_layout.addWidget(self.event_gallery_search_btn)
+
+        self.event_gallery_clear_btn = QtWidgets.QPushButton("Temizle")
+        self.event_gallery_clear_btn.setFixedHeight(30)
+        self.event_gallery_clear_btn.setToolTip("Aramayı ve tüm filtreleri temizle")
+        self.event_gallery_clear_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.event_gallery_clear_btn.clicked.connect(self._on_clear_search)
+        self.gallery_search_layout.addWidget(self.event_gallery_clear_btn)
 
         # Star filter: ★1 ★2 ★3 ★4 ★5  (click = min-star filter; click active = clear)
         self._star_filter_btns: list[QtWidgets.QPushButton] = []
@@ -1294,16 +1305,79 @@ class MainWindow(QtWidgets.QMainWindow):
         for i, btn in enumerate(self._star_filter_btns, 1):
             btn.setStyleSheet(_active if i <= new_min else _inactive)
 
-    def on_gallery_search(self):
-        """Search IPTC across all events; narrow by event when user clicks an event card."""
+    def _on_clear_search(self):
+        """Clear search text, reset all filters, reload gallery and update status bar."""
+        self.event_gallery_search.clear()
+        self.event_gallery_date_cb.setChecked(False)
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setStarFilter(0)
+            self.gallery_search_proxy.setFilterText("", None)
+            self.gallery_search_proxy.setEventFilter(None)
+        _inactive = "QPushButton { background: transparent; border: none; font-size: 18px; color: #bbb; padding: 0 1px; } QPushButton:hover { color: #FFD700; }"
+        for btn in self._star_filter_btns:
+            btn.setStyleSheet(_inactive)
+        self._search_mode = False
+
+        search_all = hasattr(self, 'event_gallery_search_all_cb') and self.event_gallery_search_all_cb.isChecked()
+        if search_all:
+            self._select_newest_event()
+        elif self.current_event_id:
+            items = self.app_service.get_media_service().get_gallery_items(self.current_event_id)
+            self.gallery_item_model = GalleryItemModel(items)
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            self.gallery_item_model.start_loading()
+            self._media_status_bar.setText("✅ Arama temizlendi")
+        else:
+            self._media_status_bar.setText("✅ Arama ve filtreler temizlendi")
+
+    def _select_newest_event(self):
+        """Select the newest event card (item 0, ordered by date DESC) and load its gallery."""
+        if self.event_card_list_widget.count() == 0:
+            self._media_status_bar.setText("✅ Arama temizlendi")
+            return
+        item = self.event_card_list_widget.item(0)
+        card = self.event_card_list_widget.itemWidget(item)
+        if card and hasattr(card, 'event'):
+            self.event_card_list_widget.scrollToItem(item)
+            self.on_event_card_clicked(card.event, card)
+
+    def _load_all_gallery_items(self):
+        """Load all media across all events ordered by date and display in gallery."""
         if not hasattr(self, 'gallery_search_proxy'):
             return
-        self._clear_event_card_selection()  # ensure deselected even if called via button
+        items = self.app_service.get_media_service().get_all_gallery_items()
+        self.gallery_item_model = GalleryItemModel(items)
+        self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+        self.gallery_search_proxy.setFilterText("", None)
+        self.gallery_search_proxy.setEventFilter(None)
+        self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+        self.gallery_item_model.start_loading()
+        self.gallery_stack.setCurrentIndex(0)
+        self._media_status_bar.setText(f"📂 Tüm Etkinlikler — {len(items)} Medya")
+
+    def on_gallery_search(self):
+        """Search gallery; scoped to selected event or all events based on checkbox."""
+        if not hasattr(self, 'gallery_search_proxy'):
+            return
         text = self.event_gallery_search.text().strip()
         date_filter = None
         if self.event_gallery_date_cb.isChecked():
             date_filter = self.event_gallery_date.date().toString("yyyyMMdd")
 
+        search_all = hasattr(self, 'event_gallery_search_all_cb') and self.event_gallery_search_all_cb.isChecked()
+
+        if not search_all:
+            # Single-event mode: apply proxy filter on existing model, no FTS, no event deselect
+            self._search_mode = False
+            self.gallery_search_proxy.setFilterText(text, date_filter)
+            if text:
+                count = self.gallery_search_proxy.rowCount()
+                self._media_status_bar.setText(f"🔍 '{text}' — {count} Medya Bulundu")
+            return
+
+        # All-events mode: FTS across all events
+        self._clear_event_card_selection()
         if text:
             # Show loading screen and kick off background FTS query
             self._search_mode = True
@@ -1324,18 +1398,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._search_worker.error.connect(self._on_search_error)
             self._search_worker.start()
         else:
-            # Search cleared: exit search mode and reload current event
+            # Search cleared in all-events mode: load all media ordered by date
             self._search_mode = False
-            self.gallery_search_proxy.setEventFilter(None)
-            if self.current_event_id:
-                items = self.app_service.get_media_service().get_gallery_items(self.current_event_id)
-                self.gallery_item_model = GalleryItemModel(items)
-                self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
-                self.gallery_search_proxy.setFilterText("", date_filter)
-                self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
-                self.gallery_item_model.start_loading()
-            else:
-                self.gallery_search_proxy.setFilterText("", date_filter)
+            self._load_all_gallery_items()
 
     def _on_search_finished(self, records, query_text):
         """Called on the main thread when the background FTS query completes."""
