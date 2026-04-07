@@ -163,6 +163,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.init_vault()
         self.UI()
         self.show()
+        QtCore.QTimer.singleShot(0, self._start_global_captioning_on_startup)
 
     def init_vault(self):
         print("⏳ Vault klasörleri kontrol ediliyor...")
@@ -593,7 +594,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
         disk_files = [
-            os.path.join(vault_path, f)
+            os.path.abspath(os.path.join(vault_path, f))
             for f in os.listdir(vault_path)
             if os.path.splitext(f)[1].lower() in image_exts
         ]
@@ -603,15 +604,21 @@ class MainWindow(QtWidgets.QMainWindow):
         from src.utils.path_util import from_db_path
         db_records = self.app_service.get_media_service().get_all_for_event(event.id)
         captioned = {
-            from_db_path(r['file_path'])
+            os.path.normcase(from_db_path(r['file_path']))
             for r in db_records
             if r.get('captioned_at') or (r.get('caption_tr') and r.get('tags_tr'))
         }
-        uncaptioned = [f for f in disk_files if os.path.normpath(f) not in captioned]
+        uncaptioned = [f for f in disk_files if os.path.normcase(f) not in captioned]
         if not uncaptioned:
             return
 
         self._start_batch_captioning_for_files(uncaptioned, event)
+
+    def _start_global_captioning_on_startup(self):
+        """Run auto-captioning once on startup across all events for uncaptioned photo media."""
+        events = self.fetch_events()
+        for event in events:
+            self._resume_batch_captioning(event)
 
     def _start_batch_captioning_for_files(self, file_paths, event):
         self._caption_queue.append((list(file_paths), event))
@@ -677,7 +684,6 @@ class MainWindow(QtWidgets.QMainWindow):
             # In search mode: just narrow the already-loaded cross-event results by this event
             self.gallery_search_proxy.setEventFilter(event.id)
             self._resume_batch_face_detection(event)
-            self._resume_batch_captioning(event)
             return
 
         # Normal mode: load this event's items from disk + DB
@@ -707,7 +713,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.gallery_item_model.start_loading()
         self._resume_batch_face_detection(event)
-        self._resume_batch_captioning(event)
 
         self.gallery_stack.setCurrentIndex(0)  # grid view
         self.media_details_scroll.setEnabled(True)
@@ -1223,14 +1228,24 @@ class MainWindow(QtWidgets.QMainWindow):
         if not item:
             return
             
+        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+        is_photo = os.path.splitext(item.img_path)[1].lower() in image_exts
+
         menu = QtWidgets.QMenu(self)
         reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
-        
+        menu.addSeparator()
+        caption_action = menu.addAction("Yeniden Altyazıla")
+        caption_action.setEnabled(is_photo and bool(self.current_event_id))
+
         action = menu.exec(self.event_gallery_list_widget.mapToGlobal(pos))
-        
+
         if action == reveal_action:
             from src.utils import path_util
             path_util.reveal_in_explorer(item.img_path)
+        elif action == caption_action:
+            event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
+            if event:
+                self._start_batch_captioning_for_files([item.img_path], event)
 
     def _on_faces_changed(self):
         """Update the UI people input and auto-save IPTC when face labels change."""
