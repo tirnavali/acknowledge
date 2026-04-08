@@ -98,13 +98,14 @@ class CaptionService:
             logger.info(f"CaptionService: model source → {model_id}")
 
             if cuda_available:
-                # device_map="auto" lets transformers shard across GPUs
+                # Load on CPU first to avoid accelerate meta-tensor errors with
+                # Qwen2.5-VL (lm_head is not weight-tied, which confuses
+                # device_map="auto" / infer_auto_device), then move to CUDA.
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                    low_cpu_mem_usage=True,
                 )
+                self._model.to("cuda")
             elif mps_available:
                 # Load on CPU first to avoid meta-tensor errors, then move to MPS.
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(

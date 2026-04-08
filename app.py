@@ -20,6 +20,7 @@ from single_view_widget import SingleViewWidget
 from src.services.application_service import ApplicationService
 from caption_tab_widget import CaptionTabWidget
 from caption_stats_widget import CaptionStatsWidget
+from toggle_switch import ToggleSwitch
 import os
 
 logging.basicConfig(level=logging.WARNING, format="%(name)s %(levelname)s: %(message)s")
@@ -132,6 +133,59 @@ class SearchWorker(QtCore.QThread):
             self.finished.emit(records, self._query)
         except Exception as e:
             self.error.emit(str(e))
+
+
+class PersonRenameWorker(QtCore.QThread):
+    """Renames a person in the DB then updates IPTC keywords in all linked files."""
+    progress = QtCore.Signal(int, int)   # current, total
+    finished = QtCore.Signal(int)        # number of files whose keywords were updated
+    error    = QtCore.Signal(str)
+
+    def __init__(self, person_service, person_id, old_name, new_name, media_records, parent=None):
+        super().__init__(parent)
+        self._person_service = person_service
+        self._person_id = person_id
+        self._old_name = old_name
+        self._new_name = new_name
+        self._media_records = media_records
+
+    def run(self):
+        from iptcinfo3 import IPTCInfo
+        from src.utils import path_util
+
+        try:
+            self._person_service.rename(self._person_id, self._new_name)
+        except Exception as e:
+            self.error.emit(f"Veritabanı güncellenemedi: {e}")
+            return
+
+        old_lower = self._old_name.lower()
+        files_updated = 0
+        total = len(self._media_records)
+        for i, rec in enumerate(self._media_records):
+            self.progress.emit(i + 1, total)
+            abs_path = path_util.from_db_path(rec.get("file_path", ""))
+            if not abs_path or not os.path.exists(abs_path):
+                continue
+            try:
+                info = IPTCInfo(abs_path, force=True)
+                raw_kws = info["keywords"] or []
+                str_kws = [k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_kws]
+                new_kws, changed = [], False
+                for kw in str_kws:
+                    if kw.lower() == old_lower:
+                        new_kws.append(self._new_name)
+                        changed = True
+                    else:
+                        new_kws.append(kw)
+                if changed:
+                    info["keywords"] = [k.encode("utf-8") for k in new_kws]
+                    info.save()
+                    files_updated += 1
+            except Exception:
+                pass  # file update is best-effort; DB rename already succeeded
+
+        self.finished.emit(files_updated)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -1115,7 +1169,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_search.setFixedHeight(30)
         self.event_gallery_search.setMinimumWidth(300)
         
-        self.event_gallery_date_cb = QtWidgets.QCheckBox("Tarih Filtresi:")
+        self.event_gallery_date_cb = ToggleSwitch("Tarih Filtresi:")
         self.event_gallery_date = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
         self.event_gallery_date.setCalendarPopup(True)
         self.event_gallery_date.setFixedHeight(30)
@@ -1124,8 +1178,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.event_gallery_search_btn = QtWidgets.QPushButton("Ara")
         self.event_gallery_search_btn.setFixedHeight(30)
-        
-        self.event_gallery_search_all_cb = QtWidgets.QCheckBox("Tüm Etkinliklerde Ara")
+
+        self.event_gallery_search_all_cb = ToggleSwitch("Tüm Etkinliklerde Ara")
         self.event_gallery_search_all_cb.setToolTip("İşaretliyse arama tüm etkinliklerde yapılır; aksi hâlde yalnızca seçili etkinlikte aranır")
 
         self.gallery_search_layout.addWidget(self.event_gallery_search)
@@ -1354,6 +1408,7 @@ class MainWindow(QtWidgets.QMainWindow):
         item = self.event_card_list_widget.item(0)
         card = self.event_card_list_widget.itemWidget(item)
         if card and hasattr(card, 'event'):
+            self.event_card_list_widget.setCurrentItem(item)
             self.event_card_list_widget.scrollToItem(item)
             self.on_event_card_clicked(card.event, card)
 
@@ -1392,8 +1447,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # All-events mode: FTS across all events
-        self._clear_event_card_selection()
         if text:
+            self._clear_event_card_selection()
             # Show loading screen and kick off background FTS query
             self._search_mode = True
             self._pending_search_date_filter = date_filter
@@ -1413,9 +1468,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._search_worker.error.connect(self._on_search_error)
             self._search_worker.start()
         else:
-            # Search cleared in all-events mode: load all media ordered by date
+            # Empty search in all-events mode: restore all media ordered by date
             self._search_mode = False
-            self._load_all_gallery_items()
+            if self.current_event_id:
+                # Re-select the previously active event instead of dumping all media
+                self._select_newest_event()
+            else:
+                self._load_all_gallery_items()
 
     def _on_search_finished(self, records, query_text):
         """Called on the main thread when the background FTS query completes."""
@@ -1659,6 +1718,11 @@ class MainWindow(QtWidgets.QMainWindow):
         refresh_btn.clicked.connect(self._load_persons_table)
         top_bar.addWidget(refresh_btn)
 
+        rename_btn = QtWidgets.QPushButton("İsim Değiştir")
+        rename_btn.setFixedHeight(30)
+        rename_btn.clicked.connect(self._rename_selected_person)
+        top_bar.addWidget(rename_btn)
+
         delete_btn = QtWidgets.QPushButton("Kişi Sil")
         delete_btn.setFixedHeight(30)
         delete_btn.setStyleSheet("QPushButton { color: #c0392b; } QPushButton:hover { background-color: #c0392b; color: white; }")
@@ -1727,11 +1791,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         from src.utils import config_util
 
-        # Auto Captioning Checkbox
-        self.auto_caption_cb = QtWidgets.QCheckBox("Otomatik Altyazı (Auto Captioning) Aktif")
+        # Auto Captioning Toggle
+        self.auto_caption_cb = ToggleSwitch("Otomatik Altyazı (Auto Captioning) Aktif")
         self.auto_caption_cb.setChecked(config_util.get_setting("auto_captioning_enabled", False))
         self.auto_caption_cb.toggled.connect(self._on_auto_caption_toggled)
-        self.auto_caption_cb.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 5px;")
         
         info_label = QtWidgets.QLabel("Not: Düşük donanımlı cihazlarda (ör. GT730 GPU vb.) otomatik altyazı (Qwen2.5:3b VLM) üretiminin kapalı olması tavsiye edilir.")
         info_label.setWordWrap(True)
@@ -1854,6 +1917,55 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.single_view_widget.set_image(abs_path)
 
+    def _rename_selected_person(self):
+        selected = self._persons_table.selectedItems()
+        if not selected:
+            QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen yeniden adlandırmak istediğiniz kişiyi seçin.")
+            return
+
+        row = self._persons_table.currentRow()
+        name_item = self._persons_table.item(row, 0)
+        if not name_item:
+            return
+
+        old_name = name_item.text()
+        person_id = name_item.data(QtCore.Qt.UserRole)
+
+        new_name, ok = QtWidgets.QInputDialog.getText(
+            self, "İsim Değiştir", f'"{old_name}" için yeni isim:', text=old_name
+        )
+        if not ok:
+            return
+        new_name = new_name.strip()
+        if not new_name or new_name == old_name:
+            return
+
+        try:
+            media_records = self.app_service.get_person_service().get_media_paths_for_person(person_id)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Hata", f"Kişi medyaları alınamadı: {e}")
+            return
+
+        self._rename_worker = PersonRenameWorker(
+            self.app_service.get_person_service(), person_id, old_name, new_name, media_records
+        )
+        self._rename_worker.progress.connect(
+            lambda cur, tot: self._media_status_bar.setText(f"⏳ Dosyalar güncelleniyor… {cur}/{tot}")
+        )
+        self._rename_worker.finished.connect(lambda n: self._on_rename_finished(n, new_name))
+        self._rename_worker.error.connect(lambda msg: QtWidgets.QMessageBox.critical(self, "Hata", msg))
+        self._media_status_bar.setText(f"⏳ '{new_name}' için dosyalar güncelleniyor…")
+        self._rename_worker.start()
+
+    def _on_rename_finished(self, files_updated: int, new_name: str):
+        self._load_persons_table()
+        if files_updated > 0:
+            self._media_status_bar.setText(
+                f"✅ '{new_name}' olarak yeniden adlandırıldı — {files_updated} dosyada anahtar kelime güncellendi."
+            )
+        else:
+            self._media_status_bar.setText(f"✅ '{new_name}' olarak yeniden adlandırıldı.")
+
     def _delete_selected_person(self):
         selected = self._persons_table.selectedItems()
         if not selected:
@@ -1973,8 +2085,6 @@ class MainWindow(QtWidgets.QMainWindow):
             QPushButton { background-color: #333333; color: white; padding: 6px 15px; border: 1px solid #555555; border-radius: 4px; font-weight: bold; }
             QPushButton:hover { background-color: #3f3f46; border: 1px solid #0078D7; }
             QPushButton:pressed { background-color: #0078D7; border: 1px solid #0078D7; }
-            QCheckBox { color: #ffffff; }
-            QCheckBox::indicator { width: 18px; height: 18px; }
         """)
 
     def closeEvent(self, event):

@@ -131,6 +131,17 @@ class PersonRepository:
             )
             db.commit()
 
+    def get_media_paths(self, person_id: UUID) -> list[dict]:
+        """Return [{media_id, file_path}] for every media linked to this person."""
+        with get_db() as db:
+            result = db.execute(text("""
+                SELECT m.id AS media_id, m.file_path
+                FROM medias m
+                JOIN media_persons mp ON m.id = mp.media_id
+                WHERE mp.person_id = :pid
+            """), {"pid": str(person_id)})
+            return [dict(row._mapping) for row in result.fetchall()]
+
     def get_persons_for_media(self, media_id: UUID) -> list[str]:
         """Get all person names linked to a media."""
         with get_db() as db:

@@ -24,6 +24,8 @@ def _build_prefix_tsquery(query: str) -> str:
     return ' & '.join(f'{w}:*' for w in words)
 
 
+
+
 def _abs(path: str) -> str:
     """Normalize a file path to DB format (relative or normalized absolute)."""
     if not path:
@@ -194,10 +196,10 @@ class MediaRepository:
             return [dict(row._mapping) for row in result.fetchall()]
 
     def get_all_ordered_by_date(self) -> list[dict]:
-        """Return all media records across all events ordered by date_taken."""
+        """Return all media records across all events ordered by IPTC date then insert time."""
         with get_db() as db:
             result = db.execute(text(
-                "SELECT * FROM medias ORDER BY date_taken ASC NULLS LAST, file_path ASC"
+                "SELECT * FROM medias ORDER BY iptc_date_created DESC NULLS LAST, created_at DESC NULLS LAST, file_path ASC"
             ))
             return [dict(row._mapping) for row in result.fetchall()]
 
@@ -232,16 +234,19 @@ class MediaRepository:
             db.commit()
 
     def search_across_events(self, query: str) -> list[dict]:
-        """PostgreSQL FTS across all metadata fields + filename ILIKE fallback.
-        Supports prefix wildcard: 'anka' matches 'ankara'.
-        Filenames like 'KURT0942.jpg' are matched via ILIKE even when FTS tokenisation
-        would miss them.
+        """PostgreSQL FTS across all metadata fields + ILIKE exact-phrase boost.
+
+        All queries use AND-of-words prefix matching so every word must appear
+        somewhere in the document (position-agnostic).  When the raw query string
+        also appears as a literal substring (case-insensitive), that result is
+        ranked 2.0 and floats to the top — giving "exact phrase" prioritisation
+        without restricting recall.
         """
         clean = sanitize_str(query)
         tsq = _build_prefix_tsquery(clean)
         with get_db() as db:
             if not tsq:
-                # Query contains only punctuation/special chars — ILIKE only (e.g. ".jpg")
+                # Only punctuation/special chars remain — ILIKE on filename only.
                 result = db.execute(text("""
                     SELECT m.*, e.name AS event_name,
                            COALESCE(pn.names, '') AS person_names,
@@ -268,10 +273,35 @@ class MediaRepository:
                     docs AS (
                         SELECT
                             m.*,
-                            e.name  AS event_name,
+                            e.name AS event_name,
                             COALESCE(pn.names, '') AS person_names,
+                            (
+                                COALESCE(m.title, '')                       || ' ' ||
+                                COALESCE(m.iptc_headline, '')               || ' ' ||
+                                COALESCE(m.iptc_caption, '')                || ' ' ||
+                                COALESCE(m.iptc_keywords, '')               || ' ' ||
+                                COALESCE(m.iptc_object_name, '')            || ' ' ||
+                                COALESCE(m.iptc_city, '')                   || ' ' ||
+                                COALESCE(m.iptc_state, '')                  || ' ' ||
+                                COALESCE(m.iptc_country, '')                || ' ' ||
+                                COALESCE(m.iptc_credit, '')                 || ' ' ||
+                                COALESCE(m.iptc_source, '')                 || ' ' ||
+                                COALESCE(m.iptc_byline, '')                 || ' ' ||
+                                COALESCE(m.iptc_byline_title, '')           || ' ' ||
+                                COALESCE(m.iptc_category, '')               || ' ' ||
+                                COALESCE(m.iptc_writer, '')                 || ' ' ||
+                                COALESCE(m.iptc_copyright, '')              || ' ' ||
+                                COALESCE(m.iptc_supplemental_categories,'') || ' ' ||
+                                COALESCE(m.caption_tr, '')                  || ' ' ||
+                                COALESCE(m.caption_en, '')                  || ' ' ||
+                                COALESCE(m.tags_tr, '')                     || ' ' ||
+                                COALESCE(m.tags_en, '')                     || ' ' ||
+                                COALESCE(pn.names, '')                      || ' ' ||
+                                COALESCE(e.name, '')                        || ' ' ||
+                                COALESCE(m.file_path, '')
+                            ) AS concat_text,
                             to_tsvector('simple',
-                                COALESCE(m.title, '')                      || ' ' ||
+                                COALESCE(m.title, '')                       || ' ' ||
                                 COALESCE(m.iptc_headline, '')               || ' ' ||
                                 COALESCE(m.iptc_caption, '')                || ' ' ||
                                 COALESCE(m.iptc_keywords, '')               || ' ' ||
@@ -300,13 +330,13 @@ class MediaRepository:
                         LEFT JOIN person_names pn ON m.id = pn.media_id
                     )
                     SELECT *,
-                        CASE WHEN doc @@ to_tsquery('simple', :tsq)
-                             THEN ts_rank(doc, to_tsquery('simple', :tsq))
-                             ELSE 0.05
+                        CASE
+                            WHEN concat_text ILIKE '%' || :raw || '%' THEN 2.0
+                            ELSE ts_rank(doc, to_tsquery('simple', :tsq))
                         END AS rank
                     FROM docs
                     WHERE doc @@ to_tsquery('simple', :tsq)
-                       OR file_path ILIKE '%' || :raw || '%'
+                       OR concat_text ILIKE '%' || :raw || '%'
                     ORDER BY rank DESC
                 """), {"tsq": tsq, "raw": clean})
             return [dict(row._mapping) for row in result.fetchall()]

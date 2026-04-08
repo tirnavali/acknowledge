@@ -132,6 +132,14 @@ class PersonService(BaseService):
             self.logger.error(f"Error getting note for person {person_id} / media {media_id}: {e}")
             return ""
 
+    def get_media_paths_for_person(self, person_id) -> list[dict]:
+        """Return [{media_id, file_path}] for every media linked to this person."""
+        try:
+            return self.person_repository.get_media_paths(person_id)
+        except Exception as e:
+            self.logger.error(f"Error getting media paths for person {person_id}: {e}")
+            raise
+
     def search_notes(self, query: str) -> list[dict]:
         try:
             return self.person_note_repository.search_notes(query)
