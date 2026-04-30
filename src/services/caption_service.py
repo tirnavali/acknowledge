@@ -292,9 +292,10 @@ class CaptionService:
                     "- Mekanı, rolleri (konuşmacı, milletvekili, dinleyici vb.) ve önemli görsel ayrıntıları belirt. "
                     "- Emin değilsen ‘bir konuşmacı’, ‘bir milletvekili’ gibi genel ifadeler kullan. "
                     "- tags_tr alanında en fazla 8 adet, virgülle ayrılmış kısa etiketler yaz (mekan, rol, nesne, renk vb.). "
-                    "JSON dışında hiçbir metin yazma.\n"
-                    ‘{"caption_tr": "Detaylı Türkçe açıklama cümlesi", ‘
-                    ‘"tags_tr": "etiket1, etiket2, etiket3, etiket4, etiket5"}’
+                    "JSON dışında hiçbir metin yazma.\n",
+                    {"caption_tr": "Detaylı Türkçe açıklama cümlesi", 
+
+                    "tags_tr": "etiket1, etiket2, etiket3, etiket4, etiket5"}
                 )
                 raw = self._run_prompt(pil_image, combined_prompt)
                 result.caption_tr, result.tags_tr = self._parse_combined_response(raw)
