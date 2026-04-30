@@ -18,6 +18,7 @@ env/
 # Environment Variables
 .env
 .env.local
+.env.example
 
 # Database
 *.db
@@ -33,6 +34,7 @@ env/
 
 # Logs
 *.log
+/logs/*
 
 # OS
 Thumbs.db

@@ -39,7 +39,7 @@ if _env_path.exists():
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 REPORT_TO_EMAIL = os.environ.get("REPORT_TO_EMAIL", "tran.ce.co@gmail.com")
 REPORT_FROM_EMAIL = os.environ.get("REPORT_FROM_EMAIL", "")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 LOG_HOURS = int(os.environ.get("LOG_HOURS", "1"))
 
@@ -82,11 +82,23 @@ def read_recent_records(hours: int) -> list[dict]:
 # Aggregation
 # ---------------------------------------------------------------------------
 
+def _percentile(values: list[int], pct: int) -> int:
+    if not values:
+        return 0
+    s = sorted(values)
+    idx = max(0, int(len(s) * pct / 100) - 1)
+    return s[idx]
+
+
 def aggregate(records: list[dict]) -> dict:
     level_counts: Counter = Counter()
     event_counts: Counter = Counter()
     errors: list[str] = []
     durations: defaultdict[str, list[int]] = defaultdict(list)
+    face_detect_total = 0
+    face_detect_auto_matched = 0
+    thumbnail_cache_hits = 0
+    thumbnail_total = 0
 
     for rec in records:
         level_counts[rec.get("level", "UNKNOWN")] += 1
@@ -98,18 +110,30 @@ def aggregate(records: list[dict]) -> dict:
         dur = rec.get("duration_ms")
         if dur is not None and event:
             durations[event].append(int(dur))
+        # UX-specific tallies
+        if event == "FACE_DETECT":
+            face_detect_total += 1
+        if event == "THUMBNAIL_GEN":
+            thumbnail_total += 1
+            if "cache" in rec.get("msg", "").lower():
+                thumbnail_cache_hits += 1
 
-    avg_durations = {
-        evt: round(sum(vals) / len(vals))
-        for evt, vals in durations.items()
-    }
+    latency_stats = {}
+    for evt, vals in durations.items():
+        latency_stats[evt] = {
+            "count": len(vals),
+            "avg_ms": round(sum(vals) / len(vals)),
+            "p95_ms": _percentile(vals, 95),
+            "max_ms": max(vals),
+        }
 
     return {
         "period_hours": LOG_HOURS,
         "total_records": len(records),
         "level_counts": dict(level_counts),
         "event_counts": dict(event_counts),
-        "avg_duration_ms": avg_durations,
+        "latency_stats": latency_stats,
+        "thumbnail_cache_hit_rate_pct": round(100 * thumbnail_cache_hits / thumbnail_total) if thumbnail_total else None,
         "recent_errors": errors[:10],
     }
 
@@ -119,18 +143,36 @@ def aggregate(records: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 PROMPT_TEMPLATE = """\
+/think
 You are a monitoring agent for a photo archiving desktop app called Acknowledge.
-The app does: media import, face detection (InsightFace), AI captioning (Qwen2.5-VL).
+The app runs on Windows with an RTX 3060 (12 GB VRAM).
 
-Here is a structured log summary from the last {hours} hour(s):
+App operations:
+  • Media import + thumbnail generation (GALLERY_LOAD, THUMBNAIL_GEN)
+  • Face detection via InsightFace (FACE_BATCH_START/COMPLETE, FACE_DETECT, FACE_DB_HIT)
+  • AI captioning via Qwen2.5-VL-3B (CAPTION_BATCH_START/COMPLETE, CAPTION_RESULT)
+  • User interactions: image selection, search, star ratings, tab switches
+
+Performance baselines (healthy ranges):
+  IMAGE_LOAD          < 500 ms      (>2000 ms = slow disk or large file)
+  FACE_DETECT         < 1500 ms     (>4000 ms = GPU pressure)
+  GALLERY_LOAD        < 300 ms      (>1000 ms = too many files in event)
+  THUMBNAIL_GEN       < 200 ms      (cache hit < 50 ms)
+  GALLERY_FILTER      < 100 ms      (client-side — always fast)
+  GALLERY_SEARCH_DONE < 2000 ms     (>5000 ms = missing DB index)
+  MODEL_LOAD_UI       < 60 s        (first cold start per session)
+  CAPTION_RESULT      3–8 s/image   (>15 s = memory pressure)
+
+Log summary for the last {hours} hour(s):
 {summary}
 
-Write a concise status report (under 200 words) covering:
-- What the app did (face detection batches, captioning batches, events imported)
-- Any errors or unusually slow operations worth noting
-- Overall health verdict: OK / WARNING / CRITICAL
+Write a concise status report (under 220 words) with these sections:
+1. Activity summary (what the app actually did this hour)
+2. Performance (flag anything outside baselines, with the actual vs expected value)
+3. Errors (list any errors, group by type)
+4. Health verdict: OK / WARNING / CRITICAL — and one sentence why
 
-Be direct and specific. No padding."""
+Be direct. Use numbers. No padding."""
 
 
 def call_ollama(summary: dict) -> str | None:
@@ -143,6 +185,7 @@ def call_ollama(summary: dict) -> str | None:
                 summary=json.dumps(summary, ensure_ascii=False, indent=2),
             ),
             "stream": False,
+            "options": {"temperature": 0.2},  # low temp for consistent analytical output
         }).encode()
         req = urllib.request.Request(
             f"{OLLAMA_URL}/api/generate",
@@ -248,7 +291,8 @@ def main() -> None:
             lines.append("")
             lines.append("Events:")
             for evt, cnt in sorted(summary["event_counts"].items(), key=lambda x: -x[1]):
-                avg = summary["avg_duration_ms"].get(evt)
+                latency = summary["latency_stats"].get(evt)
+                avg = latency["avg_ms"] if latency else None
                 suffix = f"  (avg {avg}ms)" if avg else ""
                 lines.append(f"  {evt}: {cnt}{suffix}")
             if summary["recent_errors"]:

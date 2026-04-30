@@ -138,8 +138,11 @@ class CaptionService:
     MAX_PIXELS = 1280 * 1280
     MIN_PIXELS = 224 * 224
 
-    def _run_prompt(self, image_uri: str, prompt_text: str) -> str:
-        """Run a single vision prompt and return stripped output text."""
+    def _run_prompt(self, image_input, prompt_text: str) -> str:
+        """Run a single vision prompt and return stripped output text.
+
+        image_input may be a PIL.Image.Image (in-memory) or a file path string.
+        """
         from qwen_vl_utils import process_vision_info
 
         messages = [
@@ -148,7 +151,7 @@ class CaptionService:
                 "content": [
                     {
                         "type": "image",
-                        "image": image_uri,
+                        "image": image_input,
                         "min_pixels": self.MIN_PIXELS,
                         "max_pixels": self.MAX_PIXELS,
                     },
@@ -168,18 +171,14 @@ class CaptionService:
             padding=True,
             return_tensors="pt",
         )
-        inputs = inputs.to(self._device)
-
-        # Fix: ensure vision inputs are the same dtype as the model (prevents mat1/mat2 dtype mismatch)
-        if self._model.dtype != torch.float32:
-            inputs = inputs.to(self._model.dtype)
+        # Single fused copy: move to device and cast dtype in one operation
+        inputs = inputs.to(device=self._device, dtype=self._model.dtype)
 
         start_time = time.perf_counter()
         with torch.no_grad():
             generated_ids = self._model.generate(
                 **inputs,
-                max_new_tokens=256,
-                repetition_penalty=1.15,
+                max_new_tokens=120,
             )
         generation_time = time.perf_counter() - start_time
         logger.info(
@@ -202,34 +201,29 @@ class CaptionService:
     MAX_SIDE_PX = 768
 
     @staticmethod
-    def _prepare_image(img_path: str, max_side: int) -> str:
+    def _prepare_image(img_path: str, max_side: int):
+        """Return a PIL Image resized to fit within max_side, entirely in memory.
+
+        Eliminates the temp-file round-trip (disk write + disk read + JPEG decode)
+        that previously ran before every inference call.
         """
-        Return a path to a downscaled copy of the image.
-        If the image already fits within max_side × max_side it is returned as-is.
-        The resized copy is written to a temp file that the caller must delete.
-        Returns (path, is_temp) tuple.
-        """
-        import tempfile
         from PIL import Image as _Image
 
-        with _Image.open(img_path) as im:
-            w, h = im.size
-            if max(w, h) <= max_side:
-                return img_path, False          # already small enough
-
-            # Resize keeping aspect ratio
-            ratio = max_side / max(w, h)
-            new_w, new_h = max(1, int(w * ratio)), max(1, int(h * ratio))
-            if im.mode not in ("RGB", "RGBA"):
-                im = im.convert("RGB")
-            resized = im.resize((new_w, new_h), _Image.LANCZOS)
-            if resized.mode != "RGB":
-                resized = resized.convert("RGB")
-
-            tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-            resized.save(tmp.name, "JPEG", quality=88)
-            logger.debug(f"_prepare_image: {w}×{h} → {new_w}×{new_h}, tmp={tmp.name}")
-            return tmp.name, True
+        im = _Image.open(img_path)
+        im.load()
+        w, h = im.size
+        if im.mode not in ("RGB", "RGBA"):
+            im = im.convert("RGB")
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        if max(w, h) <= max_side:
+            return im
+        ratio = max_side / max(w, h)
+        new_w, new_h = max(1, int(w * ratio)), max(1, int(h * ratio))
+        resized = im.resize((new_w, new_h), _Image.LANCZOS)
+        im.close()
+        logger.debug(f"_prepare_image: {w}×{h} → {new_w}×{new_h} (in-memory)")
+        return resized
 
     def _parse_combined_response(self, raw: str) -> tuple[str, str]:
         """Extract caption_tr and tags_tr from a JSON model response.
@@ -262,17 +256,14 @@ class CaptionService:
         so that full-resolution press photos never exhaust GPU/system memory.
         caption_en and tags_en are left empty (Turkish-only output).
         """
-        import os as _os
         result = CaptionResult(img_path=img_path)
 
-        # Pre-resize outside the lock so PIL work doesn't block other threads
+        # Pre-resize outside the lock: returns a PIL Image in memory, no temp files
         try:
-            tmp_path, is_temp = self._prepare_image(img_path, self.MAX_SIDE_PX)
+            pil_image = self._prepare_image(img_path, self.MAX_SIDE_PX)
         except Exception as e:
             result.error = f"Resim hazırlanamadı: {e}"
             return result
-
-        image_uri = str(Path(tmp_path).resolve())
 
         with self._lock:
             try:
@@ -302,10 +293,10 @@ class CaptionService:
                     "- Emin değilsen ‘bir konuşmacı’, ‘bir milletvekili’ gibi genel ifadeler kullan. "
                     "- tags_tr alanında en fazla 8 adet, virgülle ayrılmış kısa etiketler yaz (mekan, rol, nesne, renk vb.). "
                     "JSON dışında hiçbir metin yazma.\n"
-                    '{"caption_tr": "Detaylı Türkçe açıklama cümlesi", '
-                    '"tags_tr": "etiket1, etiket2, etiket3, etiket4, etiket5"}'
+                    ‘{"caption_tr": "Detaylı Türkçe açıklama cümlesi", ‘
+                    ‘"tags_tr": "etiket1, etiket2, etiket3, etiket4, etiket5"}’
                 )
-                raw = self._run_prompt(image_uri, combined_prompt)
+                raw = self._run_prompt(pil_image, combined_prompt)
                 result.caption_tr, result.tags_tr = self._parse_combined_response(raw)
                 total_duration = time.perf_counter() - full_start
                 result.duration = total_duration
@@ -313,11 +304,5 @@ class CaptionService:
             except Exception as e:
                 logger.error(f"CaptionService.analyse error for {img_path}: {e}")
                 result.error = str(e)
-            finally:
-                if is_temp:
-                    try:
-                        _os.unlink(tmp_path)
-                    except OSError:
-                        pass
 
         return result

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Runs the Acknowledge code reviewer daily. Reads 8 hours of performance logs and calls Claude Code CLI to generate targeted code improvement suggestions saved to logs/code_review_*.md</Description>
+    <URI>\AcknowledgeCodeReview</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <!-- Runs daily at 18:00 (end of working day) -->
+      <StartBoundary>2026-01-01T18:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>ArsivTBMM</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>python</Command>
+      <!-- --hours 8 reviews the last 8 hours of the working day -->
+      <Arguments>D:\projects\acknowledge\agent\code_reviewer.py --hours 8</Arguments>
+      <WorkingDirectory>D:\projects\acknowledge</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
