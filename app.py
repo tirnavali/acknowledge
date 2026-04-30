@@ -1,8 +1,11 @@
 import sys, os
 import random
 import logging
+import time
+from pathlib import Path
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtGui import QAction
+import shiboken6 as shiboken
 
 from event_card_widget import EventCardWidget
 from gallery_item_model import GalleryItemModel, GalleryItem
@@ -23,7 +26,8 @@ from caption_stats_widget import CaptionStatsWidget
 from toggle_switch import ToggleSwitch
 import os
 
-logging.basicConfig(level=logging.WARNING, format="%(name)s %(levelname)s: %(message)s")
+from src.utils.log_util import setup_logging
+setup_logging(Path(__file__).parent / "logs")
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +49,13 @@ class BatchFaceWorker(QtCore.QThread):
         self._force       = force
 
     def run(self):
+        import time as _time
         total = len(self._file_paths)
+        _t0 = _time.monotonic()
+        logger.info(
+            f"BatchFaceWorker: starting on {total} files",
+            extra={"event": "FACE_BATCH_START", "event_id": str(self._event_id)},
+        )
         for i, file_path in enumerate(self._file_paths, 1):
             try:
                 media_id = self._media_svc.ensure_media_exists(
@@ -75,12 +85,17 @@ class BatchFaceWorker(QtCore.QThread):
                 # Only save if we found at least some metadata (to avoid unnecessary writes)
                 if any(v.strip() for v in meta.values()):
                     self._media_svc.save_iptc_data(media_id, meta)
-                
+
                 self._media_svc.mark_face_detected(media_id)
             except Exception as e:
                 logger.warning(f"BatchFaceWorker: error on {file_path}: {e}")
             self.image_processed.emit(file_path)
             self.progress.emit(i, total)
+        elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+        logger.info(
+            f"BatchFaceWorker: finished {total} files in {elapsed_ms}ms",
+            extra={"event": "FACE_BATCH_COMPLETE", "event_id": str(self._event_id), "duration_ms": elapsed_ms},
+        )
         self.finished.emit()
 
 
@@ -100,7 +115,13 @@ class BackgroundCaptionWorker(QtCore.QThread):
         self._media_svc   = media_service
 
     def run(self):
+        import time as _time
         total = len(self._file_paths)
+        _t0 = _time.monotonic()
+        logger.info(
+            f"BackgroundCaptionWorker: starting on {total} files",
+            extra={"event": "CAPTION_BATCH_START", "event_id": str(self._event_id)},
+        )
         for i, file_path in enumerate(self._file_paths, 1):
             try:
                 media_id = self._media_svc.ensure_media_exists(self._event_id, file_path, "photo")
@@ -114,6 +135,11 @@ class BackgroundCaptionWorker(QtCore.QThread):
             self.result_ready.emit(result)
             self.image_captioned.emit(file_path)
             self.progress.emit(i, total)
+        elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+        logger.info(
+            f"BackgroundCaptionWorker: finished {total} files in {elapsed_ms}ms",
+            extra={"event": "CAPTION_BATCH_COMPLETE", "event_id": str(self._event_id), "duration_ms": elapsed_ms},
+        )
         self.finished.emit()
 
 
@@ -290,6 +316,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 db.commit()
             
             print("✅ Veritabanı tabloları hazır.")
+            logger.info("Application started, database ready", extra={"event": "APP_START"})
         except Exception as e:
             logging.error(f"❌ Veritabanı bağlantı hatası: {str(e)}")
             QtWidgets.QMessageBox.critical(
@@ -468,12 +495,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def refresh_events(self):
         """Clear and reload the event list"""
+        self._selected_event_card = None
         self.event_card_list_widget.clear()
         self.load_events()
 
     def on_event_search_entered(self):
         """Handle search by name for events."""
         query = self.event_search.text().strip()
+        self._selected_event_card = None
         self.event_card_list_widget.clear()
         
         if not query:
@@ -481,7 +510,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
             
         try:
+            _search_t0 = time.monotonic()
             results = self.app_service.get_event_service().search_by_name(query)
+            _search_ms = int((time.monotonic() - _search_t0) * 1000)
             if results:
                 self.load_events(results)
                 self.statusBar().showMessage(f"🔍 '{query}' için {len(results)} sonuç bulundu.", 3000)
@@ -494,6 +525,10 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 self.statusBar().showMessage(f"❌ '{query}' için sonuç bulunamadı.", 3000)
                 self._media_status_bar.setText("❌ Sonuç Bulunamadı")
+            logger.info(
+                f"Event search: '{query}' → {len(results)} results in {_search_ms}ms",
+                extra={"event": "EVENT_SEARCH", "duration_ms": _search_ms},
+            )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Arama Hatası", f"Etkinlik araması sırasında hata oluştu: {e}")
 
@@ -725,7 +760,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_event_card_clicked(self, event, card=None):
         """Handle event card click"""
         # Deselect previous card, highlight new one
-        if self._selected_event_card:
+        if self._selected_event_card and shiboken.isValid(self._selected_event_card):
             self._selected_event_card.setSelected(False)
         if card:
             card.setSelected(True)
@@ -748,6 +783,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         QtWidgets.QApplication.processEvents()
 
+        _gallery_t0 = time.monotonic()
         items = self.app_service.get_media_service().get_gallery_items(event.id)
         self.gallery_item_model = GalleryItemModel(items)
         if hasattr(self, 'gallery_search_proxy'):
@@ -766,6 +802,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._media_status_bar.setText(f"📂 Etkinlik: {event.name} — Toplam {len(items)} Medya")
 
         self.gallery_item_model.start_loading()
+        _gallery_ms = int((time.monotonic() - _gallery_t0) * 1000)
+        logger.info(
+            f"Gallery loaded: {len(items)} items in {_gallery_ms}ms for event '{event.name}'",
+            extra={"event": "GALLERY_LOAD", "event_id": str(event.id), "duration_ms": _gallery_ms},
+        )
         self._resume_batch_face_detection(event)
 
         self.gallery_stack.setCurrentIndex(0)  # grid view
@@ -779,7 +820,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_card_list_widget.clearSelection()
         for i in range(self.event_card_list_widget.count()):
             w = self.event_card_list_widget.itemWidget(self.event_card_list_widget.item(i))
-            if w:
+            if w and shiboken.isValid(w):
                 w.setSelected(False)
         self._selected_event_card = None
         self.current_event_id = None
@@ -896,6 +937,11 @@ class MainWindow(QtWidgets.QMainWindow):
             is_batch_pending = (
                 not face_detected_at
                 and self._is_batch_pending_for_event(self.current_event_id)
+            )
+            _face_path = "db_hit" if face_detected_at else ("batch_pending" if is_batch_pending else "live_detection")
+            logger.info(
+                f"Image selected: {os.path.basename(item.img_path)} face_path={_face_path}",
+                extra={"event": "IMAGE_SELECT", "media_id": str(media_id) if media_id else None},
             )
             self.single_view_widget.set_context(
                 self.current_event_id, media_id,
@@ -1348,6 +1394,10 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             self.statusBar().showMessage(f"Puan kaydedilemedi: {e}", 4000)
             return
+        logger.info(
+            f"Star rating: {current}→{new_rating}",
+            extra={"event": "STAR_RATING", "media_id": str(self.current_media_id)},
+        )
         self._set_star_display(new_rating)
         # Update the GalleryItem in memory so the thumbnail badge refreshes
         index = self.event_gallery_list_widget.currentIndex()
@@ -1440,10 +1490,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if not search_all:
             # Single-event mode: apply proxy filter on existing model, no FTS, no event deselect
             self._search_mode = False
+            _filter_t0 = time.monotonic()
             self.gallery_search_proxy.setFilterText(text, date_filter)
             if text:
                 count = self.gallery_search_proxy.rowCount()
+                _filter_ms = int((time.monotonic() - _filter_t0) * 1000)
                 self._media_status_bar.setText(f"🔍 '{text}' — {count} Medya Bulundu")
+                logger.info(
+                    f"Gallery filter: '{text}' → {count} results in {_filter_ms}ms",
+                    extra={"event": "GALLERY_FILTER", "duration_ms": _filter_ms, "event_id": str(self.current_event_id) if self.current_event_id else None},
+                )
             return
 
         # All-events mode: FTS across all events
@@ -1453,6 +1509,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._search_mode = True
             self._pending_search_date_filter = date_filter
             self._pending_search_text = text
+            self._pending_search_t0 = time.monotonic()
             self.gallery_stack.setCurrentIndex(2)  # loading widget
 
             # Cancel any previous search still running
@@ -1500,6 +1557,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gallery_stack.setCurrentIndex(0)
         count = self.gallery_search_proxy.rowCount()
         self._media_status_bar.setText(f"🔍 '{query_text}' — {count} Medya Bulundu")
+        _fts_ms = int((time.monotonic() - getattr(self, '_pending_search_t0', time.monotonic())) * 1000)
+        logger.info(
+            f"FTS search: '{query_text}' → {count} results in {_fts_ms}ms",
+            extra={"event": "GALLERY_SEARCH_DONE", "duration_ms": _fts_ms},
+        )
 
     def _on_search_error(self, message):
         self.gallery_stack.setCurrentIndex(0)
@@ -1655,6 +1717,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         
     def _on_tab_changed(self, index: int):
+        tab_name = self.tab_widget.tabText(index) if hasattr(self, 'tab_widget') else str(index)
+        logger.info(f"Tab switched to '{tab_name}'", extra={"event": "TAB_SWITCH"})
         if self.tab_widget.widget(index) is self.persons_tab:
             self._load_persons_table()
 

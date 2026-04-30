@@ -99,7 +99,7 @@ class FaceAnalysisService:
             self._app = FaceAnalysis(name="buffalo_l", providers=providers)
             # det_size=(640, 640) is a good balance of speed vs accuracy for press photos
             self._app.prepare(ctx_id=0, det_size=(640, 640))
-            logger.info(f"✅ InsightFace model loaded (buffalo_l) with {providers[0]}")
+            logger.info(f"✅ InsightFace model loaded (buffalo_l) with {providers[0]}", extra={"event": "MODEL_LOAD"})
         except Exception as e:
             logger.error(f"❌ InsightFace model load failed: {e}")
             self._app = None

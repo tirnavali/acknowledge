@@ -9,6 +9,7 @@ Architecture:
 from __future__ import annotations
 import os
 import logging
+import time
 from uuid import UUID
 from PySide6 import QtCore, QtWidgets, QtGui
 
@@ -248,6 +249,7 @@ class SingleViewWidget(QtWidgets.QWidget):
             return
 
         self.filename_label.setText(os.path.basename(img_path))
+        self._image_load_start = time.monotonic()
 
         # Stop any in-flight loader for a previous image
         if self._image_loader and self._image_loader.isRunning():
@@ -276,6 +278,11 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._source_pixmap = pixmap
         self.face_overlay.set_source_pixmap(pixmap)
         self._scale_and_show(pixmap, smooth=True)
+        _load_ms = int((time.monotonic() - getattr(self, '_image_load_start', time.monotonic())) * 1000)
+        logger.info(
+            f"Image loaded in {_load_ms}ms: {os.path.basename(path)}",
+            extra={"event": "IMAGE_LOAD", "duration_ms": _load_ms, "media_id": str(self._current_media_id) if self._current_media_id else None},
+        )
 
         # Now trigger face detection logic
         if self._face_service is None:
@@ -289,6 +296,10 @@ class SingleViewWidget(QtWidgets.QWidget):
                     self._auto_match_db_faces(db_faces)
                     self._show_db_faces(db_faces)
                     self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
+                    logger.info(
+                        f"Faces loaded from DB: {len(db_faces)} faces",
+                        extra={"event": "FACE_DB_HIT", "media_id": str(self._current_media_id)},
+                    )
                 else:
                     self._status_label.setText("Yüz algılanamadı.")
                 return
@@ -298,6 +309,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         # Batch worker is still running for this image → wait, don't duplicate detection
         if self._is_batch_pending and not self._face_detected_at:
             self._status_label.setText("⏳ Yüz tanıma bekleniyor…")
+            logger.info("Face detection deferred: batch worker still running", extra={"event": "FACE_BATCH_WAIT"})
             return
 
         # Fallback: check for named detections (older records without face_detected_at)
@@ -342,6 +354,7 @@ class SingleViewWidget(QtWidgets.QWidget):
             self._detection_worker.quit()
             self._detection_worker.wait(500)
 
+        self._detection_start = time.monotonic()
         self._detection_img_path = img_path
         self._detection_worker = FaceDetectionWorker(self._face_service, img_path, self)
         self._detection_worker.detected.connect(self._on_detection_finished)
@@ -354,8 +367,13 @@ class SingleViewWidget(QtWidgets.QWidget):
             logger.debug("Discarding stale detection results (image changed during detection)")
             return
 
+        _detect_ms = int((time.monotonic() - getattr(self, '_detection_start', time.monotonic())) * 1000)
         if not results:
             self._status_label.setText("Yüz algılanamadı.")
+            logger.info(
+                f"Face detection: 0 faces in {_detect_ms}ms",
+                extra={"event": "FACE_DETECT", "duration_ms": _detect_ms, "media_id": str(self._current_media_id) if self._current_media_id else None},
+            )
             return
 
         self._pending_results = results
@@ -405,6 +423,11 @@ class SingleViewWidget(QtWidgets.QWidget):
             except Exception as e:
                 logger.warning(f"Failed to save faces: {e}")
 
+        auto_matched = sum(1 for fd in face_dicts if fd.get("person_name"))
+        logger.info(
+            f"Face detection: {n} faces ({auto_matched} auto-matched) in {_detect_ms}ms",
+            extra={"event": "FACE_DETECT", "duration_ms": _detect_ms, "media_id": str(self._current_media_id) if self._current_media_id else None},
+        )
         self._refresh_person_names()
         img_rect = self._get_image_display_rect()
         self.face_overlay.set_faces(face_dicts, img_rect)
@@ -424,7 +447,7 @@ class SingleViewWidget(QtWidgets.QWidget):
             self.facesChanged.emit()
 
     def _on_detection_error(self, msg: str):
-        logger.error(f"Face detection error: {msg}")
+        logger.error(f"Face detection error: {msg}", extra={"event": "FACE_DETECT_ERROR"})
         self._status_label.setText(f"⚠️ Yüz algılama hatası: {msg[:60]}")
 
     def _refresh_person_names(self) -> None:

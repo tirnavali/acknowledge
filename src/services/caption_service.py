@@ -121,7 +121,7 @@ class CaptionService:
                 )
 
             self._processor = Qwen2_5_VLProcessor.from_pretrained(model_id)
-            logger.info("✅ CaptionService: Qwen2.5-VL-3B-Instruct loaded")
+            logger.info("✅ CaptionService: Qwen2.5-VL-3B-Instruct loaded", extra={"event": "MODEL_LOAD"})
         except Exception as e:
             logger.error(f"❌ CaptionService model load failed: {e}")
             self._model = None
@@ -182,7 +182,10 @@ class CaptionService:
                 repetition_penalty=1.15,
             )
         generation_time = time.perf_counter() - start_time
-        logger.info(f"CaptionService: generation took {generation_time:.2f}s")
+        logger.info(
+            f"CaptionService: generation took {generation_time:.2f}s",
+            extra={"event": "CAPTION_RESULT", "duration_ms": int(generation_time * 1000)},
+        )
 
         # Strip input tokens — Qwen canonical pattern
         trimmed = [

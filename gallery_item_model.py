@@ -2,7 +2,11 @@ from PySide6 import QtGui, QtCore
 from typing import List
 from PIL import Image, ExifTags
 from iptcinfo3 import IPTCInfo
+import logging
 import os
+import time
+
+logger = logging.getLogger(__name__)
 
 class GalleryItem(QtGui.QStandardItem):
     def __init__(self, title, img_path, in_db: bool = False, db_metadata: dict = None):
@@ -129,12 +133,26 @@ class GalleryItemRunnable(QtCore.QRunnable):
         self.signals = GalleryItemWorker()
 
     def run(self):
+        _t0 = time.monotonic()
+        thumb_path = os.path.join(
+            os.path.dirname(self.item.img_path),
+            ".thumbnails",
+            os.path.basename(self.item.img_path) + ".thumb.jpg",
+        )
+        _cache_hit = os.path.exists(thumb_path)
+
         # 1. Load metadata if missing
         self.item.load_from_file()
-        
+
         # 2. Generate thumbnail
         pixmap = GalleryItemModel.generate_pixmap(self.item)
-        
+
+        _ms = int((time.monotonic() - _t0) * 1000)
+        logger.debug(
+            f"Thumbnail {'cache' if _cache_hit else 'generated'} in {_ms}ms: {os.path.basename(self.item.img_path)}",
+            extra={"event": "THUMBNAIL_GEN", "duration_ms": _ms},
+        )
+
         # 3. Notify UI
         self.signals.finished.emit(self.item, pixmap)
 

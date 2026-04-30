@@ -1,0 +1,17 @@
+Acknowledge App — Hourly Report (2026-04-30 16:30)
+Period: last 1h | Records: 146
+
+Log levels:
+  DEBUG: 111
+  INFO: 29
+  WARNING: 6
+
+Events:
+  CAPTION_RESULT: 7  (avg 14435ms)
+  CAPTION_BATCH_START: 3
+  MODEL_LOAD: 2
+  MODEL_LOAD_UI: 2  (avg 7405ms)
+  APP_START: 1
+  CAPTION_BATCH_COMPLETE: 1  (avg 77031ms)
+
+[Ollama was unavailable — narrative summary skipped]

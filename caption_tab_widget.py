@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -271,6 +272,7 @@ class CaptionTabWidget(QtWidgets.QWidget):
     # ------------------------------------------------------------------
 
     def _start_model_load(self):
+        self._model_load_start = time.monotonic()
         self._spinner.setVisible(True)
         self._status_label.setText("Model yükleniyor…")
         self._btn_analyse.setEnabled(False)
@@ -282,16 +284,20 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._model_worker.start()
 
     def _on_model_ready(self):
+        _ms = int((time.monotonic() - getattr(self, '_model_load_start', time.monotonic())) * 1000)
         self._spinner.setVisible(False)
         self._status_label.setText("Model hazır.")
         self._btn_batch_start.setEnabled(True)
+        logger.info(f"Caption model ready in {_ms}ms", extra={"event": "MODEL_LOAD_UI", "duration_ms": _ms})
         # Analyse button enabled only if a file is already selected
         if self._selected_path:
             self._btn_analyse.setEnabled(True)
 
     def _on_model_error(self, msg: str):
+        _ms = int((time.monotonic() - getattr(self, '_model_load_start', time.monotonic())) * 1000)
         self._spinner.setVisible(False)
         self._status_label.setText(f"Model yüklenemedi: {msg}")
+        logger.error(f"Caption model load failed after {_ms}ms: {msg}", extra={"event": "MODEL_LOAD_ERROR", "duration_ms": _ms})
 
     # ------------------------------------------------------------------
     # Single mode
@@ -323,6 +329,7 @@ class CaptionTabWidget(QtWidgets.QWidget):
     def _on_analyse(self):
         if not self._selected_path:
             return
+        self._analyse_start = time.monotonic()
         self._btn_analyse.setEnabled(False)
         self._status_label.setText("Analiz ediliyor…")
         self._spinner.setVisible(True)
@@ -333,6 +340,7 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._caption_worker.start()
 
     def _on_single_finished(self, result):
+        _ms = int((time.monotonic() - getattr(self, '_analyse_start', time.monotonic())) * 1000)
         self._spinner.setVisible(False)
         self._btn_analyse.setEnabled(True)
         self._single_result = result
@@ -340,6 +348,10 @@ class CaptionTabWidget(QtWidgets.QWidget):
 
         if result.error:
             self._status_label.setText(f"Hata: {result.error}")
+            logger.warning(
+                f"Caption single failed in {_ms}ms: {result.error}",
+                extra={"event": "CAPTION_SINGLE", "duration_ms": _ms},
+            )
             return
 
         self._txt_caption_en.setPlainText(result.caption_en)
@@ -348,6 +360,10 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._le_tags_tr.setText(result.tags_tr)
         self._status_label.setText("Analiz tamamlandı.")
         self._lbl_stats.setText(f"⏱ İşlem süresi: {result.duration:.2f} sn")
+        logger.info(
+            f"Caption single done in {_ms}ms",
+            extra={"event": "CAPTION_SINGLE", "duration_ms": _ms},
+        )
         self._btn_export.setVisible(True)
         self._try_save_to_db(result)
 
@@ -380,6 +396,7 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._btn_batch_cancel.setEnabled(True)
         self._status_label.setText("Toplu analiz başladı…")
 
+        self._batch_start = time.monotonic()
         self._batch_worker = BatchCaptionWorker(self._svc, paths, parent=self)
         self._batch_worker.progress.connect(self._on_batch_progress)
         self._batch_worker.one_done.connect(self._on_batch_one_done)
@@ -392,6 +409,11 @@ class CaptionTabWidget(QtWidgets.QWidget):
             self._batch_worker.stop()
         self._btn_batch_cancel.setEnabled(False)
         self._status_label.setText("İptal ediliyor…")
+        _ms = int((time.monotonic() - getattr(self, '_batch_start', time.monotonic())) * 1000)
+        logger.info(
+            f"Caption batch cancelled after {_ms}ms",
+            extra={"event": "CAPTION_BATCH_CANCEL", "duration_ms": _ms},
+        )
 
     def _on_batch_progress(self, current: int, total: int):
         self._batch_progress.setValue(current)
@@ -402,9 +424,15 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self.stats_updated.emit(result)
 
     def _on_batch_finished(self, results: list):
+        _ms = int((time.monotonic() - getattr(self, '_batch_start', time.monotonic())) * 1000)
         self._btn_batch_start.setEnabled(True)
         self._btn_batch_cancel.setEnabled(False)
         self._status_label.setText(f"Toplu analiz tamamlandı. {len(results)} resim işlendi.")
+        successful = sum(1 for r in results if not r.error and r.has_data)
+        logger.info(
+            f"Caption batch done: {successful}/{len(results)} successful in {_ms}ms",
+            extra={"event": "CAPTION_BATCH_UI", "duration_ms": _ms},
+        )
         self._auto_save_batch_json(results)
 
     def _auto_save_batch_json(self, results: list):

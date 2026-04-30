@@ -1,0 +1,373 @@
+{"ts": "2026-04-30T13:28:33.342+00:00", "level": "INFO", "logger": "ApplicationService", "msg": "Application services initialized successfully"}
+{"ts": "2026-04-30T13:28:33.397+00:00", "level": "INFO", "logger": "__main__", "msg": "Application started, database ready", "event": "APP_START"}
+{"ts": "2026-04-30T13:28:33.683+00:00", "level": "INFO", "logger": "ApplicationService", "msg": "Initializing application..."}
+{"ts": "2026-04-30T13:28:33.703+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 5 files", "event": "CAPTION_BATCH_START", "event_id": "e10591fc-0ae4-4847-8de4-1c76a291327c"}
+{"ts": "2026-04-30T13:28:33.708+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing JpegImagePlugin"}
+{"ts": "2026-04-30T13:28:33.725+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 22 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:28:33.725+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 34 - Data Location: 116 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:28:33.725+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 46 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:28:33.725+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 58 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:28:33.725+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:28:33.725+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 82 - Data Location: 146 - value: b'Adobe Lightroom 11.2.1 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:28:33.728+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 94 - Data Location: 176 - value: b'2026:03:18 17:44:39\\x00'"}
+{"ts": "2026-04-30T13:28:33.728+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:28:34.055+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 5997×3998 → 768×511, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpown760b7.jpg"}
+{"ts": "2026-04-30T13:28:36.084+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: loading model on cuda"}
+{"ts": "2026-04-30T13:28:36.084+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: loading model on cuda"}
+{"ts": "2026-04-30T13:28:36.084+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: model source → models\\Qwen2.5-VL-3B-Instruct"}
+{"ts": "2026-04-30T13:28:36.084+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: model source → models\\Qwen2.5-VL-3B-Instruct"}
+{"ts": "2026-04-30T13:28:40.819+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "✅ CaptionService: Qwen2.5-VL-3B-Instruct loaded", "event": "MODEL_LOAD"}
+{"ts": "2026-04-30T13:28:40.819+00:00", "level": "INFO", "logger": "caption_tab_widget", "msg": "Caption model ready in 7405ms", "event": "MODEL_LOAD_UI", "duration_ms": 7405}
+{"ts": "2026-04-30T13:28:40.819+00:00", "level": "INFO", "logger": "caption_tab_widget", "msg": "Caption model ready in 7405ms", "event": "MODEL_LOAD_UI", "duration_ms": 7405}
+{"ts": "2026-04-30T13:28:43.825+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "✅ CaptionService: Qwen2.5-VL-3B-Instruct loaded", "event": "MODEL_LOAD"}
+{"ts": "2026-04-30T13:28:50.591+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 6.70s", "event": "CAPTION_RESULT", "duration_ms": 6700}
+{"ts": "2026-04-30T13:28:50.593+00:00", "level": "WARNING", "logger": "src.services.caption_service", "msg": "CaptionService: JSON parse failed, raw response: ```json\n{\n    \"caption_tr\": \"Bir grup insan, parlamento odasında, Türk bayrağı önünde el sıkışıyorlar.\",\n    \"tags_tr\": \"parlamento, oturma odası, Türk bayrağı, el sıkışma, grup\",\n}\n```"}
+{"ts": "2026-04-30T13:28:50.594+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for KURT0918.JPG took 6.77s"}
+{"ts": "2026-04-30T13:28:50.599+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 22 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:28:50.599+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 34 - Data Location: 116 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:28:50.600+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 46 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:28:50.600+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 58 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:28:50.600+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:28:50.600+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 82 - Data Location: 146 - value: b'Adobe Lightroom 11.2.1 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:28:50.600+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 94 - Data Location: 176 - value: b'2026:03:18 17:35:29\\x00'"}
+{"ts": "2026-04-30T13:28:50.601+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:28:50.825+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 4576×3051 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmp4kmcx5lc.jpg"}
+{"ts": "2026-04-30T13:29:13.535+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 22.66s", "event": "CAPTION_RESULT", "duration_ms": 22662}
+{"ts": "2026-04-30T13:29:13.535+00:00", "level": "WARNING", "logger": "src.services.caption_service", "msg": "CaptionService: JSON parse failed, raw response: ```json\n{\n    \"caption_tr\": \"Bir parlamento veya meclis ortamında, bir adam ve iki çocuk el sıkışıyorlar. Adam siyah yelekli bir kostüm giymiş ve kırmızı kravat giymiştir. Çocuklardan biri beyaz tişör"}
+{"ts": "2026-04-30T13:29:13.538+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for KURT1738.JPG took 22.71s"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 22 - Data Location: 158 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 34 - Data Location: 164 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 58 - Data Location: 196 - value: b'^\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 70 - Data Location: 204 - value: b'^\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 94 - Data Location: 212 - value: b'2026:03:18 14:42:43\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Artist (315) - type: string (2) - value: b'\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YCbCrPositioning (531) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Copyright (33432) - type: string (2) - value: b'\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'h\\x01\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: GPSInfoIFD (34853) - type: long (4) - value: b'2y\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPFVersion (45056) - type: undefined (7) - value: b'0100'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: NumberOfImages (45057) - type: long (4) - value: b'\\x02\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:13.541+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPEntry (45058) - type: undefined (7) Tag Location: 46 - Data Location: 50 - value: b'\\x00\\x00\\x03\\x80\\x1b\\xe9x\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x02\\x00\\x01@\\xdf\\xfd\\x06\\x00\\xf8\\x13x\\x00\\x00\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:13.963+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 6000×4000 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpsyzejj18.jpg"}
+{"ts": "2026-04-30T13:29:20.999+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 6.99s", "event": "CAPTION_RESULT", "duration_ms": 6987}
+{"ts": "2026-04-30T13:29:20.999+00:00", "level": "WARNING", "logger": "src.services.caption_service", "msg": "CaptionService: JSON parse failed, raw response: ```json\n{\n    \"caption_tr\": \"Bir parlamento veya meclis ortamında, üç kişiden ikisi el sıkışırken diğerinin durumu bilinmiyor.\",\n    \"tags_tr\": \"parlamento, meclis, el sıkışma, Türk bayrağı, resmi\",\n}"}
+{"ts": "2026-04-30T13:29:21.002+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for KURT2887.JPG took 7.03s"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 22 - Data Location: 158 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 34 - Data Location: 164 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 58 - Data Location: 196 - value: b'^\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 70 - Data Location: 204 - value: b'^\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 94 - Data Location: 212 - value: b'2026:03:18 14:43:40\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Artist (315) - type: string (2) - value: b'\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YCbCrPositioning (531) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:29:21.006+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Copyright (33432) - type: string (2) - value: b'\\x00'"}
+{"ts": "2026-04-30T13:29:21.008+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'h\\x01\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:21.008+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: GPSInfoIFD (34853) - type: long (4) - value: b'2y\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:21.008+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPFVersion (45056) - type: undefined (7) - value: b'0100'"}
+{"ts": "2026-04-30T13:29:21.008+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: NumberOfImages (45057) - type: long (4) - value: b'\\x02\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:21.008+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPEntry (45058) - type: undefined (7) Tag Location: 46 - Data Location: 50 - value: b'\\x00\\x00\\x03\\x80t\\x7f\\x86\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x02\\x00\\x01@7\\xf7\\x07\\x00\\xf8\\xa7\\x85\\x00\\x00\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:21.420+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 6000×4000 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpawcnao1w.jpg"}
+{"ts": "2026-04-30T13:29:44.299+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 22.83s", "event": "CAPTION_RESULT", "duration_ms": 22831}
+{"ts": "2026-04-30T13:29:44.300+00:00", "level": "WARNING", "logger": "src.services.caption_service", "msg": "CaptionService: JSON parse failed, raw response: ```json\n{\n    \"caption_tr\": \"Bir parlamento veya meclis ortamında, üç kişiden ikisi el sıkışıyor ve diğer biri konuşuyor. Ortada siyah suit giymiş bir adam bulunurken, arkasındaki duvarlar üzerinde bü"}
+{"ts": "2026-04-30T13:29:44.301+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for KURT3159.JPG took 22.88s"}
+{"ts": "2026-04-30T13:29:44.307+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 22 - Data Location: 158 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:29:44.307+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 34 - Data Location: 164 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:29:44.307+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 58 - Data Location: 196 - value: b'^\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 70 - Data Location: 204 - value: b'^\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 94 - Data Location: 212 - value: b'2026:03:18 14:45:57\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Artist (315) - type: string (2) - value: b'\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YCbCrPositioning (531) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Copyright (33432) - type: string (2) - value: b'\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'h\\x01\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: GPSInfoIFD (34853) - type: long (4) - value: b'2y\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPFVersion (45056) - type: undefined (7) - value: b'0100'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: NumberOfImages (45057) - type: long (4) - value: b'\\x02\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:44.308+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPEntry (45058) - type: undefined (7) Tag Location: 46 - Data Location: 50 - value: b'\\x00\\x00\\x03\\x80\\x95\\xda|\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x02\\x00\\x01@\\xea9\\x07\\x00\\xf8\\x05|\\x00\\x00\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:44.788+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 6000×4000 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpjybfezlo.jpg"}
+{"ts": "2026-04-30T13:29:50.732+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 5.90s", "event": "CAPTION_RESULT", "duration_ms": 5899}
+{"ts": "2026-04-30T13:29:50.732+00:00", "level": "WARNING", "logger": "src.services.caption_service", "msg": "CaptionService: JSON parse failed, raw response: ```json\n{\n    \"caption_tr\": \"İki adam el sıkışıyor, diğer iki kişi bakıyor.\",\n    \"tags_tr\": \"parlamento, meclis, el sıkışma, Türk bayrağı, resmi\",\n}\n```"}
+{"ts": "2026-04-30T13:29:50.732+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for KURT3841.JPG took 5.94s"}
+{"ts": "2026-04-30T13:29:50.732+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: finished 5 files in 77031ms", "event": "CAPTION_BATCH_COMPLETE", "duration_ms": 77031, "event_id": "e10591fc-0ae4-4847-8de4-1c76a291327c"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 3 files", "event": "CAPTION_BATCH_START", "event_id": "907693d4-adeb-4448-a730-c0f82139c200"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 6 files", "event": "CAPTION_BATCH_START", "event_id": "2e41dfdd-7679-403c-a886-ae01dcc753de"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 15476 - Data Location: 15588 - value: <table: 158 bytes>"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 15488 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 15500 - Data Location: 116 - value: b'Canon EOS R5m2\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 12658 - Data Location: 12770 - value: <table: 146 bytes>"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 15524 - Data Location: 132 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 12670 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 15536 - Data Location: 140 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 12682 - Data Location: 116 - value: b'Canon EOS R5m2\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 15560 - Data Location: 148 - value: b'Adobe Lightroom 9.0.1 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 12706 - Data Location: 132 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 15572 - Data Location: 176 - value: b'2026:01:26 13:47:46\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 12718 - Data Location: 140 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 12742 - Data Location: 148 - value: b'Adobe Lightroom 9.0.1 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 12754 - Data Location: 176 - value: b'2026:01:20 17:03:22\\x00'"}
+{"ts": "2026-04-30T13:29:50.740+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:29:51.424+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 7970×5316 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpq_a556y8.jpg"}
+{"ts": "2026-04-30T13:29:51.446+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 8192×5464 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpe42zx5mb.jpg"}
+{"ts": "2026-04-30T13:30:14.957+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 23.47s", "event": "CAPTION_RESULT", "duration_ms": 23473}
+{"ts": "2026-04-30T13:30:14.958+00:00", "level": "WARNING", "logger": "src.services.caption_service", "msg": "CaptionService: JSON parse failed, raw response: {\n    \"caption_tr\": \"Bir kadın ve bir erkek, resmi bir mekanda kürsülerinde konuşuyorlar. Kadının eli sikişiyor, erkin ise kürsüsünün arkasına bakan pozisyonda duruyor. Arkada iki farklı ülkeden bayra"}
+{"ts": "2026-04-30T13:30:14.958+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for IMG_6023.JPG.jpeg took 23.52s"}
+{"ts": "2026-04-30T13:30:14.963+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 18126 - Data Location: 18238 - value: <table: 158 bytes>"}
+{"ts": "2026-04-30T13:30:14.964+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 18138 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:30:14.964+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 18150 - Data Location: 116 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:30:14.964+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:30:14.964+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 18174 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:14.964+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 18186 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:14.965+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:30:14.965+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 18210 - Data Location: 146 - value: b'Adobe Lightroom 11.1.0 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:30:14.965+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 18222 - Data Location: 176 - value: b'2026:01:26 13:35:11\\x00'"}
+{"ts": "2026-04-30T13:30:14.965+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:15.389+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 5936×3957 → 768×511, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpojt562on.jpg"}
+{"ts": "2026-04-30T13:30:27.491+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 12.49s", "event": "CAPTION_RESULT", "duration_ms": 12492}
+{"ts": "2026-04-30T13:30:27.491+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for IMG_5922.JPG took 12.54s"}
+{"ts": "2026-04-30T13:30:27.509+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 10112 - Data Location: 10224 - value: <table: 146 bytes>"}
+{"ts": "2026-04-30T13:30:27.509+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 10124 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:30:27.511+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 10136 - Data Location: 116 - value: b'Canon EOS R5m2\\x00'"}
+{"ts": "2026-04-30T13:30:27.511+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:30:27.511+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 10160 - Data Location: 132 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:27.512+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 10172 - Data Location: 140 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:27.512+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:30:27.512+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 10196 - Data Location: 148 - value: b'Adobe Lightroom 9.0.1 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:30:27.513+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 10208 - Data Location: 176 - value: b'2026:01:20 17:06:32\\x00'"}
+{"ts": "2026-04-30T13:30:27.513+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:28.107+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 7311×4876 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpjfmch9w5.jpg"}
+{"ts": "2026-04-30T13:30:50.428+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 22.87s", "event": "CAPTION_RESULT", "duration_ms": 22874}
+{"ts": "2026-04-30T13:30:50.428+00:00", "level": "WARNING", "logger": "src.services.caption_service", "msg": "CaptionService: JSON parse failed, raw response: ```json\n{\n    \"caption_tr\": \"Bir konuşmacı, kırmızı kravat giymiş bir şekilde kürsüde konuşuyor. Diğer konuşmacı da aynı şekilde duruyor. Milletvekilleri, sandalye üzerinde oturmuş ve konuşmaya odakla"}
+{"ts": "2026-04-30T13:30:50.429+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for IMG_7570.JPG.jpeg took 22.93s"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 15548 - Data Location: 15660 - value: <table: 132 bytes>"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 15560 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 15572 - Data Location: 116 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 15596 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 15608 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 15632 - Data Location: 146 - value: b'Adobe Lightroom 11.1.0 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:30:50.434+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 15644 - Data Location: 176 - value: b'2026:01:26 13:38:02\\x00'"}
+{"ts": "2026-04-30T13:30:50.438+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:30:50.693+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 4675×3117 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmp3g0st35i.jpg"}
+{"ts": "2026-04-30T13:31:01.351+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 10.87s", "event": "CAPTION_RESULT", "duration_ms": 10873}
+{"ts": "2026-04-30T13:31:01.351+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for IMG_5932.JPG took 10.92s"}
+{"ts": "2026-04-30T13:31:01.360+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 17770 - Data Location: 17882 - value: <table: 146 bytes>"}
+{"ts": "2026-04-30T13:31:01.360+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 17782 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:31:01.362+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 17794 - Data Location: 116 - value: b'Canon EOS R3\\x00'"}
+{"ts": "2026-04-30T13:31:01.362+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:31:01.363+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 17818 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:01.363+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 17830 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:01.363+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:01.363+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 17854 - Data Location: 146 - value: b'Adobe Lightroom 11.1.0 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:31:01.363+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 17866 - Data Location: 176 - value: b'2026:01:20 12:51:37\\x00'"}
+{"ts": "2026-04-30T13:31:01.363+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:01.757+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 5925×3950 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmph9s7yqpy.jpg"}
+{"ts": "2026-04-30T13:31:24.671+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 23.27s", "event": "CAPTION_RESULT", "duration_ms": 23271}
+{"ts": "2026-04-30T13:31:24.673+00:00", "level": "WARNING", "logger": "src.services.caption_service", "msg": "CaptionService: JSON parse failed, raw response: ```json\n{\n    \"caption_tr\": \"Bir grup insan, siyah karışımlı bir kumaş giymiş, siyah pantolon giymiş, siyah ayakkabılar giymiş, siyah kıyafetler giymiş, siyah kemerli kıyafetler giymiş, siyah çanta ta"}
+{"ts": "2026-04-30T13:31:24.673+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for IMG_7573.JPG.jpeg took 23.32s"}
+{"ts": "2026-04-30T13:31:24.677+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: finished 3 files in 93937ms", "event": "CAPTION_BATCH_COMPLETE", "duration_ms": 93937, "event_id": "907693d4-adeb-4448-a730-c0f82139c200"}
+{"ts": "2026-04-30T13:31:24.680+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 1 files", "event": "CAPTION_BATCH_START", "event_id": "2be6ea73-69d8-45a0-8a28-fae69381f92d"}
+{"ts": "2026-04-30T13:31:24.680+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 8 files", "event": "CAPTION_BATCH_START", "event_id": "5ab7d858-db13-41f4-8b79-654438dc8f47"}
+{"ts": "2026-04-30T13:31:24.685+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 13990 - Data Location: 14376 - value: <table: 143 bytes>"}
+{"ts": "2026-04-30T13:31:24.685+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 14002 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:31:24.685+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 14014 - Data Location: 116 - value: b'Canon EOS R5m2\\x00'"}
+{"ts": "2026-04-30T13:31:24.686+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:31:24.686+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 14038 - Data Location: 132 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.686+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 14050 - Data Location: 140 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.686+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing AvifImagePlugin"}
+{"ts": "2026-04-30T13:31:24.686+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:24.688+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 14074 - Data Location: 148 - value: b'Adobe Lightroom 9.0.1 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:31:24.689+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 14086 - Data Location: 176 - value: b'2026:01:20 13:15:49\\x00'"}
+{"ts": "2026-04-30T13:31:24.690+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.692+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing BlpImagePlugin"}
+{"ts": "2026-04-30T13:31:24.694+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing BmpImagePlugin"}
+{"ts": "2026-04-30T13:31:24.696+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing BufrStubImagePlugin"}
+{"ts": "2026-04-30T13:31:24.698+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing CurImagePlugin"}
+{"ts": "2026-04-30T13:31:24.699+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing DcxImagePlugin"}
+{"ts": "2026-04-30T13:31:24.700+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing DdsImagePlugin"}
+{"ts": "2026-04-30T13:31:24.704+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing EpsImagePlugin"}
+{"ts": "2026-04-30T13:31:24.708+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing FitsImagePlugin"}
+{"ts": "2026-04-30T13:31:24.709+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing FliImagePlugin"}
+{"ts": "2026-04-30T13:31:24.710+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing FpxImagePlugin"}
+{"ts": "2026-04-30T13:31:24.712+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Image: failed to import FpxImagePlugin: No module named 'olefile'"}
+{"ts": "2026-04-30T13:31:24.712+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing FtexImagePlugin"}
+{"ts": "2026-04-30T13:31:24.713+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing GbrImagePlugin"}
+{"ts": "2026-04-30T13:31:24.714+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing GifImagePlugin"}
+{"ts": "2026-04-30T13:31:24.714+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing GribStubImagePlugin"}
+{"ts": "2026-04-30T13:31:24.716+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing Hdf5StubImagePlugin"}
+{"ts": "2026-04-30T13:31:24.717+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing IcnsImagePlugin"}
+{"ts": "2026-04-30T13:31:24.719+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing IcoImagePlugin"}
+{"ts": "2026-04-30T13:31:24.721+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing ImImagePlugin"}
+{"ts": "2026-04-30T13:31:24.722+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing ImtImagePlugin"}
+{"ts": "2026-04-30T13:31:24.723+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing IptcImagePlugin"}
+{"ts": "2026-04-30T13:31:24.726+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing JpegImagePlugin"}
+{"ts": "2026-04-30T13:31:24.726+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing Jpeg2KImagePlugin"}
+{"ts": "2026-04-30T13:31:24.726+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing McIdasImagePlugin"}
+{"ts": "2026-04-30T13:31:24.726+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing MicImagePlugin"}
+{"ts": "2026-04-30T13:31:24.728+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Image: failed to import MicImagePlugin: No module named 'olefile'"}
+{"ts": "2026-04-30T13:31:24.728+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing MpegImagePlugin"}
+{"ts": "2026-04-30T13:31:24.729+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing MpoImagePlugin"}
+{"ts": "2026-04-30T13:31:24.729+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing MspImagePlugin"}
+{"ts": "2026-04-30T13:31:24.730+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing PalmImagePlugin"}
+{"ts": "2026-04-30T13:31:24.732+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing PcdImagePlugin"}
+{"ts": "2026-04-30T13:31:24.732+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing PcxImagePlugin"}
+{"ts": "2026-04-30T13:31:24.732+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing PdfImagePlugin"}
+{"ts": "2026-04-30T13:31:24.740+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing PixarImagePlugin"}
+{"ts": "2026-04-30T13:31:24.746+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing PngImagePlugin"}
+{"ts": "2026-04-30T13:31:24.746+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing PpmImagePlugin"}
+{"ts": "2026-04-30T13:31:24.751+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing PsdImagePlugin"}
+{"ts": "2026-04-30T13:31:24.752+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing QoiImagePlugin"}
+{"ts": "2026-04-30T13:31:24.752+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing SgiImagePlugin"}
+{"ts": "2026-04-30T13:31:24.755+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing SpiderImagePlugin"}
+{"ts": "2026-04-30T13:31:24.755+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing SunImagePlugin"}
+{"ts": "2026-04-30T13:31:24.760+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing TgaImagePlugin"}
+{"ts": "2026-04-30T13:31:24.763+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing TiffImagePlugin"}
+{"ts": "2026-04-30T13:31:24.766+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing WebPImagePlugin"}
+{"ts": "2026-04-30T13:31:24.770+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing WmfImagePlugin"}
+{"ts": "2026-04-30T13:31:24.772+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing XbmImagePlugin"}
+{"ts": "2026-04-30T13:31:24.773+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing XpmImagePlugin"}
+{"ts": "2026-04-30T13:31:24.775+00:00", "level": "DEBUG", "logger": "PIL.Image", "msg": "Importing XVThumbImagePlugin"}
+{"ts": "2026-04-30T13:31:24.776+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: finished 1 files in 93ms", "event": "CAPTION_BATCH_COMPLETE", "duration_ms": 93, "event_id": "2be6ea73-69d8-45a0-8a28-fae69381f92d"}
+{"ts": "2026-04-30T13:31:24.780+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 2 files", "event": "CAPTION_BATCH_START", "event_id": "16d41001-b3c9-422f-affc-b4144fab55c7"}
+{"ts": "2026-04-30T13:31:24.780+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 22 files", "event": "CAPTION_BATCH_START", "event_id": "fe3a25b7-41d9-4b8c-b92c-8ac8f3913b72"}
+{"ts": "2026-04-30T13:31:24.786+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 22 - Data Location: 46296 - value: <table: 173 bytes>"}
+{"ts": "2026-04-30T13:31:24.786+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 34 - Data Location: 158 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:31:24.786+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 46 - Data Location: 164 - value: b'Canon EOS R3\\x00'"}
+{"ts": "2026-04-30T13:31:24.788+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:31:24.788+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: finished 2 files in 16ms", "event": "CAPTION_BATCH_COMPLETE", "duration_ms": 16, "event_id": "16d41001-b3c9-422f-affc-b4144fab55c7"}
+{"ts": "2026-04-30T13:31:24.788+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 70 - Data Location: 196 - value: b'H\\x00\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 82 - Data Location: 204 - value: b'H\\x00\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.790+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:24.790+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 106 - Data Location: 212 - value: b'2026:01:10 16:51:48\\x00'"}
+{"ts": "2026-04-30T13:31:24.791+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Artist (315) - type: string (2) Tag Location: 118 - Data Location: 232 - value: b'Ahmet Bolat-TBMM\\x00'"}
+{"ts": "2026-04-30T13:31:24.791+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YCbCrPositioning (531) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:24.792+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'h\\x01\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.792+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 1 files", "event": "CAPTION_BATCH_START", "event_id": "ae59de43-b5a9-484e-abb5-11b94a90e38d"}
+{"ts": "2026-04-30T13:31:24.791+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 151 files", "event": "CAPTION_BATCH_START", "event_id": "2e7d869c-933f-4bd8-af2e-ec8681b330f9"}
+{"ts": "2026-04-30T13:31:24.793+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: GPSInfoIFD (34853) - type: long (4) - value: b'~\\xb4\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.797+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPFVersion (45056) - type: undefined (7) - value: b'0100'"}
+{"ts": "2026-04-30T13:31:24.798+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: NumberOfImages (45057) - type: long (4) - value: b'\\x02\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.798+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 22 - Data Location: 49762 - value: <table: 135 bytes>"}
+{"ts": "2026-04-30T13:31:24.799+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 34 - Data Location: 158 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:31:24.799+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPEntry (45058) - type: undefined (7) Tag Location: 46 - Data Location: 50 - value: b'\\x00\\x00\\x03\\x80\\x96\\x10v\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x02\\x00\\x01@\\xaea\\x03\\x00\\xf8Qu\\x00\\x00\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.799+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 14778 - Data Location: 14982 - value: <table: 118 bytes>"}
+{"ts": "2026-04-30T13:31:24.800+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 46 - Data Location: 164 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:31:24.800+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 14790 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:31:24.801+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 14802 - Data Location: 116 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:31:24.801+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:31:24.801+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 14826 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.802+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 14838 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.801+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:31:24.802+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:24.803+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 14862 - Data Location: 146 - value: b'Adobe Lightroom 11.1.0 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:31:24.803+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 14874 - Data Location: 176 - value: b'2026:01:08 12:59:36\\x00'"}
+{"ts": "2026-04-30T13:31:24.803+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.803+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 70 - Data Location: 196 - value: b'^\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.804+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 82 - Data Location: 204 - value: b'^\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.804+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:24.805+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 106 - Data Location: 212 - value: b'2026:01:08 13:08:12\\x00'"}
+{"ts": "2026-04-30T13:31:24.805+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YCbCrPositioning (531) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:24.805+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'h\\x01\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.806+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: GPSInfoIFD (34853) - type: long (4) - value: b'2y\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.806+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPFVersion (45056) - type: undefined (7) - value: b'0100'"}
+{"ts": "2026-04-30T13:31:24.806+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: NumberOfImages (45057) - type: long (4) - value: b'\\x02\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.808+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPEntry (45058) - type: undefined (7) Tag Location: 46 - Data Location: 50 - value: b'\\x00\\x00\\x03\\x80\\x18\\x96b\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x02\\x00\\x01@\\xaa\\x00\\x05\\x00\\xf8\\xc9a\\x00\\x00\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:24.989+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 3584×2389 → 768×511, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpp6k_g1ag.jpg"}
+{"ts": "2026-04-30T13:31:25.220+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 6000×4000 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpa9_s7k91.jpg"}
+{"ts": "2026-04-30T13:31:25.229+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 6000×4000 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpx25ja8q7.jpg"}
+{"ts": "2026-04-30T13:31:25.408+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 7620×5082 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmp9ny7sch5.jpg"}
+{"ts": "2026-04-30T13:31:35.528+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 10.78s", "event": "CAPTION_RESULT", "duration_ms": 10783}
+{"ts": "2026-04-30T13:31:35.530+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for IMG_7197.JPG took 10.86s"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 18482 - Data Location: 18594 - value: <table: 146 bytes>"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 18494 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 18506 - Data Location: 116 - value: b'Canon EOS R3\\x00'"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 18530 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 18542 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 18566 - Data Location: 146 - value: b'Adobe Lightroom 11.1.0 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:31:35.546+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 18578 - Data Location: 176 - value: b'2026:01:20 12:52:02\\x00'"}
+{"ts": "2026-04-30T13:31:35.552+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:35.963+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 5978×3985 → 768×511, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpy5354r_8.jpg"}
+{"ts": "2026-04-30T13:31:53.925+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 18.34s", "event": "CAPTION_RESULT", "duration_ms": 18335}
+{"ts": "2026-04-30T13:31:53.925+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for 0I0A5033.JPG took 18.39s"}
+{"ts": "2026-04-30T13:31:53.936+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 14976 - Data Location: 15180 - value: <table: 118 bytes>"}
+{"ts": "2026-04-30T13:31:53.936+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 14988 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:31:53.937+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 15000 - Data Location: 116 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:31:53.937+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:31:53.938+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 15024 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:53.938+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 15036 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:53.938+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:53.939+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 15060 - Data Location: 146 - value: b'Adobe Lightroom 11.1.0 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:31:53.939+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 15072 - Data Location: 176 - value: b'2026:01:08 12:59:15\\x00'"}
+{"ts": "2026-04-30T13:31:53.939+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:54.241+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 6000×4000 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpy1fjnmqb.jpg"}
+{"ts": "2026-04-30T13:31:57.777+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 3.81s", "event": "CAPTION_RESULT", "duration_ms": 3805}
+{"ts": "2026-04-30T13:31:57.777+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for MSK_8517.JPG took 3.85s"}
+{"ts": "2026-04-30T13:31:57.783+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: finished 1 files in 32983ms", "event": "CAPTION_BATCH_COMPLETE", "duration_ms": 32983, "event_id": "ae59de43-b5a9-484e-abb5-11b94a90e38d"}
+{"ts": "2026-04-30T13:31:57.788+00:00", "level": "INFO", "logger": "__main__", "msg": "BackgroundCaptionWorker: starting on 1 files", "event": "CAPTION_BATCH_START", "event_id": "803888a8-ad70-4e78-9546-493bb2022d7b"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 13082 - Data Location: 13288 - value: <table: 106 bytes>"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 13094 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 13106 - Data Location: 116 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 13130 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 13142 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 13166 - Data Location: 146 - value: b'Adobe Lightroom 11.1.0 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 13178 - Data Location: 176 - value: b'2026:01:07 14:56:11\\x00'"}
+{"ts": "2026-04-30T13:31:57.789+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:31:57.962+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 5245×3497 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpav24met4.jpg"}
+{"ts": "2026-04-30T13:32:01.074+00:00", "level": "INFO", "logger": "__main__", "msg": "Tab switched to 'Altyazı Ekranı'", "event": "TAB_SWITCH"}
+{"ts": "2026-04-30T13:32:04.066+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 6.26s", "event": "CAPTION_RESULT", "duration_ms": 6256}
+{"ts": "2026-04-30T13:32:04.066+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for image00002.jpeg took 6.29s"}
+{"ts": "2026-04-30T13:32:04.076+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 22 - Data Location: 47320 - value: <table: 173 bytes>"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 34 - Data Location: 158 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 46 - Data Location: 164 - value: b'Canon EOS R3\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 70 - Data Location: 196 - value: b'H\\x00\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 82 - Data Location: 204 - value: b'H\\x00\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 106 - Data Location: 212 - value: b'2026:01:10 16:52:03\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Artist (315) - type: string (2) Tag Location: 118 - Data Location: 232 - value: b'Ahmet Bolat-TBMM\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YCbCrPositioning (531) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'h\\x01\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: GPSInfoIFD (34853) - type: long (4) - value: b'~\\xb8\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPFVersion (45056) - type: undefined (7) - value: b'0100'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: NumberOfImages (45057) - type: long (4) - value: b'\\x02\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:04.077+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: MPEntry (45058) - type: undefined (7) Tag Location: 46 - Data Location: 50 - value: b'\\x00\\x00\\x03\\x80\\xe8\\x8e\\x8c\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x02\\x00\\x01@\\x17\\x99\\x04\\x00\\xf8\\xcb\\x8b\\x00\\x00\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:04.330+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 6000×4000 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpb3pbz4l2.jpg"}
+{"ts": "2026-04-30T13:32:16.278+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 12.18s", "event": "CAPTION_RESULT", "duration_ms": 12178}
+{"ts": "2026-04-30T13:32:16.278+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for IMG_5843.JPG took 12.21s"}
+{"ts": "2026-04-30T13:32:16.292+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 13512 - Data Location: 13898 - value: <table: 143 bytes>"}
+{"ts": "2026-04-30T13:32:16.292+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 13524 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:32:16.293+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 13536 - Data Location: 116 - value: b'Canon EOS R5m2\\x00'"}
+{"ts": "2026-04-30T13:32:16.293+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:32:16.293+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 13560 - Data Location: 132 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:16.293+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 13572 - Data Location: 140 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:16.293+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:32:16.293+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 13596 - Data Location: 148 - value: b'Adobe Lightroom 9.0.1 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:32:16.293+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 13608 - Data Location: 176 - value: b'2026:01:20 13:16:16\\x00'"}
+{"ts": "2026-04-30T13:32:16.293+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:16.864+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 7280×4856 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmpww0ggyu4.jpg"}
+{"ts": "2026-04-30T13:32:21.558+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: generation took 5.23s", "event": "CAPTION_RESULT", "duration_ms": 5228}
+{"ts": "2026-04-30T13:32:21.558+00:00", "level": "INFO", "logger": "src.services.caption_service", "msg": "CaptionService: total analysis for IMG_7198.JPG took 5.28s"}
+{"ts": "2026-04-30T13:32:21.567+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ImageDescription (270) - type: string (2) Tag Location: 18366 - Data Location: 18478 - value: <table: 146 bytes>"}
+{"ts": "2026-04-30T13:32:21.567+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Make (271) - type: string (2) Tag Location: 18378 - Data Location: 110 - value: b'Canon\\x00'"}
+{"ts": "2026-04-30T13:32:21.567+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Model (272) - type: string (2) Tag Location: 18390 - Data Location: 116 - value: b'Canon EOS R1\\x00'"}
+{"ts": "2026-04-30T13:32:21.567+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Orientation (274) - type: short (3) - value: b'\\x01\\x00'"}
+{"ts": "2026-04-30T13:32:21.567+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: XResolution (282) - type: rational (5) Tag Location: 18414 - Data Location: 130 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:21.570+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: YResolution (283) - type: rational (5) Tag Location: 18426 - Data Location: 138 - value: b',\\x01\\x00\\x00\\x01\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:21.570+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ResolutionUnit (296) - type: short (3) - value: b'\\x02\\x00'"}
+{"ts": "2026-04-30T13:32:21.570+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: Software (305) - type: string (2) Tag Location: 18450 - Data Location: 146 - value: b'Adobe Lightroom 11.1.0 (iOS)\\x00'"}
+{"ts": "2026-04-30T13:32:21.570+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: DateTime (306) - type: string (2) Tag Location: 18462 - Data Location: 176 - value: b'2026:01:20 12:53:25\\x00'"}
+{"ts": "2026-04-30T13:32:21.570+00:00", "level": "DEBUG", "logger": "PIL.TiffImagePlugin", "msg": "tag: ExifIFD (34665) - type: long (4) - value: b'\\xc4\\x00\\x00\\x00'"}
+{"ts": "2026-04-30T13:32:21.802+00:00", "level": "DEBUG", "logger": "src.services.caption_service", "msg": "_prepare_image: 5982×3988 → 768×512, tmp=C:\\Users\\ARSIVT~1\\AppData\\Local\\Temp\\tmps8nybcu6.jpg"}
