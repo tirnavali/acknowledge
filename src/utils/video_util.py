@@ -72,9 +72,8 @@ def generate_video_thumbnail(video_path: str, thumb_path: str) -> bool:
     return False
 
 
-def extract_key_frames(video_path: str, count: int = 5) -> list:
-    """Return up to `count` evenly-spaced frames as BGR numpy arrays for face detection."""
-    import numpy as np
+def extract_key_frames(video_path: str, interval_seconds: float = 2.0) -> list:
+    """Return frames sampled every `interval_seconds` as BGR numpy arrays for face detection."""
     frames = []
     try:
         import av
@@ -88,13 +87,14 @@ def extract_key_frames(video_path: str, count: int = 5) -> list:
                     frames.append(frame.to_ndarray(format="bgr24"))
                     break
                 return frames
-            interval = duration / (count + 1)
-            for i in range(1, count + 1):
-                seek_ts = int(interval * i)
-                container.seek(seek_ts)
+            interval_us = int(interval_seconds * 1_000_000)
+            ts = interval_us
+            while ts < duration:
+                container.seek(ts)
                 for frame in container.decode(video=0):
                     frames.append(frame.to_ndarray(format="bgr24"))
                     break
+                ts += interval_us
     except Exception as e:
         logger.warning(f"Could not extract key frames from {video_path}: {e}")
     return frames

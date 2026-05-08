@@ -76,7 +76,7 @@ class BatchFaceWorker(QtCore.QThread):
                     self._face_svc.delete_faces_for_media(media_id)
 
                 if is_video:
-                    frames = extract_key_frames(file_path, count=5)
+                    frames = extract_key_frames(file_path)
                     results = []
                     for frame in frames:
                         frame_results = self._face_svc.detect_faces_from_array(frame)
@@ -1555,6 +1555,8 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addSeparator()
         caption_action = menu.addAction("Yeniden Altyazıla")
         caption_action.setEnabled(is_photo and bool(self.current_event_id))
+        face_action = menu.addAction("🔍 Yüzleri Yeniden Tara")
+        face_action.setEnabled(bool(self.current_event_id))
         menu.addSeparator()
         delete_action = menu.addAction("🗑️ Medyayı Sil")
 
@@ -1567,6 +1569,10 @@ class MainWindow(QtWidgets.QMainWindow):
             event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
             if event:
                 self._start_batch_captioning_for_files([item.img_path], event)
+        elif action == face_action:
+            event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
+            if event:
+                self._start_batch_face_detection_for_files([item.img_path], event, force=True)
         elif action == delete_action:
             self._delete_current_media(item)
 
