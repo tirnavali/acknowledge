@@ -1,7 +1,6 @@
 from PySide6 import QtGui, QtCore
 from typing import List
 from PIL import Image, ExifTags
-from iptcinfo3 import IPTCInfo
 import logging
 import os
 import time

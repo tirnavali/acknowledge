@@ -1357,21 +1357,32 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
     def _write_iptc_to_file(self, img_path: str, iptc_data: dict):
-        """Write IPTC metadata directly into the image file using iptcinfo3."""
+        """Write IPTC metadata directly into the image file using iptcinfo3.
+
+        Only JPEG files support IPTC APP13 segments. For other formats
+        (PNG, TIFF, WebP, BMP) iptcinfo3 blindScans and always fails,
+        producing WARNING spam and slow I/O — skip them entirely.
+        """
+        ext = os.path.splitext(img_path)[1].lower()
+        if ext not in ('.jpg', '.jpeg'):
+            logger.debug(f"_write_iptc_to_file: skipping non-JPEG {os.path.basename(img_path)}")
+            return
+
         from iptcinfo3 import IPTCInfo
-        
+
         def clean(val):
             return val.replace('\x00', '').strip() if val else ''
-        
+
         def to_list(val):
             """Convert a non-empty string to a single-item list, empty string to []."""
             v = clean(val)
             return [v.encode('utf-8')] if v else []
-        
+
         try:
             info = IPTCInfo(img_path, force=True)
         except Exception:
             info = IPTCInfo(img_path, force=True)
+
         
         # String fields (single value)
         string_fields = {

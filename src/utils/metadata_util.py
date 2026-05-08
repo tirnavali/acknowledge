@@ -53,31 +53,36 @@ def extract_metadata(file_path: str) -> dict:
         logger.debug(f"EXIF extraction error for {file_path}: {e}")
 
     # 2. READ IPTC (Takes precedence for fields it covers)
-    try:
-        # force=True avoids 'IPTC data not found' errors in some cases
-        info = IPTCInfo(file_path, force=True)
-        iptc_fields = {
-            'headline': 'Headline', 'caption/abstract': 'Caption', 'keywords': 'Keywords',
-            'object name': 'Object Name', 'city': 'City', 'province/state': 'State',
-            'country/primary location name': 'Country', 'credit': 'Credit', 'source': 'Source',
-            'copyright notice': 'Copyright', 'writer/editor': 'Writer', 'by-line': 'By-line',
-            'by-line title': 'By-line Title', 'date created': 'Date Created', 'category': 'Category',
-            'supplemental category': 'Supplemental Categories'
-        }
-        for iptc_key, display_name in iptc_fields.items():
-            try:
-                value = info[iptc_key]
-                if value:
-                    if isinstance(value, list):
-                        value = ', '.join([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in value])
-                    elif isinstance(value, bytes):
-                        value = value.decode('utf-8')
-                    
-                    val_str = str(value).replace('\x00', '').strip()
-                    if val_str:
-                        metadata[display_name] = val_str
-            except: continue
-    except Exception as e:
-        logger.debug(f"IPTC extraction error for {file_path}: {e}")
+    # iptcinfo3 only works reliably on JPEG files — PNG, TIFF, WebP, BMP do not
+    # embed IPTC in JPEG APP13 segments, so blindScan always fails and produces
+    # WARNING spam + slow disk I/O. Skip entirely for non-JPEG files.
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in ('.jpg', '.jpeg'):
+        try:
+            # force=True avoids 'IPTC data not found' errors in some cases
+            info = IPTCInfo(file_path, force=True)
+            iptc_fields = {
+                'headline': 'Headline', 'caption/abstract': 'Caption', 'keywords': 'Keywords',
+                'object name': 'Object Name', 'city': 'City', 'province/state': 'State',
+                'country/primary location name': 'Country', 'credit': 'Credit', 'source': 'Source',
+                'copyright notice': 'Copyright', 'writer/editor': 'Writer', 'by-line': 'By-line',
+                'by-line title': 'By-line Title', 'date created': 'Date Created', 'category': 'Category',
+                'supplemental category': 'Supplemental Categories'
+            }
+            for iptc_key, display_name in iptc_fields.items():
+                try:
+                    value = info[iptc_key]
+                    if value:
+                        if isinstance(value, list):
+                            value = ', '.join([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in value])
+                        elif isinstance(value, bytes):
+                            value = value.decode('utf-8')
+
+                        val_str = str(value).replace('\x00', '').strip()
+                        if val_str:
+                            metadata[display_name] = val_str
+                except: continue
+        except Exception as e:
+            logger.debug(f"IPTC extraction error for {file_path}: {e}")
 
     return metadata

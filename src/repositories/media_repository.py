@@ -382,7 +382,7 @@ class MediaRepository:
         with get_db() as db:
             result = db.execute(text("""
                 INSERT INTO medias (id, event_id, file_path, media_type, title, text_content, technical_metadata)
-                VALUES (:id, :event_id, :file_path, 'document', :title, :text_content, :technical_metadata::jsonb)
+                VALUES (:id, :event_id, :file_path, 'document', :title, :text_content, CAST(:technical_metadata AS jsonb))
                 ON CONFLICT (file_path) DO UPDATE SET
                     title = EXCLUDED.title,
                     text_content = EXCLUDED.text_content,
@@ -420,7 +420,7 @@ class MediaRepository:
         with get_db() as db:
             result = db.execute(text("""
                 INSERT INTO medias (id, event_id, file_path, media_type, title, technical_metadata, iptc_date_created)
-                VALUES (:id, :event_id, :file_path, 'video', :title, :technical_metadata::jsonb, :iptc_date_created)
+                VALUES (:id, :event_id, :file_path, 'video', :title, CAST(:technical_metadata AS jsonb), :iptc_date_created)
                 ON CONFLICT (file_path) DO UPDATE SET
                     title = EXCLUDED.title,
                     technical_metadata = EXCLUDED.technical_metadata,
