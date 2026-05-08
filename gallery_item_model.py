@@ -303,6 +303,11 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         self._filter_date = None
         self._filter_event_id = None   # set during search mode to narrow by event
         self._filter_min_stars = 0     # 0 = no star filter
+        self._person_filter: frozenset = frozenset()
+
+    def setPersonFilter(self, person_names: set):
+        self._person_filter = frozenset(person_names)
+        self.invalidateFilter()
 
     def setStarFilter(self, min_stars: int):
         """Show only items with star_rating >= min_stars. 0 clears the filter."""
@@ -324,13 +329,18 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
             self.sort(-1)
 
     def filterAcceptsRow(self, source_row, source_parent):
-        if not self._filter_text and not self._filter_date and not self._filter_event_id and not self._filter_min_stars:
+        if not self._filter_text and not self._filter_date and not self._filter_event_id and not self._filter_min_stars and not self._person_filter:
             return True
 
         model = self.sourceModel()
         index = model.index(source_row, 0, source_parent)
         item = model.itemFromIndex(index)
         if not item: return False
+
+        if self._person_filter:
+            people = set(n.strip() for n in item.iptc_data.get('People', '').split('\n') if n.strip())
+            if not self._person_filter.issubset(people):
+                return False
 
         if self._filter_min_stars:
             if getattr(item, 'star_rating', 0) < self._filter_min_stars:

@@ -107,14 +107,19 @@ class CaptionService:
                 )
                 self._model.to("cuda")
             elif mps_available:
-                # Load on CPU first to avoid meta-tensor errors, then move to MPS.
+                # float16 instead of bfloat16: MPS backend has limited bfloat16 support
+                # and crashes on several Qwen2.5-VL ops. float16 is stable on MPS.
+                # Limit CPU threads used by non-MPS ops (attention mask, tokenizer, etc.)
+                torch.set_num_threads(max(2, (os.cpu_count() or 4) // 2))
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
-                    torch_dtype=torch.bfloat16,
+                    torch_dtype=torch.float16,
                 )
                 self._model.to("mps")
             else:
                 # No device_map on CPU — avoids "cannot copy out of meta tensor" from accelerate.
+                # Limit threads so captioning doesn't saturate all cores on low-end machines.
+                torch.set_num_threads(max(2, (os.cpu_count() or 4) // 2))
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
                     torch_dtype=torch.float32,

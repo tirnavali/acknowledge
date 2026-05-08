@@ -1,0 +1,21 @@
+PySide6>=6.5.0
+sqlalchemy>=2.0.0
+python-dotenv>=1.0.0
+iptcinfo3>=2.0.0
+mediapipe
+# onnxruntime-directml replaces onnxruntime — supports any DirectX 12 GPU on Windows
+# (AMD, Intel, NVIDIA without CUDA). Do NOT install both packages simultaneously.
+onnxruntime-directml
+pgvector
+psycopg2-binary
+requests
+numpy
+insightface
+opencv-python
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.40.0
+accelerate>=0.28.0
+qwen-vl-utils>=0.0.8
+av
+python-docx>=1.1.0

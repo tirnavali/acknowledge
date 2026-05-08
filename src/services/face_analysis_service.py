@@ -10,10 +10,16 @@ Design decisions:
 """
 from __future__ import annotations
 import logging
+import os
 import threading
 import ssl
 from dataclasses import dataclass
 import numpy as np
+
+# Limit ONNX Runtime CPU threads so face detection doesn't saturate all cores.
+# PASSIVE wait policy prevents busy-spinning (reduces CPU% even further).
+os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 # Bypass SSL verification for corporate networks with MITM proxies
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -73,15 +79,15 @@ class FaceAnalysisService:
         import onnxruntime as ort
         available = ort.get_available_providers()
         
-        # Priority: CUDA (NVIDIA) > CoreML (Apple Silicon) > CPU
-        # DirectML (Windows/AMD) can also be added here if needed
+        # Priority: CUDA (NVIDIA) > DirectML (Windows any GPU) > CoreML (Apple Silicon) > CPU
         providers = []
         if "CUDAExecutionProvider" in available:
             providers.append("CUDAExecutionProvider")
+        if "DmlExecutionProvider" in available:
+            providers.append("DmlExecutionProvider")
         if "CoreMLExecutionProvider" in available:
             providers.append("CoreMLExecutionProvider")
-        
-        # Fallback to CPU
+
         providers.append("CPUExecutionProvider")
         return providers
 

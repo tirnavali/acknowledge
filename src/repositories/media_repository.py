@@ -191,7 +191,7 @@ class MediaRepository:
         with get_db() as db:
             result = db.execute(text("""
                 WITH pnames AS (
-                    SELECT mp.media_id, STRING_AGG(p.name, ' ') AS names
+                    SELECT mp.media_id, STRING_AGG(p.name, E'\n') AS names
                     FROM media_persons mp
                     JOIN persons p ON mp.person_id = p.id
                     GROUP BY mp.media_id
@@ -266,7 +266,7 @@ class MediaRepository:
                     FROM medias m
                     JOIN events e ON m.event_id = e.id
                     LEFT JOIN (
-                        SELECT mp.media_id, STRING_AGG(p.name, ' ') AS names
+                        SELECT mp.media_id, STRING_AGG(p.name, E'\n') AS names
                         FROM media_persons mp
                         JOIN persons p ON mp.person_id = p.id
                         GROUP BY mp.media_id
@@ -277,7 +277,7 @@ class MediaRepository:
             else:
                 result = db.execute(text("""
                     WITH person_names AS (
-                        SELECT mp.media_id, STRING_AGG(p.name, ' ') AS names
+                        SELECT mp.media_id, STRING_AGG(p.name, E'\n') AS names
                         FROM media_persons mp
                         JOIN persons p ON mp.person_id = p.id
                         GROUP BY mp.media_id
