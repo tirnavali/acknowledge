@@ -24,6 +24,9 @@ env/
 *.db
 *.sqlite3
 
+# Claude Code
+.claude/
+
 # IDE
 .vscode/
 .idea/
