@@ -461,9 +461,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if index.isValid():
             item = self._get_item_from_index(index)
             if item and getattr(item, 'media_type', 'photo') == 'document':
-                from PySide6.QtGui import QDesktopServices
-                from PySide6.QtCore import QUrl
-                QDesktopServices.openUrl(QUrl.fromLocalFile(item.img_path))
+                import sys
+                abs_path = os.path.abspath(item.img_path)
+                if sys.platform == 'win32':
+                    os.startfile(abs_path)
+                else:
+                    from PySide6.QtGui import QDesktopServices
+                    from PySide6.QtCore import QUrl
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(abs_path))
                 return
         self.gallery_stack.setCurrentIndex(1)
         self.single_view_widget.setFocus()
