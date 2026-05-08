@@ -3,6 +3,7 @@ from uuid import UUID
 from src.database import get_db
 from sqlalchemy import text
 import uuid as uuid_module
+import numpy as np
 
 
 class PersonRepository:
@@ -152,6 +153,15 @@ class PersonRepository:
                 ORDER BY p.name
             """), {"media_id": str(media_id)})
             return [row.name for row in result.fetchall()]
+
+    def set_reference_embedding(self, person_id: UUID, embedding: np.ndarray) -> None:
+        """Store a reference face embedding on the person record."""
+        emb_str = "[" + ",".join(str(v) for v in embedding.tolist()) + "]"
+        with get_db() as db:
+            db.execute(text("""
+                UPDATE persons SET reference_embedding = CAST(:emb AS vector) WHERE id = :pid
+            """), {"emb": emb_str, "pid": str(person_id)})
+            db.commit()
 
     def get_persons_for_event(self, event_id: UUID) -> list[dict]:
         """Get all persons linked to an event's medias, with face count and a sample face crop."""

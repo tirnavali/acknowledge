@@ -47,8 +47,9 @@ def init_db():
             db.execute(text("ALTER TABLE medias ADD COLUMN IF NOT EXISTS tags_tr TEXT"))
             db.execute(text("ALTER TABLE medias ADD COLUMN IF NOT EXISTS star_rating SMALLINT NOT NULL DEFAULT 0"))
             db.execute(text("ALTER TABLE medias ADD COLUMN IF NOT EXISTS captioned_at TIMESTAMPTZ"))
+            db.execute(text("ALTER TABLE persons ADD COLUMN IF NOT EXISTS reference_embedding vector(512)"))
             db.commit()
-            print("✅ 'face_detected_at', 'person_cleared', 'tags_en', 'tags_tr', 'star_rating', 'captioned_at' kolonları eklendi (veya zaten vardı).")
+            print("✅ 'face_detected_at', 'person_cleared', 'tags_en', 'tags_tr', 'star_rating', 'captioned_at', 'reference_embedding' kolonları eklendi (veya zaten vardı).")
 
         # Migrate absolute file_path values to relative (for cross-platform support)
         with get_db() as db:

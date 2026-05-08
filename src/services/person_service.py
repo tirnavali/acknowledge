@@ -147,6 +147,14 @@ class PersonService(BaseService):
             self.logger.error(f"Error searching notes for '{query}': {e}")
             return []
 
+    def set_reference_embedding(self, person_id, embedding) -> None:
+        """Store a reference face embedding on the person record."""
+        try:
+            return self.person_repository.set_reference_embedding(person_id, embedding)
+        except Exception as e:
+            self.logger.error(f"Error setting reference embedding for person {person_id}: {e}")
+            raise
+
     def get_persons_for_event(self, event_id) -> list[dict]:
         """Get all persons in an event with face count and sample face crop info."""
         try:

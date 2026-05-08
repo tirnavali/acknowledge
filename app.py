@@ -535,6 +535,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.persons_tab = PersonsTabWidget(
             person_service=self.app_service.get_person_service(),
             media_service=self.app_service.get_media_service(),
+            face_service=self.app_service.get_face_service(),
             parent=self,
         )
         self.tab_widget.addTab(self.persons_tab, "Kişiler")
@@ -1656,6 +1657,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.gallery_search_proxy.setStarFilter(0)
             self.gallery_search_proxy.setFilterText("", None)
             self.gallery_search_proxy.setEventFilter(None)
+        self._clear_persons_filter()
+        if hasattr(self, '_persons_filter_panel'):
+            self._persons_filter_panel.hide()
         _inactive = "QPushButton { background: transparent; border: none; font-size: 18px; color: #bbb; padding: 0 1px; } QPushButton:hover { color: #FFD700; }"
         for btn in self._star_filter_btns:
             btn.setStyleSheet(_inactive)
@@ -1715,6 +1719,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # Single-event mode: apply proxy filter on existing model, no FTS, no event deselect
             self._search_mode = False
             _filter_t0 = time.monotonic()
+            self.gallery_search_proxy.setPersonFilter(set())
             self.gallery_search_proxy.setFilterText(text, date_filter)
             if text:
                 count = self.gallery_search_proxy.rowCount()
@@ -1724,6 +1729,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"Gallery filter: '{text}' → {count} results in {_filter_ms}ms",
                     extra={"event": "GALLERY_FILTER", "duration_ms": _filter_ms, "event_id": str(self.current_event_id) if self.current_event_id else None},
                 )
+                self._update_persons_panel()
+            else:
+                self._persons_filter_panel.hide()
             return
 
         # All-events mode: FTS across all events
@@ -1786,6 +1794,7 @@ class MainWindow(QtWidgets.QMainWindow):
             f"FTS search: '{query_text}' → {count} results in {_fts_ms}ms",
             extra={"event": "GALLERY_SEARCH_DONE", "duration_ms": _fts_ms},
         )
+        self._update_persons_panel()
 
     def _on_search_error(self, message):
         self.gallery_stack.setCurrentIndex(0)
@@ -2003,6 +2012,54 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.single_view_widget.set_image(abs_path)
 
+    def _update_persons_panel(self):
+        """Rebuild the persons checkbox list from currently visible proxy rows."""
+        proxy = self.gallery_search_proxy
+        model = proxy.sourceModel()
+        if not model:
+            self._persons_filter_panel.hide()
+            return
+
+        persons = set()
+        for row in range(proxy.rowCount()):
+            src_index = proxy.mapToSource(proxy.index(row, 0))
+            item = model.itemFromIndex(src_index)
+            if item:
+                for name in item.iptc_data.get('People', '').split('\n'):
+                    name = name.strip()
+                    if name:
+                        persons.add(name)
+
+        self._persons_list.blockSignals(True)
+        self._persons_list.clear()
+        for name in sorted(persons):
+            lw_item = QtWidgets.QListWidgetItem(name)
+            lw_item.setFlags(lw_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            lw_item.setCheckState(QtCore.Qt.Unchecked)
+            self._persons_list.addItem(lw_item)
+        self._persons_list.blockSignals(False)
+
+        if persons:
+            self._persons_filter_panel.show()
+        else:
+            self._persons_filter_panel.hide()
+
+    def _on_persons_filter_changed(self):
+        checked = set()
+        for i in range(self._persons_list.count()):
+            item = self._persons_list.item(i)
+            if item.checkState() == QtCore.Qt.Checked:
+                checked.add(item.text())
+        self.gallery_search_proxy.setPersonFilter(checked)
+
+    def _clear_persons_filter(self):
+        self._persons_list.blockSignals(True)
+        for i in range(self._persons_list.count()):
+            self._persons_list.item(i).setCheckState(QtCore.Qt.Unchecked)
+        self._persons_list.blockSignals(False)
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setPersonFilter(set())
+
     def _clear_person_filter(self):
         self._person_filter_bar.hide()
         self.current_event_id = None
@@ -2100,6 +2157,43 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # event column
         self.events_column.addWidget(self.event_search)
+
+        # Persons filter panel — shows persons found in search results (hidden by default)
+        self._persons_filter_panel = QtWidgets.QWidget()
+        self._persons_filter_panel.setStyleSheet("background: #252526;")
+        _pf_layout = QtWidgets.QVBoxLayout(self._persons_filter_panel)
+        _pf_layout.setContentsMargins(4, 4, 4, 4)
+        _pf_layout.setSpacing(4)
+
+        _pf_header = QtWidgets.QHBoxLayout()
+        _pf_title = QtWidgets.QLabel("👥 Kişiler")
+        _pf_title.setStyleSheet("color: #50C8FF; font-size: 11px; font-weight: bold;")
+        _pf_header.addWidget(_pf_title)
+        _pf_header.addStretch()
+        _pf_clear = QtWidgets.QPushButton("✕")
+        _pf_clear.setFixedSize(18, 18)
+        _pf_clear.setStyleSheet(
+            "QPushButton{background:transparent;color:#888;border:none;font-size:11px;}"
+            "QPushButton:hover{color:#fff;}"
+        )
+        _pf_clear.clicked.connect(self._clear_persons_filter)
+        _pf_header.addWidget(_pf_clear)
+        _pf_layout.addLayout(_pf_header)
+
+        self._persons_list = QtWidgets.QListWidget()
+        self._persons_list.setMaximumHeight(200)
+        self._persons_list.setStyleSheet("""
+            QListWidget { background: #1e1e1e; border: 1px solid #3f3f46;
+                          border-radius: 3px; color: #f0f0f0; font-size: 12px; }
+            QListWidget::item { padding: 3px 6px; }
+            QListWidget::item:hover { background: #2d2d30; }
+            QListWidget::item:selected { background: #0078D7; }
+        """)
+        self._persons_list.itemChanged.connect(self._on_persons_filter_changed)
+        _pf_layout.addWidget(self._persons_list)
+        self._persons_filter_panel.hide()
+        self.events_column.addWidget(self._persons_filter_panel)
+
         self.event_card_list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.event_card_list_widget.customContextMenuRequested.connect(self.show_event_context_menu)
         self.events_column.addWidget(self.event_card_list_widget)

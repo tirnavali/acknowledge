@@ -119,27 +119,59 @@ class FaceRepository:
     ) -> tuple[UUID | None, str | None]:
         """
         Search ALL labelled face embeddings for the closest match (global).
+        Checks both face_detections (assigned faces) and persons.reference_embedding
+        (persons registered without any matched media yet).
         Uses pgvector cosine distance (lower = more similar).
-        Cross-event recognition is intentional: the same physical person should
-        be auto-identified across different events.
-
-        Returns:
-            (person_id, person_name) if a match is found under threshold,
-            else (None, None).
         """
         emb_list = embedding.tolist()
         emb_str = "[" + ",".join(str(v) for v in emb_list) + "]"
         with get_db() as db:
             result = db.execute(text("""
-                SELECT fd.person_id, p.name,
-                       (fd.embedding <=> CAST(:emb AS vector)) AS distance
-                FROM face_detections fd
-                JOIN persons p ON fd.person_id = p.id
-                WHERE fd.embedding IS NOT NULL AND fd.person_id IS NOT NULL
-                ORDER BY distance ASC
+                SELECT person_id, name, dist FROM (
+                    SELECT fd.person_id::text AS person_id, p.name,
+                           (fd.embedding <=> CAST(:emb AS vector)) AS dist
+                    FROM face_detections fd
+                    JOIN persons p ON fd.person_id = p.id
+                    WHERE fd.embedding IS NOT NULL AND fd.person_id IS NOT NULL
+                    UNION ALL
+                    SELECT p.id::text AS person_id, p.name,
+                           (p.reference_embedding <=> CAST(:emb AS vector)) AS dist
+                    FROM persons p
+                    WHERE p.reference_embedding IS NOT NULL
+                ) sub
+                ORDER BY dist ASC
                 LIMIT 1
             """), {"emb": emb_str})
             row = result.fetchone()
-            if row and row.distance is not None and float(row.distance) < threshold:
+            if row and row.dist is not None and float(row.dist) < threshold:
                 return UUID(str(row.person_id)), row.name
         return None, None
+
+    def find_unassigned_faces_matching(
+        self,
+        embedding: np.ndarray,
+        threshold: float = 0.5,
+    ) -> list[dict]:
+        """
+        Return all unassigned face_detections whose embedding is within threshold
+        of the given embedding. Used for the one-time person scan background job.
+
+        Returns list of dicts with keys: face_id, media_id, dist.
+        """
+        emb_list = embedding.tolist()
+        emb_str = "[" + ",".join(str(v) for v in emb_list) + "]"
+        with get_db() as db:
+            result = db.execute(text("""
+                SELECT fd.id AS face_id, fd.media_id,
+                       (fd.embedding <=> CAST(:emb AS vector)) AS dist
+                FROM face_detections fd
+                WHERE fd.person_id IS NULL
+                  AND (fd.person_cleared IS NULL OR NOT fd.person_cleared)
+                  AND fd.embedding IS NOT NULL
+                  AND (fd.embedding <=> CAST(:emb AS vector)) < :threshold
+                ORDER BY dist ASC
+            """), {"emb": emb_str, "threshold": threshold})
+            return [
+                {"face_id": UUID(str(r.face_id)), "media_id": UUID(str(r.media_id)), "dist": float(r.dist)}
+                for r in result.fetchall()
+            ]

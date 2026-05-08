@@ -123,6 +123,7 @@ class Person(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(250), nullable=False, unique=True, index=True)
+    reference_embedding = Column(Vector(512), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     medias = relationship("Media", secondary=media_persons, back_populates="persons")

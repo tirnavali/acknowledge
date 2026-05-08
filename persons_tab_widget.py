@@ -1,6 +1,6 @@
 """
 PersonsTabWidget — Kişiler sekmesi için bağımsız widget.
-Kişi listesi, not araması, yeniden adlandırma ve silme işlevlerini içerir.
+Kişi listesi, not araması, yeniden adlandırma, silme ve yeni kişi ekleme işlevlerini içerir.
 """
 import os
 from PySide6 import QtCore, QtWidgets
@@ -58,6 +58,37 @@ class PersonRenameWorker(QtCore.QThread):
         self.finished.emit(files_updated)
 
 
+class PersonScanWorker(QtCore.QThread):
+    """Scans all existing face_detections and assigns matching ones to a newly created person."""
+    progress = QtCore.Signal(int, int)  # (current, total)
+    finished = QtCore.Signal(int)       # total matches assigned
+
+    def __init__(self, person_id, reference_embedding, face_service, person_service, parent=None):
+        super().__init__(parent)
+        self._person_id = person_id
+        self._embedding = reference_embedding
+        self._face_svc = face_service
+        self._person_svc = person_service
+
+    def run(self):
+        try:
+            matches = self._face_svc.find_unassigned_faces_matching(self._embedding)
+        except Exception:
+            matches = []
+
+        total = len(matches)
+        assigned = 0
+        for i, face in enumerate(matches):
+            self.progress.emit(i + 1, total)
+            try:
+                self._face_svc.assign_person(face["face_id"], self._person_id)
+                self._person_svc.link_to_media(self._person_id, face["media_id"])
+                assigned += 1
+            except Exception:
+                pass
+        self.finished.emit(assigned)
+
+
 class PersonsTabWidget(QtWidgets.QWidget):
     # Emitted when user double-clicks a person row; carries (person_name, gallery_items)
     person_gallery_requested = QtCore.Signal(str, list)
@@ -66,11 +97,13 @@ class PersonsTabWidget(QtWidgets.QWidget):
     # Status bar messages (progress, completion)
     status_message = QtCore.Signal(str)
 
-    def __init__(self, person_service, media_service, parent=None):
+    def __init__(self, person_service, media_service, face_service=None, parent=None):
         super().__init__(parent)
         self._person_service = person_service
         self._media_service = media_service
+        self._face_service = face_service
         self._rename_worker = None
+        self._scan_worker = None
         self._init_ui()
 
     def _init_ui(self):
@@ -78,8 +111,18 @@ class PersonsTabWidget(QtWidgets.QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        # ── Row 1: person name search + refresh + rename + delete ──
+        # ── Row 1: person name search + action buttons ──
         top_bar = QtWidgets.QHBoxLayout()
+
+        add_btn = QtWidgets.QPushButton("+ Yeni Kişi Ekle")
+        add_btn.setFixedHeight(30)
+        add_btn.setStyleSheet(
+            "QPushButton { background-color: #0078D7; color: white; font-weight: bold; }"
+            "QPushButton:hover { background-color: #005fa3; }"
+        )
+        add_btn.clicked.connect(self._add_new_person)
+        top_bar.addWidget(add_btn)
+
         self._persons_search = QtWidgets.QLineEdit()
         self._persons_search.setPlaceholderText("İsimde ara…")
         self._persons_search.setFixedHeight(30)
@@ -322,3 +365,46 @@ class PersonsTabWidget(QtWidgets.QWidget):
             self.load_persons()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Hata", f"Kişi silinemedi: {e}")
+
+    def _add_new_person(self):
+        if self._face_service is None:
+            QtWidgets.QMessageBox.warning(self, "Uyarı", "Yüz tanıma servisi mevcut değil.")
+            return
+
+        from add_person_dialog import AddPersonDialog
+        dlg = AddPersonDialog(self._face_service, self._person_service, parent=self)
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+
+        name = dlg.person_name
+        embedding = dlg.reference_embedding
+
+        try:
+            person_id = self._person_service.find_or_create(name)
+            self._person_service.set_reference_embedding(person_id, embedding)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Hata", f"Kişi kaydedilemedi: {e}")
+            return
+
+        self.load_persons()
+        self.status_message.emit(f"✅ '{name}' eklendi. Mevcut medyalar taranıyor…")
+
+        self._scan_worker = PersonScanWorker(
+            person_id, embedding, self._face_service, self._person_service
+        )
+        self._scan_worker.progress.connect(
+            lambda cur, tot: self.status_message.emit(f"🔍 '{name}' taranıyor… {cur}/{tot} yüz")
+        )
+        self._scan_worker.finished.connect(lambda n: self._on_scan_finished(n, name))
+        self._scan_worker.start()
+
+    def _on_scan_finished(self, matched: int, name: str):
+        self.load_persons()
+        if matched > 0:
+            self.status_message.emit(
+                f"✅ '{name}' taraması tamamlandı — {matched} fotoğrafta eşleşme bulundu."
+            )
+        else:
+            self.status_message.emit(
+                f"✅ '{name}' eklendi — mevcut medyalarda eşleşme bulunamadı. Yeni içe aktarımlarda otomatik tanınacak."
+            )

@@ -141,3 +141,11 @@ class FaceService(BaseService):
         except Exception as e:
             self.logger.error(f"Error finding similar person: {e}")
             raise
+
+    def find_unassigned_faces_matching(self, embedding, threshold: float = 0.5) -> list:
+        """Return all unassigned face_detections matching the given embedding."""
+        try:
+            return self.face_repository.find_unassigned_faces_matching(embedding, threshold)
+        except Exception as e:
+            self.logger.error(f"Error finding unassigned faces matching embedding: {e}")
+            raise
