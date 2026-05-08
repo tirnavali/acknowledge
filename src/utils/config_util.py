@@ -8,7 +8,8 @@ CONFIG_FILE = os.path.join(PROJECT_ROOT, "settings.json")
 
 # Default settings
 DEFAULT_CONFIG = {
-    "auto_captioning_enabled": False
+    "auto_captioning_enabled": False,
+    "language": "tr",
 }
 
 def load_config() -> dict:

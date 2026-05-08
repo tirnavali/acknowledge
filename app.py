@@ -917,7 +917,9 @@ class MainWindow(QtWidgets.QMainWindow):
             f"Gallery loaded: {len(items)} items in {_gallery_ms}ms for event '{event.name}'",
             extra={"event": "GALLERY_LOAD", "event_id": str(event.id), "duration_ms": _gallery_ms},
         )
-        self._resume_batch_face_detection(event)
+        from src.utils import config_util
+        if config_util.get_setting("auto_captioning_enabled", False):
+            self._resume_batch_face_detection(event)
 
         self.gallery_stack.setCurrentIndex(0)  # grid view
         self.media_details_scroll.setEnabled(True)
@@ -1812,15 +1814,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_title_input = QtWidgets.QTextEdit()
         self.media_title_input.setMaximumHeight(50)
         self.media_title_input.setMaximumWidth(fixed_width)
-        self.media_title_input.setPlaceholderText("Title")
-        
+        self.media_title_input.setPlaceholderText("Başlık")
+
         self.media_headline_input = QtWidgets.QLineEdit()
         self.media_headline_input.setMaximumWidth(fixed_width)
-        self.media_headline_input.setPlaceholderText("Headline")
+        self.media_headline_input.setPlaceholderText("Manşet")
 
         self.media_object_name_input = QtWidgets.QLineEdit()
         self.media_object_name_input.setMaximumWidth(fixed_width)
-        self.media_object_name_input.setPlaceholderText("Object Name")
+        self.media_object_name_input.setPlaceholderText("Nesne Adı")
 
         self.media_date_input = QtWidgets.QDateTimeEdit()
         self.media_date_input.setMaximumWidth(fixed_width)
@@ -1829,50 +1831,50 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.media_location_input = QtWidgets.QLineEdit()
         self.media_location_input.setMaximumWidth(fixed_width)
-        self.media_location_input.setPlaceholderText("Location")
-        
+        self.media_location_input.setPlaceholderText("Konum")
+
         self.media_description_input = QtWidgets.QTextEdit()
         self.media_description_input.setMaximumHeight(100)
         self.media_description_input.setMaximumWidth(fixed_width)
-        self.media_description_input.setPlaceholderText("Description")
-        
+        self.media_description_input.setPlaceholderText("Açıklama")
+
         self.media_tags_input = QtWidgets.QTextEdit()
         self.media_tags_input.setMaximumWidth(fixed_width)
-        self.media_tags_input.setPlaceholderText("Tags")
+        self.media_tags_input.setPlaceholderText("Etiketler")
         self.media_tags_input.setMaximumHeight(100)
 
         # New IPTC Fields
         self.media_credit_input = QtWidgets.QLineEdit()
         self.media_credit_input.setMaximumWidth(fixed_width)
-        self.media_credit_input.setPlaceholderText("Credit")
+        self.media_credit_input.setPlaceholderText("Kredi")
 
         self.media_source_input = QtWidgets.QLineEdit()
         self.media_source_input.setMaximumWidth(fixed_width)
-        self.media_source_input.setPlaceholderText("Source")
+        self.media_source_input.setPlaceholderText("Kaynak")
 
         self.media_copyright_input = QtWidgets.QLineEdit()
         self.media_copyright_input.setMaximumWidth(fixed_width)
-        self.media_copyright_input.setPlaceholderText("Copyright")
+        self.media_copyright_input.setPlaceholderText("Telif Hakkı")
 
         self.media_writer_input = QtWidgets.QLineEdit()
         self.media_writer_input.setMaximumWidth(fixed_width)
-        self.media_writer_input.setPlaceholderText("Writer/Editor")
+        self.media_writer_input.setPlaceholderText("Yazar/Editör")
 
         self.media_byline_input = QtWidgets.QLineEdit()
         self.media_byline_input.setMaximumWidth(fixed_width)
-        self.media_byline_input.setPlaceholderText("By-line")
+        self.media_byline_input.setPlaceholderText("İmza Satırı")
 
         self.media_byline_title_input = QtWidgets.QLineEdit()
         self.media_byline_title_input.setMaximumWidth(fixed_width)
-        self.media_byline_title_input.setPlaceholderText("By-line Title")
+        self.media_byline_title_input.setPlaceholderText("İmza Unvanı")
 
         self.media_category_input = QtWidgets.QLineEdit()
         self.media_category_input.setMaximumWidth(fixed_width)
-        self.media_category_input.setPlaceholderText("Category")
+        self.media_category_input.setPlaceholderText("Kategori")
 
         self.media_supplemental_categories_input = QtWidgets.QLineEdit()
         self.media_supplemental_categories_input.setMaximumWidth(fixed_width)
-        self.media_supplemental_categories_input.setPlaceholderText("Supplemental Categories")
+        self.media_supplemental_categories_input.setPlaceholderText("Ek Kategoriler")
 
         self.media_people_input = QtWidgets.QLineEdit()
         self.media_people_input.setMaximumWidth(fixed_width)
@@ -1900,14 +1902,15 @@ class MainWindow(QtWidgets.QMainWindow):
         _sr_layout.addStretch()
 
         # Create labels and add rows
+        from src.utils.i18n import t as _t
         self.media_details_form.addRow(QtWidgets.QLabel("⭐ Puan:"), self._star_rating_widget)
-        self.media_details_form.addRow(QtWidgets.QLabel("📝 Title:"), self.media_title_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("� Headline:"), self.media_headline_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("🆔 Object Name:"), self.media_object_name_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("📅 Date:"), self.media_date_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("📍 Location:"), self.media_location_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("📄 Description:"), self.media_description_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("🏷️ Tags:"), self.media_tags_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_title")), self.media_title_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_headline")), self.media_headline_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_object_name")), self.media_object_name_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_date")), self.media_date_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_location")), self.media_location_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_description")), self.media_description_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_tags")), self.media_tags_input)
         self.media_details_form.addRow(QtWidgets.QLabel("👥 Kişiler:"), self.media_people_input)
 
         # AI-generated caption fields (read-only, populated by background captioning)
@@ -1936,16 +1939,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_form.addRow(QtWidgets.QLabel("🤖 AI Açıklama:"), self._ai_caption_en)
         self.media_details_form.addRow(QtWidgets.QLabel("🏷 AI Etiket:"), self._ai_tags_en)
 
-        self.media_details_form.addRow(QtWidgets.QLabel("💳 Credit:"), self.media_credit_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("🏗️ Source:"), self.media_source_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("©️ Copyright:"), self.media_copyright_input)
-        
-        self.media_details_form.addRow(QtWidgets.QLabel("✍️ Writer:"), self.media_writer_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("👤 By-line:"), self.media_byline_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("🎓 By-line Title:"), self.media_byline_title_input)
-        
-        self.media_details_form.addRow(QtWidgets.QLabel("🗂️ Category:"), self.media_category_input)
-        self.media_details_form.addRow(QtWidgets.QLabel("➕ Sup. Categories:"), self.media_supplemental_categories_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_credit")), self.media_credit_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_source")), self.media_source_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_copyright")), self.media_copyright_input)
+
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_writer")), self.media_writer_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_byline")), self.media_byline_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_byline_title")), self.media_byline_title_input)
+
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_category")), self.media_category_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_sup_categories")), self.media_supplemental_categories_input)
 
         # Styling
         self.media_details_form.setLabelAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
@@ -1954,6 +1957,53 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_form.setVerticalSpacing(8)
 
         
+    def _apply_language(self):
+        """Update all translatable form labels and placeholders to the current language."""
+        from src.utils.i18n import t as _t
+        pairs = [
+            (self.media_title_input,                   "lbl_title"),
+            (self.media_headline_input,                "lbl_headline"),
+            (self.media_object_name_input,             "lbl_object_name"),
+            (self.media_date_input,                    "lbl_date"),
+            (self.media_location_input,                "lbl_location"),
+            (self.media_description_input,             "lbl_description"),
+            (self.media_tags_input,                    "lbl_tags"),
+            (self.media_credit_input,                  "lbl_credit"),
+            (self.media_source_input,                  "lbl_source"),
+            (self.media_copyright_input,               "lbl_copyright"),
+            (self.media_writer_input,                  "lbl_writer"),
+            (self.media_byline_input,                  "lbl_byline"),
+            (self.media_byline_title_input,            "lbl_byline_title"),
+            (self.media_category_input,                "lbl_category"),
+            (self.media_supplemental_categories_input, "lbl_sup_categories"),
+        ]
+        for widget, key in pairs:
+            lbl = self.media_details_form.labelForField(widget)
+            if lbl:
+                lbl.setText(_t(key))
+        self.media_title_input.setPlaceholderText(_t("ph_title"))
+        self.media_headline_input.setPlaceholderText(_t("ph_headline"))
+        self.media_object_name_input.setPlaceholderText(_t("ph_object_name"))
+        self.media_location_input.setPlaceholderText(_t("ph_location"))
+        self.media_description_input.setPlaceholderText(_t("ph_description"))
+        self.media_tags_input.setPlaceholderText(_t("ph_tags"))
+        self.media_credit_input.setPlaceholderText(_t("ph_credit"))
+        self.media_source_input.setPlaceholderText(_t("ph_source"))
+        self.media_copyright_input.setPlaceholderText(_t("ph_copyright"))
+        self.media_writer_input.setPlaceholderText(_t("ph_writer"))
+        self.media_byline_input.setPlaceholderText(_t("ph_byline"))
+        self.media_byline_title_input.setPlaceholderText(_t("ph_byline_title"))
+        self.media_category_input.setPlaceholderText(_t("ph_category"))
+        self.media_supplemental_categories_input.setPlaceholderText(_t("ph_sup_categories"))
+
+    def _on_language_changed(self, checked: bool):
+        if not checked:
+            return
+        from src.utils import config_util
+        lang = "tr" if self._lang_tr_btn.isChecked() else "en"
+        config_util.set_setting("language", lang)
+        self._apply_language()
+
     def _connect_persons_tab(self):
         self.persons_tab.person_gallery_requested.connect(self._on_person_gallery_requested)
         self.persons_tab.note_navigation_requested.connect(self._on_note_navigation_requested)
@@ -2083,16 +2133,34 @@ class MainWindow(QtWidgets.QMainWindow):
         from src.utils import config_util
 
         # Auto Captioning Toggle
-        self.auto_caption_cb = ToggleSwitch("Otomatik Altyazı (Auto Captioning) Aktif")
+        self.auto_caption_cb = ToggleSwitch("Otomatik İşleme Aktif (Altyazı + Yüz Tanıma)")
         self.auto_caption_cb.setChecked(config_util.get_setting("auto_captioning_enabled", False))
         self.auto_caption_cb.toggled.connect(self._on_auto_caption_toggled)
-        
-        info_label = QtWidgets.QLabel("Not: Düşük donanımlı cihazlarda (ör. GT730 GPU vb.) otomatik altyazı (Qwen2.5:3b VLM) üretiminin kapalı olması tavsiye edilir.")
+
+        info_label = QtWidgets.QLabel("Not: Bu ayar hem otomatik altyazı üretimini (Qwen2.5-VL) hem de etkinlik açılışında otomatik yüz tanımayı kontrol eder. Düşük donanımlı cihazlarda kapalı tutulması tavsiye edilir.")
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #aaa; font-style: italic; font-size: 12px; margin-bottom: 20px;")
 
         layout.addWidget(self.auto_caption_cb)
         layout.addWidget(info_label)
+
+        # Language selector
+        lang_group = QtWidgets.QGroupBox("Arayüz Dili / Interface Language")
+        lang_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; border: 1px solid #3f3f46; margin-top: 10px; padding-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; }"
+        )
+        lang_layout = QtWidgets.QHBoxLayout(lang_group)
+        self._lang_tr_btn = QtWidgets.QRadioButton("Türkçe")
+        self._lang_en_btn = QtWidgets.QRadioButton("English")
+        current_lang = config_util.get_setting("language", "tr")
+        (self._lang_tr_btn if current_lang == "tr" else self._lang_en_btn).setChecked(True)
+        self._lang_tr_btn.toggled.connect(self._on_language_changed)
+        lang_layout.addWidget(self._lang_tr_btn)
+        lang_layout.addWidget(self._lang_en_btn)
+        lang_layout.addStretch()
+        layout.addWidget(lang_group)
+
         layout.addStretch()
 
     def _on_auto_caption_toggled(self, checked):
