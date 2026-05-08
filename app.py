@@ -1538,6 +1538,8 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addSeparator()
         caption_action = menu.addAction("Yeniden Altyazıla")
         caption_action.setEnabled(is_photo and bool(self.current_event_id))
+        menu.addSeparator()
+        delete_action = menu.addAction("🗑️ Medyayı Sil")
 
         action = menu.exec(self.event_gallery_list_widget.mapToGlobal(pos))
 
@@ -1548,6 +1550,36 @@ class MainWindow(QtWidgets.QMainWindow):
             event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
             if event:
                 self._start_batch_captioning_for_files([item.img_path], event)
+        elif action == delete_action:
+            self._delete_current_media(item)
+
+    def _delete_current_media(self, item):
+        """Confirm then delete a media item from DB and disk."""
+        fname = os.path.basename(item.img_path)
+        reply = QtWidgets.QMessageBox.question(
+            self, "Medyayı Sil",
+            f'"{fname}" kalıcı olarak silinsin mi?\nDosya diskten de kaldırılır.',
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            media_row = self.app_service.get_media_service().get_by_file_path(item.img_path)
+            if media_row:
+                self.app_service.get_media_service().delete(
+                    media_row['id'], media_row.get('file_path')
+                )
+            # Remove from gallery model without full reload
+            proxy = self.event_gallery_list_widget.model()
+            index = self.event_gallery_list_widget.currentIndex()
+            source_index = proxy.mapToSource(index)
+            self.gallery_item_model.removeRow(source_index.row())
+            if self.current_media_id and media_row and \
+                    str(self.current_media_id) == str(media_row.get('id', '')):
+                self.current_media_id = None
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Hata", f"Silme başarısız:\n{e}")
 
     def _on_faces_changed(self):
         """Update the UI people input and auto-save IPTC when face labels change."""

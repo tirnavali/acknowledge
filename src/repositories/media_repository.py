@@ -405,3 +405,31 @@ class MediaRepository:
             )
             return {os.path.normpath(row.file_path) for row in result.fetchall()}
 
+    def delete(self, media_id: UUID, file_path: str | None = None) -> None:
+        """Delete a media record (cascade) and remove vault file + thumbnail from disk."""
+        with get_db() as db:
+            db.execute(
+                text("DELETE FROM face_detections WHERE media_id = :id"),
+                {"id": str(media_id)},
+            )
+            db.execute(
+                text("DELETE FROM media_persons WHERE media_id = :id"),
+                {"id": str(media_id)},
+            )
+            db.execute(
+                text("DELETE FROM medias WHERE id = :id"),
+                {"id": str(media_id)},
+            )
+            db.commit()
+
+        if file_path:
+            abs_path = path_util.from_db_path(file_path)
+            if os.path.exists(abs_path):
+                os.remove(abs_path)
+            thumb = os.path.join(
+                os.path.dirname(abs_path), ".thumbnails",
+                os.path.basename(abs_path) + ".thumb.jpg",
+            )
+            if os.path.exists(thumb):
+                os.remove(thumb)
+

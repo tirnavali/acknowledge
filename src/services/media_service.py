@@ -56,10 +56,10 @@ class MediaService(BaseService):
             self.logger.error(f"Error updating media {media_id}: {e}")
             raise
     
-    def delete(self, media_id):
-        """Delete media record."""
+    def delete(self, media_id, file_path=None):
+        """Delete media record, vault file, and thumbnail."""
         try:
-            return self.media_repository.delete(media_id)
+            return self.media_repository.delete(media_id, file_path)
         except Exception as e:
             self.logger.error(f"Error deleting media {media_id}: {e}")
             raise
