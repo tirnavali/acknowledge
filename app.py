@@ -852,9 +852,16 @@ class MainWindow(QtWidgets.QMainWindow):
             
         event = card.event
         
+        import sys as _sys
+        _is_mac = _sys.platform == "darwin"
+        _is_win = _sys.platform == "win32"
+        _finder_label = "🗂️ Finder'da Aç" if _is_mac else "🗂️ Dosya Gezgini'nde Aç"
+
         menu = QtWidgets.QMenu(self)
         details_action = menu.addAction("🔍 Detaylar")
         process_action = menu.addAction("⚙️ Yüz Tanıma ve İndeksleme Başlat")
+        menu.addSeparator()
+        open_folder_action = menu.addAction(_finder_label)
         menu.addSeparator()
         delete_action = menu.addAction("🗑️ Sil")
         
@@ -865,8 +872,36 @@ class MainWindow(QtWidgets.QMainWindow):
         elif action == process_action:
             self._resume_batch_face_detection(event, force=True)
             self.statusBar().showMessage(f"🚀 '{event.name}' için işlem manuel olarak başlatıldı...", 4000)
+        elif action == open_folder_action:
+            self._open_event_folder(event)
         elif action == delete_action:
             self.on_event_delete(event)
+
+    def _open_event_folder(self, event):
+        """Open the event's vault folder in the native file manager (Finder / Explorer)."""
+        import sys as _sys
+        import subprocess as _sp
+
+        folder = getattr(event, 'vault_folder_path', None)
+        if not folder or not os.path.isdir(folder):
+            QtWidgets.QMessageBox.warning(
+                self, "Klasör Bulunamadı",
+                f"Etkinlik vault klasörü bulunamadı:\n{folder}"
+            )
+            return
+
+        try:
+            if _sys.platform == "darwin":
+                _sp.Popen(["open", folder])
+            elif _sys.platform == "win32":
+                _sp.Popen(["explorer", os.path.normpath(folder)])
+            else:  # Linux fallback
+                _sp.Popen(["xdg-open", folder])
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Hata",
+                f"Klasör açılamadı: {e}"
+            )
 
     def on_event_details(self, event):
         """Show event details in a popup"""
