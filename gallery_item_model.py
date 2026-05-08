@@ -204,10 +204,16 @@ class GalleryItemModel(QtGui.QStandardItemModel):
             pixmap = QtGui.QPixmap(thumb_path)
 
         if not pixmap or pixmap.isNull():
-            if getattr(item, 'media_type', 'photo') == 'document':
+            media_type = getattr(item, 'media_type', 'photo')
+            if media_type == 'document':
                 from src.utils.document_util import generate_document_thumbnail
                 os.makedirs(thumb_dir, exist_ok=True)
                 generate_document_thumbnail(item.img_path, thumb_path)
+                pixmap = QtGui.QPixmap(thumb_path)
+            elif media_type == 'video':
+                from src.utils.video_util import generate_video_thumbnail
+                os.makedirs(thumb_dir, exist_ok=True)
+                generate_video_thumbnail(item.img_path, thumb_path)
                 pixmap = QtGui.QPixmap(thumb_path)
             else:
                 # Generate thumbnail using Pillow for high performance avoiding full uncompressed loading
@@ -253,6 +259,23 @@ class GalleryItemModel(QtGui.QStandardItemModel):
             painter.fillRect(strip_rect, QtGui.QColor(0, 0, 0, 160))
             painter.setPen(QtGui.QColor("#FFD700"))
             painter.drawText(strip_rect, QtCore.Qt.AlignCenter, stars_text)
+
+        # Play badge for videos
+        if getattr(item, 'media_type', 'photo') == 'video':
+            badge_r = 14
+            cx = pixmap.width() - badge_r - 6
+            cy = pixmap.height() - badge_r - 6
+            painter.setBrush(QtGui.QColor(0, 0, 0, 160))
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.drawEllipse(QtCore.QPoint(cx, cy), badge_r, badge_r)
+            tri = badge_r - 4
+            painter.setBrush(QtGui.QColor("white"))
+            triangle = QtGui.QPolygon([
+                QtCore.QPoint(cx - tri // 2 + 2, cy - tri // 2),
+                QtCore.QPoint(cx - tri // 2 + 2, cy + tri // 2),
+                QtCore.QPoint(cx + tri // 2 + 2, cy),
+            ])
+            painter.drawPolygon(triangle)
 
         painter.end()
         return pixmap

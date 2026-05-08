@@ -66,6 +66,14 @@ class FaceService(BaseService):
         except Exception as e:
             self.logger.error(f"Error detecting faces in {image_path}: {e}")
             raise
+
+    def detect_faces_from_array(self, img):
+        """Detect faces in a BGR numpy array (e.g., a video frame)."""
+        try:
+            return self.face_analysis_service.detect_from_array(img)
+        except Exception as e:
+            self.logger.error(f"Error detecting faces in frame array: {e}")
+            raise
     
     def recognize_faces(self, face_embeddings):
         """Recognize faces using embeddings."""

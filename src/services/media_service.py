@@ -80,9 +80,11 @@ class MediaService(BaseService):
             # Create a lookup map: resolved absolute path -> record dict
             db_map = {path_util.from_db_path(r['file_path']): r for r in db_records}
             
+            from src.utils.video_util import VIDEO_EXTS
+            _gallery_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".doc", ".docx"} | VIDEO_EXTS
             items = []
             for filename in os.listdir(abs_folder_path):
-                if filename.lower().endswith((".jpg", ".png", ".jpeg", ".doc", ".docx")):
+                if os.path.splitext(filename)[1].lower() in _gallery_exts:
                     img_path = os.path.join(abs_folder_path, filename)
                     abs_path = path_util.normalize_path(img_path)
                     db_record = db_map.get(abs_path)

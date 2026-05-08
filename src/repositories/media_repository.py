@@ -395,6 +395,44 @@ class MediaRepository:
                 return val if isinstance(val, UUID) else UUID(str(val))
             raise RuntimeError(f"Failed to save document media: {clean_path}")
 
+    def save_video_media(
+        self,
+        event_id: UUID,
+        file_path: str,
+        title: str | None = None,
+        technical_metadata: dict | None = None,
+        iptc_date_created: str | None = None,
+    ) -> UUID:
+        """Insert or update a video media record."""
+        import uuid as _uuid
+        import json
+        clean_path = _abs(sanitize_str(file_path))
+        new_id = _uuid.uuid4()
+        tech_meta_json = json.dumps(technical_metadata) if technical_metadata else None
+        with get_db() as db:
+            result = db.execute(text("""
+                INSERT INTO medias (id, event_id, file_path, media_type, title, technical_metadata, iptc_date_created)
+                VALUES (:id, :event_id, :file_path, 'video', :title, :technical_metadata::jsonb, :iptc_date_created)
+                ON CONFLICT (file_path) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    technical_metadata = EXCLUDED.technical_metadata,
+                    iptc_date_created = EXCLUDED.iptc_date_created
+                RETURNING id
+            """), {
+                "id": str(new_id),
+                "event_id": str(event_id),
+                "file_path": clean_path,
+                "title": sanitize_str(title) if title else None,
+                "technical_metadata": tech_meta_json,
+                "iptc_date_created": iptc_date_created,
+            })
+            row = result.fetchone()
+            db.commit()
+            if row:
+                val = row[0] if hasattr(row, "__getitem__") else row.id
+                return val if isinstance(val, UUID) else UUID(str(val))
+            raise RuntimeError(f"Failed to save video media: {clean_path}")
+
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""
         import os

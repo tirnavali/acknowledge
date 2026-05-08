@@ -51,6 +51,7 @@ class BatchFaceWorker(QtCore.QThread):
 
     def run(self):
         import time as _time
+        from src.utils.video_util import VIDEO_EXTS, extract_key_frames
         total = len(self._file_paths)
         _t0 = _time.monotonic()
         logger.info(
@@ -59,8 +60,12 @@ class BatchFaceWorker(QtCore.QThread):
         )
         for i, file_path in enumerate(self._file_paths, 1):
             try:
+                ext = os.path.splitext(file_path)[1].lower()
+                is_video = ext in VIDEO_EXTS
+                media_type = "video" if is_video else "photo"
+
                 media_id = self._media_svc.ensure_media_exists(
-                    self._event_id, file_path, "photo"
+                    self._event_id, file_path, media_type
                 )
                 media_row = self._media_svc.get_by_file_path(file_path)
                 if not self._force and media_row and media_row.get("face_detected_at"):
@@ -70,7 +75,15 @@ class BatchFaceWorker(QtCore.QThread):
                 if self._force:
                     self._face_svc.delete_faces_for_media(media_id)
 
-                results = self._face_svc.detect_faces(file_path)
+                if is_video:
+                    frames = extract_key_frames(file_path, count=5)
+                    results = []
+                    for frame in frames:
+                        frame_results = self._face_svc.detect_faces_from_array(frame)
+                        results.extend(frame_results or [])
+                else:
+                    results = self._face_svc.detect_faces(file_path)
+
                 saved_ids = self._face_svc.save_faces(media_id, results) if results else []
 
                 for face_result, face_id in zip(results or [], saved_ids):
@@ -80,12 +93,12 @@ class BatchFaceWorker(QtCore.QThread):
                             self._face_svc.assign_person(face_id, pid)
                             self._person_svc.link_to_media(pid, media_id)
 
-                # --- Automatic Metadata Extraction ---
-                from src.utils import metadata_util
-                meta = metadata_util.extract_metadata(file_path)
-                # Only save if we found at least some metadata (to avoid unnecessary writes)
-                if any(v.strip() for v in meta.values()):
-                    self._media_svc.save_iptc_data(media_id, meta)
+                if not is_video:
+                    # --- Automatic Metadata Extraction (images only) ---
+                    from src.utils import metadata_util
+                    meta = metadata_util.extract_metadata(file_path)
+                    if any(v.strip() for v in meta.values()):
+                        self._media_svc.save_iptc_data(media_id, meta)
 
                 self._media_svc.mark_face_detected(media_id)
             except Exception as e:
@@ -674,12 +687,13 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
 
     def _start_batch_face_detection(self, event):
+        from src.utils.video_util import VIDEO_EXTS
         vault_path = event.vault_folder_path
-        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+        media_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"} | VIDEO_EXTS
         file_paths = [
             os.path.join(vault_path, f)
             for f in os.listdir(vault_path)
-            if os.path.splitext(f)[1].lower() in image_exts
+            if os.path.splitext(f)[1].lower() in media_exts
         ]
         if not file_paths:
             return
@@ -728,11 +742,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage(f"⚠️ '{event.name}' zaten işleniyor veya kuyrukta.", 4000)
             return
 
-        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+        from src.utils.video_util import VIDEO_EXTS
+        media_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"} | VIDEO_EXTS
         disk_files = {
             os.path.join(vault_path, f)
             for f in os.listdir(vault_path)
-            if os.path.splitext(f)[1].lower() in image_exts
+            if os.path.splitext(f)[1].lower() in media_exts
         }
         logger.debug(f"_resume_batch_face_detection: disk_files={len(disk_files)}")
         if not disk_files:

@@ -89,19 +89,21 @@ class EventService(BaseService):
         progress_callback(current: int, total: int) is called after each file is copied.
         """
         from src.utils.document_util import DOCUMENT_EXTS, extract_docx_text, extract_doc_metadata, generate_document_thumbnail
+        from src.utils.video_util import VIDEO_EXTS, generate_video_thumbnail, extract_video_metadata
 
         safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in name).strip()
         vault_folder = os.path.join(vault_base_path, safe_name)
         os.makedirs(vault_folder, exist_ok=True)
 
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
-        supported_exts = image_exts | DOCUMENT_EXTS
+        supported_exts = image_exts | DOCUMENT_EXTS | VIDEO_EXTS
         media_files = [
             f for f in os.listdir(source_folder)
             if os.path.splitext(f)[1].lower() in supported_exts
         ]
         total = len(media_files)
-        doc_metadata: dict[str, dict] = {}  # filename -> {text_content, technical_metadata, title}
+        doc_metadata: dict[str, dict] = {}   # filename -> {text_content, technical_metadata, title}
+        video_metadata: dict[str, dict] = {} # filename -> {technical_metadata, title, iptc_date_created}
 
         for i, filename in enumerate(media_files, 1):
             src = os.path.join(source_folder, filename)
@@ -136,6 +138,15 @@ class EventService(BaseService):
                     "technical_metadata": meta or None,
                     "title": os.path.splitext(filename)[0],
                 }
+            elif ext in VIDEO_EXTS:
+                if not os.path.exists(thumb_path):
+                    generate_video_thumbnail(dst, thumb_path)
+                meta = extract_video_metadata(dst)
+                video_metadata[filename] = {
+                    "technical_metadata": meta or None,
+                    "title": os.path.splitext(filename)[0],
+                    "iptc_date_created": meta.get("creation_time"),
+                }
 
             if progress_callback is not None:
                 progress_callback(i, total)
@@ -161,6 +172,20 @@ class EventService(BaseService):
                     )
                 except Exception as e:
                     self.logger.warning(f"Could not persist document record for {filename}: {e}")
+
+        if video_metadata and self.media_repository:
+            for filename, v_meta in video_metadata.items():
+                vault_file_path = os.path.join(vault_folder, filename)
+                try:
+                    self.media_repository.save_video_media(
+                        event_id=event.id,
+                        file_path=vault_file_path,
+                        title=v_meta["title"],
+                        technical_metadata=v_meta["technical_metadata"],
+                        iptc_date_created=v_meta["iptc_date_created"],
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Could not persist video record for {filename}: {e}")
 
         self.logger.info(f"Created event '{name}', imported {total} files to {vault_folder}")
         return event

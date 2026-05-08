@@ -174,5 +174,43 @@ class FaceAnalysisService:
         results.sort(key=lambda f: (f.x2 - f.x1) * (f.y2 - f.y1), reverse=True)
         return results
 
+    def detect_from_array(self, img: np.ndarray) -> list[FaceResult]:
+        """Detect faces in a BGR numpy array (e.g., a decoded video frame)."""
+        import cv2
+
+        with self._lock:
+            self._load_model()
+            if self._app is None:
+                return []
+            h, w = img.shape[:2]
+            faces = self._app.get(img)
+
+        results = []
+        for face in faces:
+            bbox = face.bbox.astype(float)
+            x1, y1, x2, y2 = bbox
+            ix1 = max(0, int(x1))
+            iy1 = max(0, int(y1))
+            ix2 = min(w, int(x2))
+            iy2 = min(h, int(y2))
+            if ix2 <= ix1 or iy2 <= iy1:
+                continue
+            crop = img[iy1:iy2, ix1:ix2]
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            blur_score = _variance_of_laplacian(gray)
+            if blur_score < BLUR_THRESHOLD:
+                logger.info(f"Skipping video frame face: too blurry. Score: {blur_score:.2f}")
+                continue
+            results.append(FaceResult(
+                x1=max(0.0, x1 / w),
+                y1=max(0.0, y1 / h),
+                x2=min(1.0, x2 / w),
+                y2=min(1.0, y2 / h),
+                embedding=face.embedding,
+                score=float(face.det_score),
+            ))
+        results.sort(key=lambda f: (f.x2 - f.x1) * (f.y2 - f.y1), reverse=True)
+        return results
+
     def is_ready(self) -> bool:
         return self._app is not None
