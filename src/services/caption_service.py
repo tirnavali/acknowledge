@@ -183,7 +183,7 @@ class CaptionService:
         with torch.no_grad():
             generated_ids = self._model.generate(
                 **inputs,
-                max_new_tokens=120,
+                max_new_tokens=300,  # 120 was too small: 25-40 word caption + JSON overhead truncated output
             )
         generation_time = time.perf_counter() - start_time
         logger.info(
@@ -233,7 +233,11 @@ class CaptionService:
     def _parse_combined_response(self, raw: str) -> tuple[str, str]:
         """Extract caption_tr and tags_tr from a JSON model response.
 
-        Falls back to using the raw text as caption with no tags if JSON parsing fails.
+        Handles three cases:
+        1. Clean JSON  → standard json.loads
+        2. Markdown-fenced JSON (```json ... ```) → strip fence then parse
+        3. Truncated JSON (max_new_tokens hit before closing brace)
+           → extract field values directly via regex so nothing is lost
         """
         import json
         import re
@@ -243,13 +247,39 @@ class CaptionService:
                 return ", ".join(str(v) for v in val)
             return str(val) if val is not None else ""
 
+        # Strip markdown code fences if present
+        stripped = re.sub(r'^```[a-z]*\s*', '', raw.strip(), flags=re.IGNORECASE)
+        stripped = re.sub(r'```\s*$', '', stripped).strip()
+
+        # Attempt 1: full JSON parse
         try:
-            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            match = re.search(r'\{.*\}', stripped, re.DOTALL)
             if match:
                 data = json.loads(match.group())
-                return _coerce_str(data.get("caption_tr", "")).strip(), _coerce_str(data.get("tags_tr", "")).strip()
+                return (
+                    _coerce_str(data.get("caption_tr", "")).strip(),
+                    _coerce_str(data.get("tags_tr", "")).strip(),
+                )
         except (json.JSONDecodeError, ValueError):
             pass
+
+        # Attempt 2: truncated JSON — extract field values via regex
+        # Model hit max_new_tokens before closing the JSON object.
+        caption_tr = ""
+        tags_tr = ""
+        m = re.search(r'"caption_tr"\s*:\s*"(.*?)"', stripped, re.DOTALL)
+        if m:
+            caption_tr = m.group(1).strip()
+        m = re.search(r'"tags_tr"\s*:\s*"(.*?)"', stripped, re.DOTALL)
+        if m:
+            tags_tr = m.group(1).strip()
+
+        if caption_tr:
+            logger.debug(
+                "CaptionService: partial JSON recovered via regex for raw: %s", raw[:80]
+            )
+            return caption_tr, tags_tr
+
         logger.warning("CaptionService: JSON parse failed, raw response: %s", raw[:200])
         return "", ""
 
@@ -283,30 +313,56 @@ class CaptionService:
 
             try:
                 full_start = time.perf_counter()
+
+                # NOTE: This MUST be a single str, not a (str, dict) tuple.
+                # The old implementation accidentally created a tuple which silently
+                # dropped the JSON format example from the prompt, causing the model
+                # to produce free text instead of JSON => frequent parse failures.
                 combined_prompt = (
-                    "Bu fotoğrafı Türkçe analiz et. "
+                    "Bu fötoğrafı Türkçe analiz et. "
                     "Sadece aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma. "
                     "Emin olmadığın kişilerin adını yazma, kişi isimlerini tahmin etme. "
                     "Kurallar: "
-                    "- Fotoğraf bir parlamento veya meclis ortamını gösteriyorsa, caption_tr içinde bunu açıkça belirt. "
+                    "- Fötoğraf bir parlamento veya meclis ortamını gösteriyorsa, "
+                    "caption_tr içinde bunu açıkça belirt. "
                     "- Kravat renkleri görünüyorsa mutlaka belirt (örneğin: mavi kravat, kırmızı kravat). "
                     "- El sıkışma varsa mutlaka belirt. "
                     "- Bir kişi kürsüde konuşma yapıyorsa mutlaka belirt. "
                     "- Arka planda ülke bayrakları varsa mutlaka belirt. "
-                    "- caption_tr alanında 25–40 kelimelik, tek cümlelik ayrıntılı bir açıklama yaz. "
+                    "- caption_tr alanında 25-40 kelimelik, tek cümlelik ayrıntılı bir açıklama yaz. "
                     "- Mekanı, rolleri (konuşmacı, milletvekili, dinleyici vb.) ve önemli görsel ayrıntıları belirt. "
-                    "- Emin değilsen ‘bir konuşmacı’, ‘bir milletvekili’ gibi genel ifadeler kullan. "
+                    "- Emin değilsen 'bir konuşmacı', 'bir milletvekili' gibi genel ifadeler kullan. "
                     "- tags_tr alanında en fazla 8 adet, virgülle ayrılmış kısa etiketler yaz (mekan, rol, nesne, renk vb.). "
-                    "JSON dışında hiçbir metin yazma.\n",
-                    {"caption_tr": "Detaylı Türkçe açıklama cümlesi", 
-
-                    "tags_tr": "etiket1, etiket2, etiket3, etiket4, etiket5"}
+                    "JSON dışında hiçbir metin yazma.\n"
+                    '{"caption_tr": "Ayrıntılı Türkçe açıklama cümlesi", '
+                    '"tags_tr": "etiket1, etiket2, etiket3"}'
                 )
+
                 raw = self._run_prompt(pil_image, combined_prompt)
-                result.caption_tr, result.tags_tr = self._parse_combined_response(raw)
+                caption_tr, tags_tr = self._parse_combined_response(raw)
+
+                if caption_tr:
+                    result.caption_tr = caption_tr
+                    result.tags_tr = tags_tr
+                else:
+                    # Fallback: JSON parse failed but model produced text output.
+                    # Save raw text directly so the caption is not silently lost.
+                    raw_stripped = raw.strip()
+                    if len(raw_stripped) > 20:
+                        result.caption_tr = raw_stripped
+                        logger.warning(
+                            "CaptionService: JSON parse failed, saving raw text as "
+                            "caption_tr for %s",
+                            os.path.basename(img_path),
+                        )
+
                 total_duration = time.perf_counter() - full_start
                 result.duration = total_duration
-                logger.info(f"CaptionService: total analysis for {os.path.basename(img_path)} took {total_duration:.2f}s")
+                saved = "yes" if result.caption_tr else "no"
+                logger.info(
+                    f"CaptionService: analysis done {os.path.basename(img_path)} "
+                    f"{total_duration:.2f}s | saved={saved}"
+                )
             except Exception as e:
                 logger.error(f"CaptionService.analyse error for {img_path}: {e}")
                 result.error = str(e)

@@ -859,17 +859,48 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage("✅ Altyazı tamamlandı.", 5000)
 
     def _on_caption_image_done(self, file_path: str):
-        """If single view is showing this file, refresh the AI caption fields."""
-        if self.single_view_widget.current_img_path != file_path:
-            return
+        """Called when a background caption job finishes one image.
+
+        1. Updates the single-view AI caption panel if this image is open.
+        2. Updates the in-memory GalleryItem so the caption appears in the
+           gallery grid immediately — no need to reopen the event.
+        """
         try:
             media_row = self.app_service.get_media_service().get_by_file_path(file_path)
-            if media_row:
-                self._ai_caption_en.setPlainText(media_row.get('caption_tr') or '')
+            caption_tr = (media_row.get('caption_tr') or '') if media_row else ''
+            tags_tr    = (media_row.get('tags_tr')    or '') if media_row else ''
+
+            # --- 1. Update single view panel if this file is currently open ---
+            if self.single_view_widget.current_img_path == file_path:
+                self._ai_caption_en.setPlainText(caption_tr)
                 self._ai_caption_tr.setPlainText('')
-                self._ai_tags_en.setText(media_row.get('tags_tr') or '')
-        except Exception:
-            pass
+                self._ai_tags_en.setText(tags_tr)
+
+            # --- 2. Update the GalleryItem in the model so the gallery grid
+            #        reflects the new caption without reopening the event. ---
+            if hasattr(self, 'gallery_item_model') and self.gallery_item_model:
+                norm_path = os.path.normcase(os.path.normpath(file_path))
+                for row in range(self.gallery_item_model.rowCount()):
+                    item = self.gallery_item_model.item(row)
+                    if not item:
+                        continue
+                    if os.path.normcase(os.path.normpath(item.img_path)) == norm_path:
+                        # Patch the in-memory iptc_data so search/filter sees it too
+                        if caption_tr:
+                            item.iptc_data['AI Açıklama (TR)'] = caption_tr
+                        if tags_tr:
+                            item.iptc_data['AI Etiketler (TR)'] = tags_tr
+                        # Notify the view to repaint this cell
+                        idx = self.gallery_item_model.indexFromItem(item)
+                        if idx.isValid():
+                            self.gallery_item_model.dataChanged.emit(
+                                idx, idx,
+                                [QtCore.Qt.DisplayRole, QtCore.Qt.ToolTipRole]
+                            )
+                        break
+        except Exception as e:
+            logger.debug(f"_on_caption_image_done: {e}")
+
 
     def _open_photo_from_caption_stats(self, img_path: str, event_name: str):
         """Open a photo from the caption stats widget in single view."""
