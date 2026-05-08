@@ -545,7 +545,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.add_event.triggered.connect(self.add_event_window)
         self.toolbar_widget.addAction(self.add_event)
 
-        self.toolbar_widget.addAction("Çıkış")
+        exit_toolbar_action = QAction("Çıkış", self)
+        exit_toolbar_action.triggered.connect(self.close)
+        self.toolbar_widget.addAction(exit_toolbar_action)
         self.toolbar_widget.show()
 
     def add_event_window(self):
@@ -2441,6 +2443,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 worker.quit()
                 worker.wait(2000) # Wait up to 2 seconds for clean exit
         event.accept()
+        QtWidgets.QApplication.quit()
 
 
 
