@@ -357,9 +357,9 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         if item_rank > 0:
             return True   # already approved by PostgreSQL FTS
         score = self._calculate_score(item, self._filter_text)
-        item.setData(score, QtCore.Qt.UserRole + 1)
+        item._search_score = score
         return score > 0
-        
+
     def lessThan(self, left, right):
         if not self._filter_text and not self._filter_date: return left.row() < right.row()
         l_item = self.sourceModel().itemFromIndex(left)
@@ -369,8 +369,8 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         r_rank = getattr(r_item, 'search_rank', 0) or 0
         if l_rank or r_rank:
             return l_rank < r_rank   # higher DB rank → shown first (DescendingOrder)
-        l_score = l_item.data(QtCore.Qt.UserRole + 1) or 0
-        r_score = r_item.data(QtCore.Qt.UserRole + 1) or 0
+        l_score = getattr(l_item, '_search_score', 0) or 0
+        r_score = getattr(r_item, '_search_score', 0) or 0
         return l_score < r_score
 
     def _calculate_score(self, item, search_text):

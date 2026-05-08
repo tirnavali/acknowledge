@@ -146,3 +146,11 @@ class PersonService(BaseService):
         except Exception as e:
             self.logger.error(f"Error searching notes for '{query}': {e}")
             return []
+
+    def get_persons_for_event(self, event_id) -> list[dict]:
+        """Get all persons in an event with face count and sample face crop info."""
+        try:
+            return self.person_repository.get_persons_for_event(event_id)
+        except Exception as e:
+            self.logger.error(f"Error getting persons for event {event_id}: {e}")
+            raise

@@ -189,10 +189,18 @@ class MediaRepository:
     def get_all_for_event(self, event_id: UUID) -> list[dict]:
         """Return all media records and their metadata for a given event."""
         with get_db() as db:
-            result = db.execute(
-                text("SELECT * FROM medias WHERE event_id = :event_id"),
-                {"event_id": str(event_id)}
-            )
+            result = db.execute(text("""
+                WITH pnames AS (
+                    SELECT mp.media_id, STRING_AGG(p.name, ' ') AS names
+                    FROM media_persons mp
+                    JOIN persons p ON mp.person_id = p.id
+                    GROUP BY mp.media_id
+                )
+                SELECT m.*, COALESCE(pn.names, '') AS person_names
+                FROM medias m
+                LEFT JOIN pnames pn ON m.id = pn.media_id
+                WHERE m.event_id = :event_id
+            """), {"event_id": str(event_id)})
             return [dict(row._mapping) for row in result.fetchall()]
 
     def get_all_ordered_by_date(self) -> list[dict]:

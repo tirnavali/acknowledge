@@ -152,3 +152,35 @@ class PersonRepository:
                 ORDER BY p.name
             """), {"media_id": str(media_id)})
             return [row.name for row in result.fetchall()]
+
+    def get_persons_for_event(self, event_id: UUID) -> list[dict]:
+        """Get all persons linked to an event's medias, with face count and a sample face crop."""
+        with get_db() as db:
+            result = db.execute(text("""
+                SELECT
+                    p.id,
+                    p.name,
+                    COUNT(DISTINCT mp.media_id) AS media_count,
+                    COUNT(DISTINCT fd.id)        AS face_count,
+                    (SELECT fd2.bbox
+                     FROM face_detections fd2
+                     JOIN medias m2 ON fd2.media_id = m2.id
+                     WHERE fd2.person_id = p.id
+                       AND m2.event_id = :event_id
+                     LIMIT 1)                    AS sample_bbox,
+                    (SELECT m3.file_path
+                     FROM face_detections fd3
+                     JOIN medias m3 ON fd3.media_id = m3.id
+                     WHERE fd3.person_id = p.id
+                       AND m3.event_id = :event_id
+                     LIMIT 1)                    AS sample_file_path
+                FROM persons p
+                JOIN media_persons mp ON p.id = mp.person_id
+                JOIN medias m ON mp.media_id = m.id
+                LEFT JOIN face_detections fd
+                       ON fd.media_id = m.id AND fd.person_id = p.id
+                WHERE m.event_id = :event_id
+                GROUP BY p.id, p.name
+                ORDER BY face_count DESC, p.name
+            """), {"event_id": str(event_id)})
+            return [dict(row._mapping) for row in result.fetchall()]
