@@ -123,10 +123,11 @@ class BackgroundCaptionWorker(QtCore.QThread):
     image_captioned = QtCore.Signal(str)        # file_path when one image is done
     result_ready    = QtCore.Signal(object)     # CaptionResult after each image
 
-    def __init__(self, file_paths, event_id, caption_service, media_service, parent=None):
+    def __init__(self, file_paths, event_id, caption_service, media_service, parent=None, event_name=""):
         super().__init__(parent)
         self._file_paths  = file_paths
         self._event_id    = event_id
+        self._event_name  = event_name
         self._caption_svc = caption_service
         self._media_svc   = media_service
 
@@ -148,6 +149,7 @@ class BackgroundCaptionWorker(QtCore.QThread):
                 logger.warning(f"BackgroundCaptionWorker: error on {file_path}: {e}")
                 from src.domain.entities.caption_result import CaptionResult
                 result = CaptionResult(img_path=file_path, error=str(e))
+            result.event_name = self._event_name
             self.result_ready.emit(result)
             self.image_captioned.emit(file_path)
             self.progress.emit(i, total)
@@ -556,6 +558,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tab_widget.addTab(self.caption_tab, "Altyazı")
         self._caption_stats = CaptionStatsWidget(parent=self)
         self.caption_tab.stats_updated.connect(self._caption_stats.add_result)
+        self._caption_stats.open_photo_requested.connect(self._open_photo_from_caption_stats)
         self.tab_widget.addTab(self._caption_stats, "Altyazı Ekranı")
 
         self.faq_tab = FAQWidget(parent=self)
@@ -835,6 +838,7 @@ class MainWindow(QtWidgets.QMainWindow):
             svc.get_caption_service(),
             svc.get_media_service(),
             parent=self,
+            event_name=getattr(event, 'name', ''),
         )
         self._caption_worker._event_id = event.id
         self._caption_worker.progress.connect(self._on_caption_progress)
@@ -866,6 +870,39 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._ai_tags_en.setText(media_row.get('tags_tr') or '')
         except Exception:
             pass
+
+    def _open_photo_from_caption_stats(self, img_path: str, event_name: str):
+        """Open a photo from the caption stats widget in single view."""
+        try:
+            # Switch to the Etkinlikler tab (index 0)
+            self.tab_widget.setCurrentIndex(0)
+
+            # Find and load the event that owns this file
+            target_event = None
+            if event_name:
+                events = self.fetch_events()
+                target_event = next((e for e in events if e.name == event_name), None)
+
+            if target_event:
+                # Click the event card to load the gallery
+                self.on_event_card_clicked(target_event)
+
+            # Set image in single view
+            media_row = self.app_service.get_media_service().get_by_file_path(img_path)
+            media_id = media_row['id'] if media_row else None
+            face_detected_at = media_row.get('face_detected_at') if media_row else None
+            event_id = target_event.id if target_event else self.current_event_id
+
+            self.single_view_widget.set_context(
+                event_id, media_id,
+                face_detected_at=face_detected_at,
+                is_batch_pending=False,
+            )
+            self.single_view_widget.set_image(img_path)
+            self.gallery_stack.setCurrentIndex(1)  # switch to single view
+            self.single_view_widget.setFocus()
+        except Exception as e:
+            logger.warning(f"_open_photo_from_caption_stats failed: {e}")
 
     def on_event_card_clicked(self, event, card=None):
         """Handle event card click"""

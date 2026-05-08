@@ -1,3 +1,4 @@
 {
-    "auto_captioning_enabled": false
+    "auto_captioning_enabled": false,
+    "language": "tr"
 }

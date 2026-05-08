@@ -11,6 +11,7 @@ class CaptionResult:
     tags_tr: str = ""    # comma-separated
     duration: float = 0.0
     error: str = ""
+    event_name: str = ""  # name of the event this file belongs to
 
     @property
     def has_data(self) -> bool:

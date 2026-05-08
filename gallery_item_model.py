@@ -16,13 +16,14 @@ class GalleryItem(QtGui.QStandardItem):
         self.exif_data = {}
         self.iptc_data = {}
         self._text_content = ''
-        self.is_loaded = False # Flag for background worker
-        
+        self.is_loaded = False  # Flag for background worker
+        self._db_populated = False  # True when metadata came from DB (skip disk read)
+
         self.setTextAlignment(QtCore.Qt.AlignCenter)
         self.setSizeHint(QtCore.QSize(300, 300))
         self.setToolTip(self.img_path)
         self.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-        
+
         # Store event_id so proxy model can filter by event during search
         self.event_id = str(db_metadata.get('event_id', '')) if db_metadata else None
 
@@ -41,6 +42,7 @@ class GalleryItem(QtGui.QStandardItem):
             db_title = db_metadata.get('title')
             if db_title:
                 self.setText(db_title)
+            self._db_populated = True
             
     def _pop_from_db(self, db_metadata):
         """Map database columns back to the display-friendly iptc_data dict."""
@@ -87,8 +89,16 @@ class GalleryItem(QtGui.QStandardItem):
                 self.iptc_data[display_name] = str(val)
 
     def load_from_file(self):
-        """Heavy I/O: Read EXIF/IPTC from file. Called from background thread."""
+        """Heavy I/O: Read EXIF/IPTC from file. Called from background thread.
+
+        Fast path: if metadata was already populated from the DB, skip disk I/O
+        entirely — only read from file when DB had no data.
+        """
         if self.media_type == 'document':
+            self.is_loaded = True
+            return
+        if self._db_populated:
+            # DB metadata already covers display needs; skip expensive file reads.
             self.is_loaded = True
             return
         if not self.exif_data:
@@ -190,18 +200,39 @@ class GalleryItemModel(QtGui.QStandardItemModel):
             item.setIcon(QtGui.QIcon(self._placeholder))
             self.appendRow(item)
 
+    TARGET_SIZE = 150  # display size in the gallery grid
+    THUMB_SIZE  = 300  # saved thumbnail resolution (2× for HiDPI / quality)
+
     @staticmethod
     def generate_pixmap(item: GalleryItem) -> QtGui.QPixmap:
-        """Heavylifting for thumbnail generation"""
-        thumb_size = 300
+        """Load or generate the thumbnail for one gallery item.
+
+        Performance notes:
+        - Cache hit: load the pre-saved JPEG at target display size directly
+          (Qt scales at load time, avoiding a second SmoothTransformation pass).
+        - Cache miss: generate via Pillow at THUMB_SIZE, save, then load at
+          TARGET_SIZE.
+        """
+        target = GalleryItemModel.TARGET_SIZE
+        thumb_size = GalleryItemModel.THUMB_SIZE
+
         dir_name = os.path.dirname(item.img_path)
         base_name = os.path.basename(item.img_path)
         thumb_dir = os.path.join(dir_name, ".thumbnails")
         thumb_path = os.path.join(thumb_dir, base_name + ".thumb.jpg")
-        
+
         pixmap = None
         if os.path.exists(thumb_path):
+            # Cache hit: thumbnail JPEG is already small (≤300px); load it and
+            # scale with FastTransformation — no quality loss since it's already
+            # a JPEG thumbnail, and preserves aspect ratio correctly.
             pixmap = QtGui.QPixmap(thumb_path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(
+                    target, target,
+                    QtCore.Qt.KeepAspectRatio,
+                    QtCore.Qt.FastTransformation,  # fast: source is already a small JPEG
+                )
 
         if not pixmap or pixmap.isNull():
             media_type = getattr(item, 'media_type', 'photo')
@@ -216,23 +247,24 @@ class GalleryItemModel(QtGui.QStandardItemModel):
                 generate_video_thumbnail(item.img_path, thumb_path)
                 pixmap = QtGui.QPixmap(thumb_path)
             else:
-                # Generate thumbnail using Pillow for high performance avoiding full uncompressed loading
+                # Cache miss: generate thumbnail using Pillow
                 try:
                     os.makedirs(thumb_dir, exist_ok=True)
                     with Image.open(item.img_path) as img:
                         if img.mode != "RGB":
                             img = img.convert("RGB")
-                        img.thumbnail((thumb_size, thumb_size))
-                        img.save(thumb_path, "JPEG", quality=85)
+                        img.thumbnail((thumb_size, thumb_size), Image.LANCZOS)
+                        img.save(thumb_path, "JPEG", quality=85, optimize=True)
                     pixmap = QtGui.QPixmap(thumb_path)
                 except Exception:
                     pass
-                
+
         if not pixmap or pixmap.isNull():
-            pixmap = QtGui.QPixmap(150, 150)
+            pixmap = QtGui.QPixmap(target, target)
             pixmap.fill(QtGui.QColor("#ffcccc"))
-        else:
-            pixmap = pixmap.scaled(150, 150, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+        elif pixmap.width() > target or pixmap.height() > target:
+            # Ensure final size is within target bounds
+            pixmap = pixmap.scaled(target, target, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
 
         painter = QtGui.QPainter(pixmap)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -292,8 +324,17 @@ class GalleryItemModel(QtGui.QStandardItemModel):
             pool.start(runnable)
 
     def _on_item_loaded(self, item, pixmap):
-        """Update item with loaded thumbnail"""
+        """Update item with loaded thumbnail and notify the view to repaint.
+
+        Without emitting dataChanged the view can skip repainting the badge
+        overlay (green tick, star strip) when scrolling rapidly.
+        """
         item.setIcon(QtGui.QIcon(pixmap))
+        # Emit dataChanged so every attached view repaints this cell — this
+        # fixes the green-tick badge sometimes disappearing when navigating.
+        idx = self.indexFromItem(item)
+        if idx.isValid():
+            self.dataChanged.emit(idx, idx, [QtCore.Qt.DecorationRole])
 
 
 class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
