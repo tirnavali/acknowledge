@@ -218,7 +218,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Tirnavali Acknowledge")
-        self.resize(1400, 900)
         self.current_event_id = None
         self.current_media_id = None
         self.app_service = ApplicationService()
@@ -243,7 +242,40 @@ class MainWindow(QtWidgets.QMainWindow):
         self.init_vault()
         self.UI()
         self.show()
+        # Fit window AFTER show() so inner widgets have finished their layout pass.
+        # singleShot(0) defers to the next event-loop iteration.
+        QtCore.QTimer.singleShot(0, lambda: self._fit_to_screen(preferred_w=1400, preferred_h=900))
         QtCore.QTimer.singleShot(0, self._start_global_captioning_on_startup)
+
+    # ------------------------------------------------------------------
+    # Adaptive window sizing
+    # ------------------------------------------------------------------
+
+    def _fit_to_screen(self, preferred_w: int = 1400, preferred_h: int = 900) -> None:
+        """Resize and center the window so it always fits the current display.
+
+        Call this AFTER show() (e.g. via QTimer.singleShot) so the full
+        layout pass has completed and inner widgets cannot re-expand the window.
+
+        Logic:
+        - availableGeometry() excludes the macOS Dock and Windows taskbar.
+        - Resize to min(preferred, 92 % of screen) to leave comfortable margins.
+        - Center the result. No maximum size is set so macOS full-screen works freely.
+        """
+        # Use the screen that contains the window (handles multi-monitor correctly).
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        avail  = screen.availableGeometry()   # logical pixels, excludes Dock/taskbar
+
+        max_w = int(avail.width()  * 0.92)
+        max_h = int(avail.height() * 0.92)
+
+        win_w = min(preferred_w, max_w)
+        win_h = min(preferred_h, max_h)
+
+        # Center on the available area, then resize atomically.
+        x = avail.x() + (avail.width()  - win_w) // 2
+        y = avail.y() + (avail.height() - win_h) // 2
+        self.setGeometry(x, y, win_w, win_h)
 
     def init_vault(self):
         print("⏳ Vault klasörleri kontrol ediliyor...")
@@ -1225,10 +1257,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_search = QtWidgets.QLineEdit()
         self.event_search.setPlaceholderText("Ara...")
         self.event_search.setFixedHeight(30)
-        self.event_search.setFixedWidth(200)
+        self.event_search.setMinimumWidth(160)
+        self.event_search.setMaximumWidth(240)
 
         self.event_card_list_widget = QtWidgets.QListWidget()
-        self.event_card_list_widget.setFixedWidth(200)
+        self.event_card_list_widget.setMinimumWidth(160)
+        self.event_card_list_widget.setMaximumWidth(240)
         self.event_card_list_widget.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.event_card_list_widget.setResizeMode(QtWidgets.QListView.Adjust)
         self.event_card_list_widget.setWordWrap(True)
@@ -1243,49 +1277,71 @@ class MainWindow(QtWidgets.QMainWindow):
         # Load events into the list
         self.load_events()
         
-        # Gallery search section
-        self.gallery_search_layout = QtWidgets.QHBoxLayout()
+        # Gallery search section — two-row layout
+        # Row 1: search input + action buttons
+        # Row 2: filter toggles + date + star rating filter
+        self.gallery_search_layout = QtWidgets.QVBoxLayout()
+        self.gallery_search_layout.setSpacing(4)
+        self.gallery_search_layout.setContentsMargins(0, 0, 0, 0)
+
+        # --- Row 1: search bar ---
+        _search_row = QtWidgets.QHBoxLayout()
+        _search_row.setSpacing(6)
+
         self.event_gallery_search = QtWidgets.QLineEdit()
-        self.event_gallery_search.setPlaceholderText("Metadata veya Dosya Adı Ara...")
-        self.event_gallery_search.setFixedHeight(30)
-        self.event_gallery_search.setMinimumWidth(300)
-        
-        self.event_gallery_date_cb = ToggleSwitch("Tarih Filtresi:")
-        self.event_gallery_date = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
-        self.event_gallery_date.setCalendarPopup(True)
-        self.event_gallery_date.setFixedHeight(30)
-        self.event_gallery_date.setEnabled(False)
-        self.event_gallery_date_cb.toggled.connect(self.event_gallery_date.setEnabled)
+        self.event_gallery_search.setPlaceholderText("🔍  Metadata veya Dosya Adı Ara...")
+        self.event_gallery_search.setFixedHeight(36)
+        self.event_gallery_search.setStyleSheet(
+            "QLineEdit { font-size: 13px; padding: 4px 10px; border-radius: 6px; "
+            "background: #2a2a2e; border: 1px solid #555; color: #fff; }"
+            "QLineEdit:focus { border: 1px solid #0078D7; background: #1e1e2e; }"
+        )
+        self.event_gallery_search.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
 
         self.event_gallery_search_btn = QtWidgets.QPushButton("Ara")
-        self.event_gallery_search_btn.setFixedHeight(30)
-
-        self.event_gallery_search_all_cb = ToggleSwitch("Tüm Etkinliklerde Ara")
-        self.event_gallery_search_all_cb.setToolTip("İşaretliyse arama tüm etkinliklerde yapılır; aksi hâlde yalnızca seçili etkinlikte aranır")
-
-        self.gallery_search_layout.addWidget(self.event_gallery_search)
-        self.gallery_search_layout.addWidget(self.event_gallery_search_all_cb)
-        self.gallery_search_layout.addWidget(self.event_gallery_date_cb)
-        self.gallery_search_layout.addWidget(self.event_gallery_date)
-        self.gallery_search_layout.addWidget(self.event_gallery_search_btn)
+        self.event_gallery_search_btn.setFixedHeight(36)
+        self.event_gallery_search_btn.setFixedWidth(60)
 
         self.event_gallery_clear_btn = QtWidgets.QPushButton("Temizle")
-        self.event_gallery_clear_btn.setFixedHeight(30)
+        self.event_gallery_clear_btn.setFixedHeight(36)
         self.event_gallery_clear_btn.setToolTip("Aramayı ve tüm filtreleri temizle")
         self.event_gallery_clear_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.event_gallery_clear_btn.clicked.connect(self._on_clear_search)
-        self.gallery_search_layout.addWidget(self.event_gallery_clear_btn)
 
-        # Star filter: ★1 ★2 ★3 ★4 ★5  (click = min-star filter; click active = clear)
+        _search_row.addWidget(self.event_gallery_search)
+        _search_row.addWidget(self.event_gallery_search_btn)
+        _search_row.addWidget(self.event_gallery_clear_btn)
+
+        # --- Row 2: filter controls ---
+        _filter_row = QtWidgets.QHBoxLayout()
+        _filter_row.setSpacing(8)
+
+        self.event_gallery_search_all_cb = ToggleSwitch("Tüm Etkinliklerde Ara")
+        self.event_gallery_search_all_cb.setToolTip(
+            "İşaretliyse arama tüm etkinliklerde yapılır; "
+            "aksi hâlde yalnızca seçili etkinlikte aranır"
+        )
+
+        self.event_gallery_date_cb = ToggleSwitch("Tarih Filtresi:")
+        self.event_gallery_date = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
+        self.event_gallery_date.setCalendarPopup(True)
+        self.event_gallery_date.setFixedHeight(28)
+        self.event_gallery_date.setEnabled(False)
+        self.event_gallery_date_cb.toggled.connect(self.event_gallery_date.setEnabled)
+
+        # Star filter: ❡1❡²2❡²3❡²4❡²5  (click = min-star filter; click active = clear)
         self._star_filter_btns: list[QtWidgets.QPushButton] = []
         _star_filter_style = (
-            "QPushButton { background: transparent; border: none; font-size: 18px; color: #bbb; padding: 0 1px; }"
+            "QPushButton { background: transparent; border: none; font-size: 16px; "
+            "color: #888; padding: 0 2px; }"
             "QPushButton:hover { color: #FFD700; }"
             "QPushButton[active='true'] { color: #FFD700; }"
         )
         for i in range(1, 6):
             btn = QtWidgets.QPushButton("★")
-            btn.setFixedSize(26, 30)
+            btn.setFixedSize(24, 28)
             btn.setStyleSheet(_star_filter_style)
             btn.setProperty("star", i)
             btn.setProperty("active", "false")
@@ -1293,9 +1349,18 @@ class MainWindow(QtWidgets.QMainWindow):
             btn.setToolTip(f"{i} yıldız ve üzeri")
             btn.clicked.connect(lambda checked=False, n=i: self._on_star_filter_clicked(n))
             self._star_filter_btns.append(btn)
-            self.gallery_search_layout.addWidget(btn)
 
-        self.gallery_search_layout.addStretch()
+        _filter_row.addWidget(self.event_gallery_search_all_cb)
+        _filter_row.addWidget(self.event_gallery_date_cb)
+        _filter_row.addWidget(self.event_gallery_date)
+        _filter_row.addSpacing(4)
+        for btn in self._star_filter_btns:
+            _filter_row.addWidget(btn)
+        _filter_row.addStretch()
+
+        self.gallery_search_layout.addLayout(_search_row)
+        self.gallery_search_layout.addLayout(_filter_row)
+
         # Gallery Stack section (Grid + Single)
         self.gallery_stack = QtWidgets.QStackedWidget()
         
@@ -1608,71 +1673,71 @@ class MainWindow(QtWidgets.QMainWindow):
         # Create input fields and store references
         self.media_title_input = QtWidgets.QTextEdit()
         self.media_title_input.setMaximumHeight(50)
-        self.media_title_input.setFixedWidth(fixed_width)
+        self.media_title_input.setMaximumWidth(fixed_width)
         self.media_title_input.setPlaceholderText("Title")
         
         self.media_headline_input = QtWidgets.QLineEdit()
-        self.media_headline_input.setFixedWidth(fixed_width)
+        self.media_headline_input.setMaximumWidth(fixed_width)
         self.media_headline_input.setPlaceholderText("Headline")
 
         self.media_object_name_input = QtWidgets.QLineEdit()
-        self.media_object_name_input.setFixedWidth(fixed_width)
+        self.media_object_name_input.setMaximumWidth(fixed_width)
         self.media_object_name_input.setPlaceholderText("Object Name")
 
         self.media_date_input = QtWidgets.QDateTimeEdit()
-        self.media_date_input.setFixedWidth(fixed_width)
+        self.media_date_input.setMaximumWidth(fixed_width)
         self.media_date_input.setCalendarPopup(True)
         self.media_date_input.setDisplayFormat("dd.MM.yyyy HH:mm")
         
         self.media_location_input = QtWidgets.QLineEdit()
-        self.media_location_input.setFixedWidth(fixed_width)
+        self.media_location_input.setMaximumWidth(fixed_width)
         self.media_location_input.setPlaceholderText("Location")
         
         self.media_description_input = QtWidgets.QTextEdit()
         self.media_description_input.setMaximumHeight(100)
-        self.media_description_input.setFixedWidth(fixed_width)
+        self.media_description_input.setMaximumWidth(fixed_width)
         self.media_description_input.setPlaceholderText("Description")
         
         self.media_tags_input = QtWidgets.QTextEdit()
-        self.media_tags_input.setFixedWidth(fixed_width)
+        self.media_tags_input.setMaximumWidth(fixed_width)
         self.media_tags_input.setPlaceholderText("Tags")
         self.media_tags_input.setMaximumHeight(100)
 
         # New IPTC Fields
         self.media_credit_input = QtWidgets.QLineEdit()
-        self.media_credit_input.setFixedWidth(fixed_width)
+        self.media_credit_input.setMaximumWidth(fixed_width)
         self.media_credit_input.setPlaceholderText("Credit")
 
         self.media_source_input = QtWidgets.QLineEdit()
-        self.media_source_input.setFixedWidth(fixed_width)
+        self.media_source_input.setMaximumWidth(fixed_width)
         self.media_source_input.setPlaceholderText("Source")
 
         self.media_copyright_input = QtWidgets.QLineEdit()
-        self.media_copyright_input.setFixedWidth(fixed_width)
+        self.media_copyright_input.setMaximumWidth(fixed_width)
         self.media_copyright_input.setPlaceholderText("Copyright")
 
         self.media_writer_input = QtWidgets.QLineEdit()
-        self.media_writer_input.setFixedWidth(fixed_width)
+        self.media_writer_input.setMaximumWidth(fixed_width)
         self.media_writer_input.setPlaceholderText("Writer/Editor")
 
         self.media_byline_input = QtWidgets.QLineEdit()
-        self.media_byline_input.setFixedWidth(fixed_width)
+        self.media_byline_input.setMaximumWidth(fixed_width)
         self.media_byline_input.setPlaceholderText("By-line")
 
         self.media_byline_title_input = QtWidgets.QLineEdit()
-        self.media_byline_title_input.setFixedWidth(fixed_width)
+        self.media_byline_title_input.setMaximumWidth(fixed_width)
         self.media_byline_title_input.setPlaceholderText("By-line Title")
 
         self.media_category_input = QtWidgets.QLineEdit()
-        self.media_category_input.setFixedWidth(fixed_width)
+        self.media_category_input.setMaximumWidth(fixed_width)
         self.media_category_input.setPlaceholderText("Category")
 
         self.media_supplemental_categories_input = QtWidgets.QLineEdit()
-        self.media_supplemental_categories_input.setFixedWidth(fixed_width)
+        self.media_supplemental_categories_input.setMaximumWidth(fixed_width)
         self.media_supplemental_categories_input.setPlaceholderText("Supplemental Categories")
 
         self.media_people_input = QtWidgets.QLineEdit()
-        self.media_people_input.setFixedWidth(fixed_width)
+        self.media_people_input.setMaximumWidth(fixed_width)
         self.media_people_input.setPlaceholderText("Kişiler (Virgülle ayırın)")
 
         # Star rating widget (5 clickable stars)
@@ -1712,20 +1777,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ai_caption_en = QtWidgets.QTextEdit()
         self._ai_caption_en.setReadOnly(True)
         self._ai_caption_en.setMaximumHeight(70)
-        self._ai_caption_en.setFixedWidth(fixed_width)
+        self._ai_caption_en.setMaximumWidth(fixed_width)
         self._ai_caption_en.setPlaceholderText("(AI açıklaması bekleniyor…)")
         self._ai_caption_en.setStyleSheet(_ai_style)
 
         self._ai_caption_tr = QtWidgets.QTextEdit()
         self._ai_caption_tr.setReadOnly(True)
         self._ai_caption_tr.setMaximumHeight(70)
-        self._ai_caption_tr.setFixedWidth(fixed_width)
+        self._ai_caption_tr.setMaximumWidth(fixed_width)
         self._ai_caption_tr.setPlaceholderText("(AI Türkçe açıklama bekleniyor…)")
         self._ai_caption_tr.setStyleSheet(_ai_style)
 
         self._ai_tags_en = QtWidgets.QLineEdit()
         self._ai_tags_en.setReadOnly(True)
-        self._ai_tags_en.setFixedWidth(fixed_width)
+        self._ai_tags_en.setMaximumWidth(fixed_width)
         self._ai_tags_en.setPlaceholderText("(AI etiketler…)")
         self._ai_tags_en.setStyleSheet(_ai_style)
 
@@ -2096,21 +2161,36 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Hata", f"Kişi silinemedi: {e}")
 
     def layouts(self):
-        self.events_layout = QtWidgets.QHBoxLayout()
+        # Use a QSplitter for the three-column layout so each panel resizes
+        # proportionally and never overflows the screen on any display size.
+        self.events_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        self.events_splitter.setChildrenCollapsible(False)
         self.events_column = QtWidgets.QVBoxLayout()
         self.events_gallery = QtWidgets.QVBoxLayout()
-        
+
+        # Wrap events_column in a container widget for the splitter
+        self._events_col_widget = QtWidgets.QWidget()
+        self._events_col_widget.setMinimumWidth(180)
+        self._events_col_widget.setMaximumWidth(260)
+        self._events_col_widget.setLayout(self.events_column)
+
+        # Wrap events_gallery in a container widget for the splitter
+        self._gallery_col_widget = QtWidgets.QWidget()
+        self._gallery_col_widget.setMinimumWidth(320)
+        self._gallery_col_widget.setLayout(self.events_gallery)
+
         # Right side: Details Scroll Area
         self.media_details_scroll = QtWidgets.QScrollArea()
         self.media_details_scroll.setWidgetResizable(True)
-        self.media_details_scroll.setFixedWidth(450)
+        self.media_details_scroll.setMinimumWidth(350)
+        self.media_details_scroll.setMaximumWidth(520)
         self.media_details_scroll.setStyleSheet("background-color: #252526; border: 1px solid #3f3f46; border-radius: 4px;")
-        
+
         self.media_details_container = QtWidgets.QWidget()
         self.media_details_form = QtWidgets.QFormLayout()
         self.media_details_container.setLayout(self.media_details_form)
         self.media_details_scroll.setWidget(self.media_details_container)
-        
+
         # Single Save button at the top of the details panel
         self.save_media_btn = QtWidgets.QPushButton("💾 Kaydet")
         self.save_media_btn.setStyleSheet("""
@@ -2122,10 +2202,20 @@ class MainWindow(QtWidgets.QMainWindow):
         """)
         self.save_media_btn.clicked.connect(self.save_media_iptc)
         self.media_details_form.addRow(self.save_media_btn)
-        
-        self.events_layout.addLayout(self.events_column, 1)
-        self.events_layout.addLayout(self.events_gallery, 3)
-        self.events_layout.addWidget(self.media_details_scroll, 1)
+
+        # Add all three panels to the splitter
+        self.events_splitter.addWidget(self._events_col_widget)
+        self.events_splitter.addWidget(self._gallery_col_widget)
+        self.events_splitter.addWidget(self.media_details_scroll)
+        # Proportions: event list (narrow) | gallery (wide) | details (medium)
+        self.events_splitter.setStretchFactor(0, 1)
+        self.events_splitter.setStretchFactor(1, 5)
+        self.events_splitter.setStretchFactor(2, 2)
+
+        # Keep events_layout as a thin wrapper so the rest of the code compiles
+        self.events_layout = QtWidgets.QHBoxLayout()
+        self.events_layout.setContentsMargins(0, 0, 0, 0)
+        self.events_layout.addWidget(self.events_splitter)
         
         # event column
         self.events_column.addWidget(self.event_search)
@@ -2184,7 +2274,30 @@ class MainWindow(QtWidgets.QMainWindow):
             QPushButton { background-color: #333333; color: white; padding: 6px 15px; border: 1px solid #555555; border-radius: 4px; font-weight: bold; }
             QPushButton:hover { background-color: #3f3f46; border: 1px solid #0078D7; }
             QPushButton:pressed { background-color: #0078D7; border: 1px solid #0078D7; }
+
+            /* Splitter handle — visible groove with centered drag dot */
+            QSplitter::handle {
+                background-color: #2d2d30;
+                border-left: 1px solid #3f3f46;
+                border-right: 1px solid #3f3f46;
+                width: 6px;
+                margin: 0px;
+            }
+            QSplitter::handle:hover {
+                background-color: #0078D7;
+            }
+            QSplitter::handle:pressed {
+                background-color: #005A9E;
+            }
         """)
+
+        # Style the splitter handle image (3-dot drag indicator) via the widget itself
+        if hasattr(self, 'events_splitter'):
+            self.events_splitter.setHandleWidth(6)
+            for i in range(1, self.events_splitter.count()):
+                handle = self.events_splitter.handle(i)
+                handle.setCursor(QtCore.Qt.SplitHCursor)
+                handle.setToolTip("Sürükleyerek boyutlandırın")
 
     def closeEvent(self, event):
         """Cleanup running threads before closing."""

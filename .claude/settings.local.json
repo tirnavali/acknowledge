@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls -lh /d/62542/projects/acknowledge/*.py)"
+      "Bash(ls -lh /d/62542/projects/acknowledge/*.py)",
+      "Bash(xargs cat *)"
     ]
   }
 }
