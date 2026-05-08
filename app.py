@@ -215,6 +215,30 @@ class PersonRenameWorker(QtCore.QThread):
         self.finished.emit(files_updated)
 
 
+class UpdateCheckWorker(QtCore.QThread):
+    """Fetches origin and checks for new commits in the background."""
+    update_available = QtCore.Signal(int, str)   # (commit_count, latest_sha)
+    no_update        = QtCore.Signal()
+
+    def run(self):
+        from src.utils.update_util import check_for_updates
+        available, count, sha = check_for_updates()
+        if available:
+            self.update_available.emit(count, sha)
+        else:
+            self.no_update.emit()
+
+
+class UpdateApplyWorker(QtCore.QThread):
+    """Runs git pull (and pip install if needed) in the background."""
+    finished = QtCore.Signal(bool, str)   # (success, error_message)
+
+    def run(self):
+        from src.utils.update_util import apply_update
+        success, error = apply_update()
+        self.finished.emit(success, error)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -237,6 +261,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """)
         self.statusBar()
         self._search_worker = None              # background FTS worker
+        self._update_check_worker = None
+        self._update_apply_worker = None
+        self._update_bar = self._make_update_bar()
         self._search_mode = False               # True while cross-event search is active
         self._selected_event_card = None        # currently highlighted EventCardWidget
         self.init_db()
@@ -247,6 +274,70 @@ class MainWindow(QtWidgets.QMainWindow):
         # singleShot(0) defers to the next event-loop iteration.
         QtCore.QTimer.singleShot(0, lambda: self._fit_to_screen(preferred_w=1400, preferred_h=900))
         QtCore.QTimer.singleShot(0, self._start_global_captioning_on_startup)
+        QtCore.QTimer.singleShot(3000, self._check_for_updates_async)
+
+    # ------------------------------------------------------------------
+    # Auto-update
+    # ------------------------------------------------------------------
+
+    def _make_update_bar(self) -> QtWidgets.QFrame:
+        bar = QtWidgets.QFrame()
+        bar.setStyleSheet("""
+            QFrame { background-color: #1a6ea8; }
+            QLabel { color: white; font-size: 12px; font-weight: bold; background: transparent; }
+            QPushButton {
+                background-color: white; color: #1a6ea8; border: none;
+                padding: 3px 12px; border-radius: 3px; font-weight: bold; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #e8f4fd; }
+            QPushButton#dismiss { background: transparent; color: white; font-size: 14px; padding: 0 6px; }
+        """)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(12, 4, 8, 4)
+
+        self._update_label = QtWidgets.QLabel("Yeni güncelleme mevcut")
+        layout.addWidget(self._update_label)
+        layout.addStretch()
+
+        self._update_btn = QtWidgets.QPushButton("Güncelle ve Yeniden Başlat")
+        self._update_btn.clicked.connect(self._apply_update)
+        layout.addWidget(self._update_btn)
+
+        dismiss = QtWidgets.QPushButton("✕")
+        dismiss.setObjectName("dismiss")
+        dismiss.clicked.connect(bar.hide)
+        layout.addWidget(dismiss)
+
+        bar.hide()
+        return bar
+
+    def _check_for_updates_async(self):
+        if self._update_check_worker and self._update_check_worker.isRunning():
+            return
+        self._update_check_worker = UpdateCheckWorker(self)
+        self._update_check_worker.update_available.connect(self._on_update_available)
+        self._update_check_worker.start()
+
+    def _on_update_available(self, count: int, sha: str):
+        noun = "güncelleme" if count == 1 else "yeni commit"
+        self._update_label.setText(f"🔄  {count} {noun} mevcut ({sha[:7]})")
+        self._update_bar.show()
+
+    def _apply_update(self):
+        self._update_btn.setEnabled(False)
+        self._update_label.setText("Güncelleniyor…")
+        self._update_apply_worker = UpdateApplyWorker(self)
+        self._update_apply_worker.finished.connect(self._on_update_finished)
+        self._update_apply_worker.start()
+
+    def _on_update_finished(self, success: bool, error: str):
+        if success:
+            from src.utils.update_util import restart_app
+            restart_app()
+        else:
+            self._update_btn.setEnabled(True)
+            self._update_label.setText("Yeni güncelleme mevcut")
+            QtWidgets.QMessageBox.warning(self, "Güncelleme Hatası", f"Güncelleme başarısız:\n{error}")
 
     # ------------------------------------------------------------------
     # Adaptive window sizing
@@ -469,6 +560,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._central_layout = QtWidgets.QVBoxLayout(self._central_container)
         self._central_layout.setContentsMargins(0,0,0,0)
         self._central_layout.setSpacing(0)
+        self._central_layout.addWidget(self._update_bar)
         self._central_layout.addWidget(self.tab_widget)
         self._central_layout.addWidget(self._media_status_bar)
         
