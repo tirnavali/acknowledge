@@ -82,7 +82,7 @@ class MediaService(BaseService):
             
             items = []
             for filename in os.listdir(abs_folder_path):
-                if filename.lower().endswith((".jpg", ".png", ".jpeg")):
+                if filename.lower().endswith((".jpg", ".png", ".jpeg", ".doc", ".docx")):
                     img_path = os.path.join(abs_folder_path, filename)
                     abs_path = path_util.normalize_path(img_path)
                     db_record = db_map.get(abs_path)

@@ -15,6 +15,7 @@ class GalleryItem(QtGui.QStandardItem):
         self.in_db = in_db
         self.exif_data = {}
         self.iptc_data = {}
+        self._text_content = ''
         self.is_loaded = False # Flag for background worker
         
         self.setTextAlignment(QtCore.Qt.AlignCenter)
@@ -24,6 +25,9 @@ class GalleryItem(QtGui.QStandardItem):
         
         # Store event_id so proxy model can filter by event during search
         self.event_id = str(db_metadata.get('event_id', '')) if db_metadata else None
+
+        # Store media_type for format-specific behaviour (e.g. documents)
+        self.media_type = db_metadata.get('media_type', 'photo') if db_metadata else 'photo'
 
         # Store DB search rank (set by FTS query; 0 for non-search items)
         self.search_rank = float(db_metadata.get('rank') or 0) if db_metadata else 0.0
@@ -68,6 +72,9 @@ class GalleryItem(QtGui.QStandardItem):
         if pnames:
             self.iptc_data['People'] = pnames
 
+        # Document text content for in-memory search
+        self._text_content = db_metadata.get('text_content') or ''
+
         # AI-generated captions and tags
         for db_key, display_name in (
             ('caption_tr', 'AI Açıklama (TR)'),
@@ -81,6 +88,9 @@ class GalleryItem(QtGui.QStandardItem):
 
     def load_from_file(self):
         """Heavy I/O: Read EXIF/IPTC from file. Called from background thread."""
+        if self.media_type == 'document':
+            self.is_loaded = True
+            return
         if not self.exif_data:
             self.__read_exif()
         if not self.iptc_data:
@@ -192,19 +202,25 @@ class GalleryItemModel(QtGui.QStandardItemModel):
         pixmap = None
         if os.path.exists(thumb_path):
             pixmap = QtGui.QPixmap(thumb_path)
-            
+
         if not pixmap or pixmap.isNull():
-            # Generate thumbnail using Pillow for high performance avoiding full uncompressed loading
-            try:
+            if getattr(item, 'media_type', 'photo') == 'document':
+                from src.utils.document_util import generate_document_thumbnail
                 os.makedirs(thumb_dir, exist_ok=True)
-                with Image.open(item.img_path) as img:
-                    if img.mode != "RGB":
-                        img = img.convert("RGB")
-                    img.thumbnail((thumb_size, thumb_size))
-                    img.save(thumb_path, "JPEG", quality=85)
+                generate_document_thumbnail(item.img_path, thumb_path)
                 pixmap = QtGui.QPixmap(thumb_path)
-            except Exception:
-                pass
+            else:
+                # Generate thumbnail using Pillow for high performance avoiding full uncompressed loading
+                try:
+                    os.makedirs(thumb_dir, exist_ok=True)
+                    with Image.open(item.img_path) as img:
+                        if img.mode != "RGB":
+                            img = img.convert("RGB")
+                        img.thumbnail((thumb_size, thumb_size))
+                        img.save(thumb_path, "JPEG", quality=85)
+                    pixmap = QtGui.QPixmap(thumb_path)
+                except Exception:
+                    pass
                 
         if not pixmap or pixmap.isNull():
             pixmap = QtGui.QPixmap(150, 150)
@@ -339,6 +355,7 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         keywords = search_text.split()
         iptc, exif = item.iptc_data, item.exif_data
         
+        text_content = getattr(item, '_text_content', '') or ''
         text_blocks = [
             (iptc.get('People', ''), 10), (item.text(), 8),
             (os.path.basename(item.img_path), 8),
@@ -348,6 +365,7 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
             (iptc.get('AI Caption (EN)', ''), 4),
             (iptc.get('AI Etiketler (TR)', ''), 3),
             (iptc.get('AI Tags (EN)', ''), 3),
+            (text_content, 2),
             (" ".join(str(v) for v in iptc.values()), 1),
             (" ".join(str(v) for v in exif.values()), 0.5)
         ]

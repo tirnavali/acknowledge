@@ -29,7 +29,7 @@ class ApplicationService:
         self.person_note_repo = PersonNoteRepository()
 
         # Create services
-        self.event_service = EventService(self.event_repo)
+        self.event_service = EventService(self.event_repo, self.media_repo)
         self.media_service = MediaService(self.media_repo, self.event_repo)
         self.face_service = FaceService(self.face_repo, self.person_repo)
         self.person_service = PersonService(self.person_repo, self.person_note_repo)

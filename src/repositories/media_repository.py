@@ -242,8 +242,12 @@ class MediaRepository:
         ranked 2.0 and floats to the top — giving "exact phrase" prioritisation
         without restricting recall.
         """
-        clean = sanitize_str(query)
-        tsq = _build_prefix_tsquery(clean)
+        raw_clean = sanitize_str(query)
+        # For ILIKE exact boost, we strip quotes so that "mavi kravat" matches 
+        # the phrase 'mavi kravat' in the text.
+        boost_query = raw_clean.replace('"', '').replace("'", "").strip()
+        tsq = _build_prefix_tsquery(raw_clean)
+
         with get_db() as db:
             if not tsq:
                 # Only punctuation/special chars remain — ILIKE on filename only.
@@ -261,7 +265,7 @@ class MediaRepository:
                     ) pn ON m.id = pn.media_id
                     WHERE m.file_path ILIKE '%' || :raw || '%'
                     ORDER BY m.file_path
-                """), {"raw": clean})
+                """), {"raw": boost_query})
             else:
                 result = db.execute(text("""
                     WITH person_names AS (
@@ -298,7 +302,8 @@ class MediaRepository:
                                 COALESCE(m.tags_en, '')                     || ' ' ||
                                 COALESCE(pn.names, '')                      || ' ' ||
                                 COALESCE(e.name, '')                        || ' ' ||
-                                COALESCE(m.file_path, '')
+                                COALESCE(m.file_path, '')                   || ' ' ||
+                                COALESCE(m.text_content, '')
                             ) AS concat_text,
                             to_tsvector('simple',
                                 COALESCE(m.title, '')                       || ' ' ||
@@ -323,7 +328,8 @@ class MediaRepository:
                                 COALESCE(m.tags_en, '')                     || ' ' ||
                                 COALESCE(pn.names, '')                      || ' ' ||
                                 COALESCE(e.name, '')                        || ' ' ||
-                                COALESCE(m.file_path, '')
+                                COALESCE(m.file_path, '')                   || ' ' ||
+                                COALESCE(m.text_content, '')
                             ) AS doc
                         FROM medias m
                         JOIN events e ON m.event_id = e.id
@@ -336,9 +342,9 @@ class MediaRepository:
                         END AS rank
                     FROM docs
                     WHERE doc @@ to_tsquery('simple', :tsq)
-                       OR concat_text ILIKE '%' || :raw || '%'
+                       OR (LENGTH(:raw) > 0 AND concat_text ILIKE '%' || :raw || '%')
                     ORDER BY rank DESC
-                """), {"tsq": tsq, "raw": clean})
+                """), {"tsq": tsq, "raw": boost_query})
             return [dict(row._mapping) for row in result.fetchall()]
 
     def save_star_rating(self, media_id: UUID, rating: int) -> None:
@@ -350,6 +356,44 @@ class MediaRepository:
                 {"r": rating, "id": str(media_id)},
             )
             db.commit()
+
+    def save_document_media(
+        self,
+        event_id: UUID,
+        file_path: str,
+        title: str | None = None,
+        text_content: str | None = None,
+        technical_metadata: dict | None = None,
+    ) -> UUID:
+        """Insert or update a document media record including text content."""
+        import uuid as _uuid
+        import json
+        clean_path = _abs(sanitize_str(file_path))
+        new_id = _uuid.uuid4()
+        tech_meta_json = json.dumps(technical_metadata) if technical_metadata else None
+        with get_db() as db:
+            result = db.execute(text("""
+                INSERT INTO medias (id, event_id, file_path, media_type, title, text_content, technical_metadata)
+                VALUES (:id, :event_id, :file_path, 'document', :title, :text_content, :technical_metadata::jsonb)
+                ON CONFLICT (file_path) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    text_content = EXCLUDED.text_content,
+                    technical_metadata = EXCLUDED.technical_metadata
+                RETURNING id
+            """), {
+                "id": str(new_id),
+                "event_id": str(event_id),
+                "file_path": clean_path,
+                "title": sanitize_str(title) if title else None,
+                "text_content": sanitize_str(text_content) if text_content else None,
+                "technical_metadata": tech_meta_json,
+            })
+            row = result.fetchone()
+            db.commit()
+            if row:
+                val = row[0] if hasattr(row, "__getitem__") else row.id
+                return val if isinstance(val, UUID) else UUID(str(val))
+            raise RuntimeError(f"Failed to save document media: {clean_path}")
 
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""

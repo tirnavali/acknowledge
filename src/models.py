@@ -15,6 +15,7 @@ class MediaType(str, enum.Enum):
     VIDEO = "video"
     PDF = "pdf"
     TRANSCRIPT = "transcript"
+    DOCUMENT = "document"
 
 # Junction table for N-to-N: Media <-> Person
 media_persons = Table(
@@ -112,6 +113,9 @@ class Pdf(Media):
 
 class Transcript(Media):
     __mapper_args__ = {'polymorphic_identity': 'transcript'}
+
+class Document(Media):
+    __mapper_args__ = {'polymorphic_identity': 'document'}
 
 
 class Person(Base):

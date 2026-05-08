@@ -24,6 +24,7 @@ from src.services.application_service import ApplicationService
 from caption_tab_widget import CaptionTabWidget
 from caption_stats_widget import CaptionStatsWidget
 from toggle_switch import ToggleSwitch
+from faq_widget import FAQWidget
 import os
 
 from src.utils.log_util import setup_logging
@@ -403,10 +404,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gallery_stack.setCurrentIndex(0)
 
     def switch_to_single_view(self):
+        index = self.event_gallery_list_widget.currentIndex()
+        if index.isValid():
+            item = self._get_item_from_index(index)
+            if item and getattr(item, 'media_type', 'photo') == 'document':
+                from PySide6.QtGui import QDesktopServices
+                from PySide6.QtCore import QUrl
+                QDesktopServices.openUrl(QUrl.fromLocalFile(item.img_path))
+                return
         self.gallery_stack.setCurrentIndex(1)
         self.single_view_widget.setFocus()
-        # If an item is selected, update single view
-        index = self.event_gallery_list_widget.currentIndex()
         if index.isValid():
             self.on_gallery_item_clicked(index)
 
@@ -484,6 +491,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._caption_stats = CaptionStatsWidget(parent=self)
         self.caption_tab.stats_updated.connect(self._caption_stats.add_result)
         self.tab_widget.addTab(self._caption_stats, "Altyazı Ekranı")
+
+        self.faq_tab = FAQWidget(parent=self)
+        self.tab_widget.addTab(self.faq_tab, "Yardım")
 
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.show()
@@ -1010,13 +1020,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"Image selected: {os.path.basename(item.img_path)} face_path={_face_path}",
                 extra={"event": "IMAGE_SELECT", "media_id": str(media_id) if media_id else None},
             )
-            self.single_view_widget.set_context(
-                self.current_event_id, media_id,
-                face_detected_at=face_detected_at,
-                is_batch_pending=is_batch_pending,
-            )
-            # Update single view image
-            self.single_view_widget.set_image(item.img_path)
+            if getattr(item, 'media_type', 'photo') != 'document':
+                self.single_view_widget.set_context(
+                    self.current_event_id, media_id,
+                    face_detected_at=face_detected_at,
+                    is_batch_pending=is_batch_pending,
+                )
+                self.single_view_widget.set_image(item.img_path)
             
             # Clear all fields first
             for w in [self.media_headline_input, self.media_object_name_input,

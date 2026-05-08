@@ -9,10 +9,11 @@ import shutil
 
 class EventService(BaseService):
     """Service for managing events."""
-    
-    def __init__(self, event_repository: EventRepository):
+
+    def __init__(self, event_repository: EventRepository, media_repository=None):
         super().__init__()
         self.event_repository = event_repository
+        self.media_repository = media_repository
         self.logger = logging.getLogger(self.__class__.__name__)
     
     def get_all(self):
@@ -87,36 +88,54 @@ class EventService(BaseService):
 
         progress_callback(current: int, total: int) is called after each file is copied.
         """
+        from src.utils.document_util import DOCUMENT_EXTS, extract_docx_text, extract_doc_metadata, generate_document_thumbnail
+
         safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in name).strip()
         vault_folder = os.path.join(vault_base_path, safe_name)
         os.makedirs(vault_folder, exist_ok=True)
 
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
-        image_files = [
+        supported_exts = image_exts | DOCUMENT_EXTS
+        media_files = [
             f for f in os.listdir(source_folder)
-            if os.path.splitext(f)[1].lower() in image_exts
+            if os.path.splitext(f)[1].lower() in supported_exts
         ]
-        total = len(image_files)
-        for i, filename in enumerate(image_files, 1):
+        total = len(media_files)
+        doc_metadata: dict[str, dict] = {}  # filename -> {text_content, technical_metadata, title}
+
+        for i, filename in enumerate(media_files, 1):
             src = os.path.join(source_folder, filename)
             dst = os.path.join(vault_folder, filename)
+            ext = os.path.splitext(filename)[1].lower()
             if not os.path.exists(dst):
                 shutil.copy2(src, dst)
-            
-            # Pre-generate thumbnail to make gallery load instantaneous
-            try:
-                thumb_dir = os.path.join(vault_folder, ".thumbnails")
-                os.makedirs(thumb_dir, exist_ok=True)
-                thumb_path = os.path.join(thumb_dir, filename + ".thumb.jpg")
+
+            thumb_dir = os.path.join(vault_folder, ".thumbnails")
+            os.makedirs(thumb_dir, exist_ok=True)
+            thumb_path = os.path.join(thumb_dir, filename + ".thumb.jpg")
+
+            if ext in image_exts:
+                # Pre-generate thumbnail to make gallery load instantaneous
+                try:
+                    if not os.path.exists(thumb_path):
+                        from PIL import Image
+                        with Image.open(dst) as img:
+                            if img.mode != "RGB":
+                                img = img.convert("RGB")
+                            img.thumbnail((300, 300))
+                            img.save(thumb_path, "JPEG", quality=85)
+                except Exception as e:
+                    self.logger.warning(f"Could not pre-generate thumbnail for {filename}: {e}")
+            elif ext in DOCUMENT_EXTS:
                 if not os.path.exists(thumb_path):
-                    from PIL import Image
-                    with Image.open(dst) as img:
-                        if img.mode != "RGB":
-                            img = img.convert("RGB")
-                        img.thumbnail((300, 300))
-                        img.save(thumb_path, "JPEG", quality=85)
-            except Exception as e:
-                self.logger.warning(f"Could not pre-generate thumbnail for {filename}: {e}")
+                    generate_document_thumbnail(dst, thumb_path)
+                text = extract_docx_text(dst)
+                meta = extract_doc_metadata(dst)
+                doc_metadata[filename] = {
+                    "text_content": text,
+                    "technical_metadata": meta or None,
+                    "title": os.path.splitext(filename)[0],
+                }
 
             if progress_callback is not None:
                 progress_callback(i, total)
@@ -128,5 +147,20 @@ class EventService(BaseService):
         )
         event.mark_as_imported(vault_folder)
         self.event_repository.save(event)
+
+        if doc_metadata and self.media_repository:
+            for filename, doc_meta in doc_metadata.items():
+                vault_file_path = os.path.join(vault_folder, filename)
+                try:
+                    self.media_repository.save_document_media(
+                        event_id=event.id,
+                        file_path=vault_file_path,
+                        title=doc_meta["title"],
+                        text_content=doc_meta["text_content"],
+                        technical_metadata=doc_meta["technical_metadata"],
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Could not persist document record for {filename}: {e}")
+
         self.logger.info(f"Created event '{name}', imported {total} files to {vault_folder}")
         return event
