@@ -51,14 +51,14 @@ pip install -r requirements.txt
 
 ### Step 2: Environment Configuration
 
-Copy `.env.example` to `.env` (or create `.env`) and confirm it matches the docker-compose defaults:
+Copy `.env.example` to `.env` and fill in your values:
 ```
-DB_USER=tirnavali
-DB_PASSWORD=tbmm1920
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=tirnavali_acknowledge_db
-MEDIA_VAULT_PATH=image_vault
+DB_NAME=your_db_name
+MEDIA_VAULT_PATH=media_vault
 ```
 
 ### Step 3 (optional): Download the AI captioning model
