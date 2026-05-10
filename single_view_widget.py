@@ -733,18 +733,22 @@ class SingleViewWidget(QtWidgets.QWidget):
                 self._source_pixmap = pix
                 self._zoom_factor = 1.0  # Reset zoom to fit
                 self.image_label.setPixmap(pix)
-                
-                # Clear existing face overlays and show only this one
+                # Update overlay with the new source pixmap
+                self.face_overlay.set_source_pixmap(pix)
                 self.face_overlay.clear_faces()
+                
+                # Position and show overlay correctly
+                img_rect = self._get_image_display_rect()
                 self.face_overlay.add_face(
                     face_data["bbox"], 
                     face_data.get("person_name") or "Bilinmiyor",
-                    face_data.get("face_id")
+                    face_data.get("face_id"),
+                    img_rect=img_rect
                 )
-                self.face_overlay.setVisible(True)
-                
-                # Trigger resize logic to align overlay
-                self.update_overlay()
+                self.face_overlay.setGeometry(self._image_container.rect())
+                self.face_overlay.update()
+                self.face_overlay.show()
+                self.face_overlay.raise_()
         except Exception as e:
             logger.error(f"_on_face_thumb_clicked failed: {e}")
 

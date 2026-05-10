@@ -373,8 +373,10 @@ class FaceOverlayWidget(QtWidgets.QWidget):
 
         self.update()
 
-    def add_face(self, bbox: dict, name: str, face_id: str | None = None) -> None:
+    def add_face(self, bbox: dict, name: str, face_id: str | None = None, img_rect: QtCore.QRect | None = None) -> None:
         """Add a single face to the current overlay (used for video previews)."""
+        if img_rect:
+            self._img_rect = img_rect
         self._faces.append({
             "bbox": bbox,
             "person_name": name,
