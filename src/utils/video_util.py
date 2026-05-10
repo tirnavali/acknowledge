@@ -59,10 +59,10 @@ def generate_video_thumbnail(video_path: str, thumb_path: str) -> bool:
             if video_stream is None:
                 return False
             
-            # Check for rotation
+            # Check for rotation in multiple metadata keys
             rotation = 0
             if video_stream.metadata:
-                rotation = int(video_stream.metadata.get("rotate", 0))
+                rotation = int(video_stream.metadata.get("rotate") or video_stream.metadata.get("rotation") or 0)
 
             if container.duration and container.duration > 0:
                 seek_ts = int(container.duration * 0.1)
@@ -95,7 +95,7 @@ def extract_key_frames(video_path: str, interval_seconds: float = 2.0) -> list[t
             # Check for rotation metadata
             rotation = 0
             if video_stream.metadata:
-                rotation = int(video_stream.metadata.get("rotate", 0))
+                rotation = int(video_stream.metadata.get("rotate") or video_stream.metadata.get("rotation") or 0)
             
             duration = container.duration
             if not duration or duration <= 0:
@@ -129,6 +129,7 @@ def extract_key_frames(video_path: str, interval_seconds: float = 2.0) -> list[t
         logger.warning(f"Could not extract key frames from {video_path}: {e}")
     return frames
 
+
 def get_video_frame(video_path: str, t_ms: float) -> "PIL.Image" | None:
     """Extract a single frame from a video at a specific timestamp in milliseconds, respecting rotation."""
     try:
@@ -141,7 +142,7 @@ def get_video_frame(video_path: str, t_ms: float) -> "PIL.Image" | None:
             # Check for rotation metadata
             rotation = 0
             if video_stream.metadata:
-                rotation = int(video_stream.metadata.get("rotate", 0))
+                rotation = int(video_stream.metadata.get("rotate") or video_stream.metadata.get("rotation") or 0)
                 
             # Convert ms to microseconds for PyAV seek
             seek_ts = int(t_ms * 1000)
@@ -155,3 +156,4 @@ def get_video_frame(video_path: str, t_ms: float) -> "PIL.Image" | None:
     except Exception as e:
         logger.warning(f"get_video_frame failed for {video_path} at {t_ms}ms: {e}")
     return None
+
