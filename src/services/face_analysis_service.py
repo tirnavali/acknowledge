@@ -57,6 +57,8 @@ class FaceResult:
     embedding: np.ndarray  # shape (512,)
     # Confidence score
     score: float
+    # For videos: timestamp in milliseconds
+    timestamp_ms: float | None = None
 
 
 class FaceAnalysisService:
@@ -128,14 +130,17 @@ class FaceAnalysisService:
             if self._app is None:
                 return []
 
-            # Read file into memory as bytes before decoding to avoid file locks on Windows
+            # Use Pillow for robust EXIF orientation handling
             try:
-                import numpy as np
-                with open(img_path, "rb") as f:
-                    data = f.read()
-                img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                from PIL import Image, ImageOps
+                with Image.open(img_path) as pil_img:
+                    pil_img = ImageOps.exif_transpose(pil_img)
+                    if pil_img.mode != "RGB":
+                        pil_img = pil_img.convert("RGB")
+                    # Convert RGB to BGR for InsightFace/OpenCV
+                    img = np.array(pil_img)[:, :, ::-1].copy()
             except Exception as e:
-                logger.error(f"Could not read/decode image: {img_path}: {e}")
+                logger.error(f"Could not read/decode image via Pillow: {img_path}: {e}")
                 img = None
 
             if img is None:

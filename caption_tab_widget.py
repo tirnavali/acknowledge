@@ -317,7 +317,23 @@ class CaptionTabWidget(QtWidgets.QWidget):
             self._btn_analyse.setEnabled(True)
 
     def _load_preview(self, path: str):
-        pix = QtGui.QPixmap(path)
+        try:
+            from PIL import Image, ImageOps
+            with Image.open(path) as pil_img:
+                pil_img = ImageOps.exif_transpose(pil_img)
+                if pil_img.mode != "RGB":
+                    pil_img = pil_img.convert("RGB")
+                
+                # Convert to QPixmap
+                width, height = pil_img.size
+                bytes_per_line = 3 * width
+                data = pil_img.tobytes("raw", "RGB")
+                qimg = QtGui.QImage(data, width, height, bytes_per_line, QtGui.QImage.Format_RGB888)
+                pix = QtGui.QPixmap.fromImage(qimg.copy())
+        except Exception as e:
+            logger.warning(f"Could not load preview for {path}: {e}")
+            pix = QtGui.QPixmap()
+
         if not pix.isNull():
             pix = pix.scaled(
                 self._preview.size(),

@@ -177,12 +177,14 @@ class PersonRepository:
                      JOIN medias m2 ON fd2.media_id = m2.id
                      WHERE fd2.person_id = p.id
                        AND m2.event_id = :event_id
+                     ORDER BY m2.media_type ASC, fd2.id ASC
                      LIMIT 1)                    AS sample_bbox,
                     (SELECT m3.file_path
                      FROM face_detections fd3
                      JOIN medias m3 ON fd3.media_id = m3.id
                      WHERE fd3.person_id = p.id
                        AND m3.event_id = :event_id
+                     ORDER BY m3.media_type ASC, fd3.id ASC
                      LIMIT 1)                    AS sample_file_path
                 FROM persons p
                 JOIN media_persons mp ON p.id = mp.person_id

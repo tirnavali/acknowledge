@@ -2,7 +2,7 @@
 FaceDetection model — stores per-face bounding box and embedding for a media item.
 """
 import uuid
-from sqlalchemy import Column, String, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Float
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -23,6 +23,9 @@ class FaceDetection(Base):
 
     # 512-dim ArcFace embedding from insightface
     embedding = Column(Vector(512), nullable=True)
+
+    # For videos: millisecond timestamp where the face was detected
+    timestamp_ms = Column(Float, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

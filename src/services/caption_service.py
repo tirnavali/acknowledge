@@ -212,9 +212,10 @@ class CaptionService:
         Eliminates the temp-file round-trip (disk write + disk read + JPEG decode)
         that previously ran before every inference call.
         """
-        from PIL import Image as _Image
+        from PIL import Image as _Image, ImageOps as _ImageOps
 
         im = _Image.open(img_path)
+        im = _ImageOps.exif_transpose(im)
         im.load()
         w, h = im.size
         if im.mode not in ("RGB", "RGBA"):

@@ -1,4 +1,5 @@
 """Dialog showing all persons detected in an event with face thumbnails."""
+from __future__ import annotations
 import json
 import logging
 
@@ -7,31 +8,62 @@ from PySide6 import QtCore, QtGui, QtWidgets
 logger = logging.getLogger(__name__)
 
 
-def _crop_face(file_path: str, bbox) -> QtGui.QPixmap | None:
-    """Load image and crop the face region using normalised bbox dict."""
+def _crop_face(file_path: str, bbox, timestamp_ms: float | None = None) -> QtGui.QPixmap | None:
+    """Load image/video and crop the face region. For videos, seeks to timestamp_ms if provided."""
     try:
         from src.utils.path_util import from_db_path
+        from PIL import Image, ImageOps
         abs_path = from_db_path(file_path)
-        pm = QtGui.QPixmap(abs_path)
-        if pm.isNull():
-            return None
+        
+        # If it's a video, use PyAV helper
+        from src.utils.video_util import VIDEO_EXTS, get_video_frame
+        ext = "." + abs_path.lower().split('.')[-1]
+        is_video = ext in VIDEO_EXTS
+        
+        if is_video:
+            pil_img = get_video_frame(abs_path, timestamp_ms or 0)
+            if not pil_img:
+                return None
+        else:
+            with Image.open(abs_path) as img:
+                img = ImageOps.exif_transpose(img)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                pil_img = img.copy() # copy to avoid closing issue
+    except Exception as e:
+        logger.warning(f"Could not load image/frame for cropping {file_path}: {e}")
+        return None
+
+    try:
+        w, h = pil_img.size
         if isinstance(bbox, str):
             bbox = json.loads(bbox)
         if not isinstance(bbox, dict):
             return None
-        w, h = pm.width(), pm.height()
-        pad = 0.05
+        
+        # Increased padding (0.15) to show more context around the face
+        pad = 0.15
         x1 = max(0.0, bbox["x1"] - pad)
         y1 = max(0.0, bbox["y1"] - pad)
         x2 = min(1.0, bbox["x2"] + pad)
         y2 = min(1.0, bbox["y2"] + pad)
-        crop_rect = QtCore.QRect(
-            int(x1 * w), int(y1 * h),
-            int((x2 - x1) * w), int((y2 - y1) * h),
-        )
-        return pm.copy(crop_rect)
+        
+        left, top, right, bottom = int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h)
+        # Ensure we have a valid crop area
+        if right <= left or bottom <= top:
+            return None
+            
+        face_img = pil_img.crop((left, top, right, bottom))
+        
+        # Convert to QPixmap
+        face_img.thumbnail((120, 120), Image.LANCZOS)
+        width, height = face_img.size
+        bytes_per_line = 3 * width
+        data = face_img.tobytes("raw", "RGB")
+        qimg = QtGui.QImage(data, width, height, bytes_per_line, QtGui.QImage.Format_RGB888)
+        return QtGui.QPixmap.fromImage(qimg.copy())
     except Exception as e:
-        logger.warning(f"Could not crop face from {file_path}: {e}")
+        logger.debug(f"Crop failed for {file_path}: {e}")
         return None
 
 

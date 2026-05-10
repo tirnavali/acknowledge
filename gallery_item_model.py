@@ -1,6 +1,6 @@
 from PySide6 import QtGui, QtCore
 from typing import List
-from PIL import Image, ExifTags
+from PIL import Image, ExifTags, ImageOps
 import logging
 import os
 import time
@@ -250,6 +250,8 @@ class GalleryItemModel(QtGui.QStandardItemModel):
                 try:
                     os.makedirs(thumb_dir, exist_ok=True)
                     with Image.open(item.img_path) as img:
+                        # Auto-rotate based on EXIF orientation
+                        img = ImageOps.exif_transpose(img)
                         if img.mode != "RGB":
                             img = img.convert("RGB")
                         img.thumbnail((thumb_size, thumb_size), Image.LANCZOS)

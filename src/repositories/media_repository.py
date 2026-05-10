@@ -452,16 +452,10 @@ class MediaRepository:
             return {os.path.normpath(row.file_path) for row in result.fetchall()}
 
     def delete(self, media_id: UUID, file_path: str | None = None) -> None:
-        """Delete a media record (cascade) and remove vault file + thumbnail from disk."""
+        """Delete a media record and remove vault file + thumbnail from disk.
+        Database-level ON DELETE CASCADE handles related face_detections, media_persons, etc.
+        """
         with get_db() as db:
-            db.execute(
-                text("DELETE FROM face_detections WHERE media_id = :id"),
-                {"id": str(media_id)},
-            )
-            db.execute(
-                text("DELETE FROM media_persons WHERE media_id = :id"),
-                {"id": str(media_id)},
-            )
             db.execute(
                 text("DELETE FROM medias WHERE id = :id"),
                 {"id": str(media_id)},
@@ -478,4 +472,63 @@ class MediaRepository:
             )
             if os.path.exists(thumb):
                 os.remove(thumb)
+
+    def apply_schema_migrations(self) -> None:
+        """Apply necessary schema updates (adding columns, enforcing constraints)."""
+        iptc_columns = [
+            ("iptc_headline", "VARCHAR(500)"),
+            ("iptc_caption", "TEXT"),
+            ("iptc_keywords", "TEXT"),
+            ("iptc_object_name", "VARCHAR(500)"),
+            ("iptc_city", "VARCHAR(250)"),
+            ("iptc_state", "VARCHAR(250)"),
+            ("iptc_country", "VARCHAR(250)"),
+            ("iptc_credit", "VARCHAR(500)"),
+            ("iptc_source", "VARCHAR(500)"),
+            ("iptc_copyright", "VARCHAR(500)"),
+            ("iptc_writer", "VARCHAR(250)"),
+            ("iptc_byline", "VARCHAR(250)"),
+            ("iptc_byline_title", "VARCHAR(250)"),
+            ("iptc_date_created", "VARCHAR(50)"),
+            ("iptc_category", "VARCHAR(100)"),
+            ("iptc_supplemental_categories", "VARCHAR(500)"),
+            ("title", "VARCHAR(500)"),
+            ("tags_en", "TEXT"),
+            ("tags_tr", "TEXT"),
+        ]
+        
+        with get_db() as db:
+            # 1. Add missing IPTC columns
+            for col_name, col_type in iptc_columns:
+                try:
+                    db.execute(text(f"ALTER TABLE medias ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                except Exception:
+                    pass
+            
+            # 2. Add timestamp_ms to face_detections
+            try:
+                db.execute(text("ALTER TABLE face_detections ADD COLUMN IF NOT EXISTS timestamp_ms FLOAT"))
+            except Exception:
+                pass
+                
+            # 3. Enforce ON DELETE CASCADE for all tables that reference medias.id
+            constraints = [
+                ("face_detections", "face_detections_media_id_fkey"),
+                ("media_persons", "media_persons_media_id_fkey"),
+                ("person_notes", "person_notes_media_id_fkey"),
+            ]
+            
+            for table, conname in constraints:
+                db.execute(text(f"""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '{conname}') THEN
+                            EXECUTE 'ALTER TABLE {table} DROP CONSTRAINT {conname}';
+                        END IF;
+                        EXECUTE 'ALTER TABLE {table} ADD CONSTRAINT {conname} 
+                            FOREIGN KEY (media_id) REFERENCES medias(id) ON DELETE CASCADE';
+                    END $$;
+                """))
+            
+            db.commit()
 

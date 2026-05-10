@@ -33,14 +33,39 @@ class ImageLoaderWorker(QtCore.QThread):
         self._img_path = img_path
 
     def run(self):
-        # Read file into memory first to avoid file-mapping locks on Windows
         try:
-            with open(self._img_path, "rb") as f:
-                data = f.read()
-            image = QtGui.QImage.fromData(data)
-        except Exception as e:
-            logger.error(f"Failed to load image from buffer: {e}")
-            image = QtGui.QImage()
+            from PIL import Image, ImageOps
+            import numpy as np
+            with Image.open(self._img_path) as pil_img:
+                pil_img = ImageOps.exif_transpose(pil_img)
+                if pil_img.mode != "RGB":
+                    pil_img = pil_img.convert("RGB")
+            
+            # Convert PIL to QImage
+            width, height = pil_img.size
+            bytes_per_line = 3 * width
+            data = pil_img.tobytes("raw", "RGB")
+            image = QtGui.QImage(data, width, height, bytes_per_line, QtGui.QImage.Format_RGB888)
+            image = image.copy()
+        except Exception:
+            # Fallback for videos: use OpenCV to extract the first frame
+            try:
+                import cv2
+                cap = cv2.VideoCapture(self._img_path)
+                ret, frame = cap.read()
+                cap.release()
+                if not ret:
+                    image = QtGui.QImage()
+                else:
+                    # Convert BGR to RGB
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = frame_rgb.shape
+                    bytes_per_line = ch * w
+                    image = QtGui.QImage(frame_rgb.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888)
+                    image = image.copy()
+            except Exception as e:
+                logger.error(f"Failed to load image/video via Pillow/CV2: {e}")
+                image = QtGui.QImage()
         self.loaded.emit(self._img_path, image)
 
 
@@ -66,6 +91,66 @@ class FaceDetectionWorker(QtCore.QThread):
 # ---------------------------------------------------------------------------
 # Main widget
 # ---------------------------------------------------------------------------
+
+class _VideoFaceThumb(QtWidgets.QFrame):
+    """Small thumbnail for a face detected in a video, with name and timestamp."""
+    def __init__(self, face: dict, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(90, 110)
+        self.setStyleSheet("""
+            QFrame {
+                background: #2a2a2e;
+                border-radius: 6px;
+                border: 1px solid #3a3a3e;
+            }
+            QFrame:hover { background: #35353a; border-color: #50C8FF; }
+        """)
+        
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+        
+        # Crop logic (similar to EventPersonsDialog but faster/smaller)
+        self.thumb_label = QtWidgets.QLabel()
+        self.thumb_label.setFixedSize(82, 70)
+        self.thumb_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.thumb_label.setStyleSheet("border-radius: 3px; background: #1a1a1a;")
+        layout.addWidget(self.thumb_label)
+        
+        name = face.get("person_name") or "Bilinmiyor"
+        name_lbl = QtWidgets.QLabel(name)
+        name_lbl.setAlignment(QtCore.Qt.AlignCenter)
+        name_lbl.setStyleSheet("color: #ddd; font-size: 10px; font-weight: bold;")
+        layout.addWidget(name_lbl)
+        
+        tms = face.get("timestamp_ms") or 0
+        total_seconds = tms / 1000.0
+        minutes = int(total_seconds // 60)
+        seconds = total_seconds % 60
+        time_str = f"{minutes:02d}:{seconds:05.2f}"
+        time_lbl = QtWidgets.QLabel(time_str)
+        time_lbl.setAlignment(QtCore.Qt.AlignCenter)
+        time_lbl.setStyleSheet("color: #888; font-size: 9px;")
+        layout.addWidget(time_lbl)
+        
+        self.face_data = face
+        self.setCursor(QtCore.Qt.PointingHandCursor)
+
+    clicked = QtCore.Signal(dict)
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit(self.face_data)
+        super().mousePressEvent(event)
+
+    def set_pixmap(self, pix):
+        if pix and not pix.isNull():
+            self.thumb_label.setPixmap(pix.scaled(
+                82, 70, QtCore.Qt.KeepAspectRatioByExpanding, QtCore.Qt.SmoothTransformation
+            ).copy(QtCore.QRect(0, 0, 82, 70)))
+        else:
+            self.thumb_label.setText("👤")
+            self.thumb_label.setStyleSheet("color: #444; font-size: 24px;")
 
 class SingleViewWidget(QtWidgets.QWidget):
     """
@@ -202,11 +287,32 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.scroll_area.setWidget(self._image_container)
         layout.addWidget(self.scroll_area)
 
-        # Status bar for detection feedback
         self._status_label = QtWidgets.QLabel("")
         self._status_label.setAlignment(QtCore.Qt.AlignCenter)
         self._status_label.setStyleSheet("color: #888; font-size: 11px;")
         layout.addWidget(self._status_label)
+
+        # NEW: Face list area (hidden by default, used for videos)
+        self.face_list_scroll = QtWidgets.QScrollArea()
+        self.face_list_scroll.setFixedHeight(130)
+        self.face_list_scroll.setWidgetResizable(True)
+        self.face_list_scroll.setVisible(False)
+        self.face_list_scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: #1e1e1e;
+                border: none;
+                border-top: 1px solid #333;
+            }
+        """)
+        
+        self.face_list_content = QtWidgets.QWidget()
+        self.face_list_content.setStyleSheet("background: transparent;")
+        self.face_list_layout = QtWidgets.QHBoxLayout(self.face_list_content)
+        self.face_list_layout.setContentsMargins(10, 5, 10, 10)
+        self.face_list_layout.setSpacing(12)
+        
+        self.face_list_scroll.setWidget(self.face_list_content)
+        layout.addWidget(self.face_list_scroll)
 
     # ------------------------------------------------------------------
     # Public API
@@ -260,6 +366,14 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.image_label.setText("⏳ Yükleniyor…")
         self._status_label.setText("")
 
+        from src.utils.video_util import VIDEO_EXTS
+        self._is_video = os.path.splitext(img_path)[1].lower() in VIDEO_EXTS
+        
+        # For videos, we don't show the interactive overlay boxes on top of a static frame
+        self.face_overlay.setVisible(not self._is_video)
+        self.face_list_scroll.setVisible(self._is_video)
+        self._clear_face_list()
+
         self._image_loader = ImageLoaderWorker(img_path, self)
         self._image_loader.loaded.connect(self._on_image_loaded)
         self._image_loader.start()
@@ -276,58 +390,65 @@ class SingleViewWidget(QtWidgets.QWidget):
         # Convert QImage → QPixmap on the UI thread (the only safe place)
         pixmap = QtGui.QPixmap.fromImage(image)
         self._source_pixmap = pixmap
-        self.face_overlay.set_source_pixmap(pixmap)
         self._scale_and_show(pixmap, smooth=True)
-        _load_ms = int((time.monotonic() - getattr(self, '_image_load_start', time.monotonic())) * 1000)
-        logger.info(
-            f"Image loaded in {_load_ms}ms: {os.path.basename(path)}",
-            extra={"event": "IMAGE_LOAD", "duration_ms": _load_ms, "media_id": str(self._current_media_id) if self._current_media_id else None},
-        )
+        
+        # If video, load and show faces at bottom
+        if self._is_video and self._current_media_id:
+            self._populate_face_list()
+        
+        # If it's a photo, trigger face detection overlay
+        if not self._is_video:
+            self.face_overlay.set_source_pixmap(pixmap)
+            _load_ms = int((time.monotonic() - getattr(self, '_image_load_start', time.monotonic())) * 1000)
+            logger.info(
+                f"Image loaded in {_load_ms}ms: {os.path.basename(path)}",
+                extra={"event": "IMAGE_LOAD", "duration_ms": _load_ms, "media_id": str(self._current_media_id) if self._current_media_id else None},
+            )
 
-        # Now trigger face detection logic
-        if self._face_service is None:
-            return  # face detection disabled
+            # Now trigger face detection logic
+            if self._face_service is None:
+                return  # face detection disabled
 
-        # DB-first: if background worker already processed this media, load from DB and skip re-detection
-        if self._current_media_id and self._face_detected_at and self._face_service:
-            try:
-                db_faces = self._face_service.get_faces_for_media(self._current_media_id)
-                if db_faces:
-                    self._auto_match_db_faces(db_faces)
-                    self._show_db_faces(db_faces)
-                    self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
-                    logger.info(
-                        f"Faces loaded from DB: {len(db_faces)} faces",
-                        extra={"event": "FACE_DB_HIT", "media_id": str(self._current_media_id)},
-                    )
-                else:
-                    self._status_label.setText("Yüz algılanamadı.")
-                return
-            except Exception as e:
-                logger.warning(f"Could not get faces from DB: {e}")
-
-        # Batch worker is still running for this image → wait, don't duplicate detection
-        if self._is_batch_pending and not self._face_detected_at:
-            self._status_label.setText("⏳ Yüz tanıma bekleniyor…")
-            logger.info("Face detection deferred: batch worker still running", extra={"event": "FACE_BATCH_WAIT"})
-            return
-
-        # Fallback: check for named detections (older records without face_detected_at)
-        if self._current_media_id and self._face_service:
-            try:
-                db_faces = self._face_service.get_faces_for_media(self._current_media_id)
-                has_named = any(f.get("person_name") for f in db_faces)
-                if db_faces and has_named:
-                    self._auto_match_db_faces(db_faces)
-                    self._show_db_faces(db_faces)
-                    self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
+            # DB-first: if background worker already processed this media, load from DB and skip re-detection
+            if self._current_media_id and self._face_detected_at and self._face_service:
+                try:
+                    db_faces = self._face_service.get_faces_for_media(self._current_media_id)
+                    if db_faces:
+                        self._auto_match_db_faces(db_faces)
+                        self._show_db_faces(db_faces)
+                        self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
+                        logger.info(
+                            f"Faces loaded from DB: {len(db_faces)} faces",
+                            extra={"event": "FACE_DB_HIT", "media_id": str(self._current_media_id)},
+                        )
+                    else:
+                        self._status_label.setText("Yüz algılanamadı.")
                     return
-            except Exception as e:
-                logger.warning(f"Could not get faces from DB: {e}")
+                except Exception as e:
+                    logger.warning(f"Could not get faces from DB: {e}")
 
-        # No DB data → run detector
-        self._status_label.setText("🔍 Yüzler algılanıyor…")
-        self._start_detection(path)
+            # Batch worker is still running for this image → wait, don't duplicate detection
+            if self._is_batch_pending and not self._face_detected_at:
+                self._status_label.setText("⏳ Yüz tanıma bekleniyor…")
+                logger.info("Face detection deferred: batch worker still running", extra={"event": "FACE_BATCH_WAIT"})
+                return
+
+            # Fallback: check for named detections (older records without face_detected_at)
+            if self._current_media_id and self._face_service:
+                try:
+                    db_faces = self._face_service.get_faces_for_media(self._current_media_id)
+                    has_named = any(f.get("person_name") for f in db_faces)
+                    if db_faces and has_named:
+                        self._auto_match_db_faces(db_faces)
+                        self._show_db_faces(db_faces)
+                        self._status_label.setText(f"🗃️ {len(db_faces)} yüz veritabanından yüklendi")
+                        return
+                except Exception as e:
+                    logger.warning(f"Could not get faces from DB: {e}")
+
+            # No DB data → run detector
+            self._status_label.setText("🔍 Yüzler algılanıyor…")
+            self._start_detection(path)
 
     def refresh_faces_from_db(self):
         """Re-fetch face detections from DB and update the overlay. Called after batch worker finishes."""
@@ -551,6 +672,81 @@ class SingleViewWidget(QtWidgets.QWidget):
     # ------------------------------------------------------------------
     # Name assignment
     # ------------------------------------------------------------------
+
+    def _clear_face_list(self):
+        while self.face_list_layout.count() > 0:
+            item = self.face_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.face_list_layout.addStretch()
+
+    def _populate_face_list(self):
+        """Fetch faces from DB and show as thumbnails at the bottom."""
+        self._clear_face_list()
+        if not self._current_media_id:
+            return
+
+        try:
+            from src.database import get_db
+            from src.repositories.face_repository import FaceRepository
+            repo = FaceRepository()
+            faces = repo.get_faces_for_media(self._current_media_id)
+            if not faces:
+                self._status_label.setText("Bu videoda henüz yüz tespiti yapılmadı.")
+                return
+
+            self._status_label.setText(f"📹 Videoda {len(faces)} yüz tespit edildi.")
+            
+            # Remove the stretch we added in _clear_face_list
+            self.face_list_layout.takeAt(self.face_list_layout.count()-1)
+
+            from event_persons_dialog import _crop_face
+            for f in faces:
+                thumb = _VideoFaceThumb(f)
+                thumb.clicked.connect(self._on_face_thumb_clicked)
+                self.face_list_layout.addWidget(thumb)
+                
+                crop = _crop_face(self.current_img_path, f["bbox"], f.get("timestamp_ms"))
+                thumb.set_pixmap(crop)
+            
+            self.face_list_layout.addStretch()
+        except Exception as e:
+            logger.error(f"Failed to populate video face list: {e}")
+
+    def _on_face_thumb_clicked(self, face_data: dict):
+        """When a video face thumbnail is clicked, show the full frame in the main view."""
+        if not self.current_img_path:
+            return
+            
+        try:
+            from src.utils.video_util import get_video_frame
+            t_ms = face_data.get("timestamp_ms") or 0
+            pil_img = get_video_frame(self.current_img_path, t_ms)
+            
+            if pil_img:
+                # Convert PIL to QImage
+                from PIL import ImageQt
+                qimg = ImageQt.ImageQt(pil_img)
+                pix = QtGui.QPixmap.fromImage(qimg)
+                
+                # Show in main label and update zoom state
+                self._source_pixmap = pix
+                self._zoom_factor = 1.0  # Reset zoom to fit
+                self.image_label.setPixmap(pix)
+                
+                # Clear existing face overlays and show only this one
+                self.face_overlay.clear_faces()
+                self.face_overlay.add_face(
+                    face_data["bbox"], 
+                    face_data.get("person_name") or "Bilinmiyor",
+                    face_data.get("face_id")
+                )
+                self.face_overlay.setVisible(True)
+                
+                # Trigger resize logic to align overlay
+                self.update_overlay()
+        except Exception as e:
+            logger.error(f"_on_face_thumb_clicked failed: {e}")
 
     def _on_face_named(self, face_index: int, name: str):
         """

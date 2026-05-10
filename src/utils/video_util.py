@@ -1,4 +1,5 @@
 """Video utility functions: metadata extraction, thumbnail generation, key-frame extraction."""
+from __future__ import annotations
 import os
 import logging
 
@@ -57,11 +58,19 @@ def generate_video_thumbnail(video_path: str, thumb_path: str) -> bool:
             video_stream = next((s for s in container.streams if s.type == "video"), None)
             if video_stream is None:
                 return False
+            
+            # Check for rotation
+            rotation = 0
+            if video_stream.metadata:
+                rotation = int(video_stream.metadata.get("rotate", 0))
+
             if container.duration and container.duration > 0:
                 seek_ts = int(container.duration * 0.1)
                 container.seek(seek_ts)
             for frame in container.decode(video=0):
                 img = frame.to_image()
+                if rotation != 0:
+                    img = img.rotate(-rotation, expand=True)
                 if img.mode != "RGB":
                     img = img.convert("RGB")
                 img.thumbnail((300, 300))
@@ -72,29 +81,77 @@ def generate_video_thumbnail(video_path: str, thumb_path: str) -> bool:
     return False
 
 
-def extract_key_frames(video_path: str, interval_seconds: float = 2.0) -> list:
-    """Return frames sampled every `interval_seconds` as BGR numpy arrays for face detection."""
+def extract_key_frames(video_path: str, interval_seconds: float = 2.0) -> list[tuple]:
+    """Return (frame_array, timestamp_ms) sampled every `interval_seconds` for face detection."""
     frames = []
+    try:
+        import av
+        import numpy as np
+        with av.open(video_path) as container:
+            video_stream = next((s for s in container.streams if s.type == "video"), None)
+            if video_stream is None:
+                return frames
+            
+            # Check for rotation metadata
+            rotation = 0
+            if video_stream.metadata:
+                rotation = int(video_stream.metadata.get("rotate", 0))
+            
+            duration = container.duration
+            if not duration or duration <= 0:
+                for frame in container.decode(video=0):
+                    img = frame.to_image()
+                    if rotation != 0:
+                        img = img.rotate(-rotation, expand=True)
+                    frames.append((np.array(img)[:, :, ::-1].copy(), 0.0))
+                    break
+                return frames
+            
+            interval_us = int(interval_seconds * 1_000_000)
+            ts = 0
+            while ts < duration:
+                try:
+                    container.seek(ts)
+                    for frame in container.decode(video=0):
+                        img = frame.to_image()
+                        if rotation != 0:
+                            img = img.rotate(-rotation, expand=True)
+                        
+                        # frame.time is in seconds; convert to ms
+                        t_ms = float(frame.time * 1000.0) if frame.time is not None else float(ts / 1000.0)
+                        # Convert PIL RGB to BGR ndarray for insightface
+                        frames.append((np.array(img)[:, :, ::-1].copy(), t_ms))
+                        break
+                except Exception as e:
+                    logger.debug(f"Seek/decode error at {ts}us: {e}")
+                ts += interval_us
+    except Exception as e:
+        logger.warning(f"Could not extract key frames from {video_path}: {e}")
+    return frames
+
+def get_video_frame(video_path: str, t_ms: float) -> "PIL.Image" | None:
+    """Extract a single frame from a video at a specific timestamp in milliseconds, respecting rotation."""
     try:
         import av
         with av.open(video_path) as container:
             video_stream = next((s for s in container.streams if s.type == "video"), None)
             if video_stream is None:
-                return frames
-            duration = container.duration
-            if not duration or duration <= 0:
-                for frame in container.decode(video=0):
-                    frames.append(frame.to_ndarray(format="bgr24"))
-                    break
-                return frames
-            interval_us = int(interval_seconds * 1_000_000)
-            ts = interval_us
-            while ts < duration:
-                container.seek(ts)
-                for frame in container.decode(video=0):
-                    frames.append(frame.to_ndarray(format="bgr24"))
-                    break
-                ts += interval_us
+                return None
+            
+            # Check for rotation metadata
+            rotation = 0
+            if video_stream.metadata:
+                rotation = int(video_stream.metadata.get("rotate", 0))
+                
+            # Convert ms to microseconds for PyAV seek
+            seek_ts = int(t_ms * 1000)
+            container.seek(seek_ts)
+            
+            for frame in container.decode(video=0):
+                img = frame.to_image()
+                if rotation != 0:
+                    img = img.rotate(-rotation, expand=True)
+                return img
     except Exception as e:
-        logger.warning(f"Could not extract key frames from {video_path}: {e}")
-    return frames
+        logger.warning(f"get_video_frame failed for {video_path} at {t_ms}ms: {e}")
+    return None

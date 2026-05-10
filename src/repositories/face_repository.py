@@ -42,15 +42,17 @@ class FaceRepository:
                 new_id = uuid_module.uuid4()
                 embedding_list = face.embedding.tolist() if face.embedding is not None else None
                 db.execute(text("""
-                    INSERT INTO face_detections (id, media_id, bbox, embedding)
+                    INSERT INTO face_detections (id, media_id, bbox, embedding, timestamp_ms)
                     VALUES (:id, :media_id,
                             CAST(:bbox AS jsonb),
-                            CAST(:emb AS vector))
+                            CAST(:emb AS vector),
+                            :tms)
                 """), {
                     "id": str(new_id),
                     "media_id": media_id_str,
                     "bbox": f'{{"x1":{face.x1},"y1":{face.y1},"x2":{face.x2},"y2":{face.y2}}}',
                     "emb": "[" + ",".join(str(v) for v in embedding_list) + "]" if embedding_list else None,
+                    "tms": getattr(face, 'timestamp_ms', None),
                 })
                 ids.append(new_id)
             db.commit()
@@ -95,12 +97,12 @@ class FaceRepository:
         """
         with get_db() as db:
             result = db.execute(text("""
-                SELECT fd.id, fd.bbox, fd.embedding::text, fd.person_id, fd.person_cleared,
+                SELECT fd.id, fd.bbox, fd.embedding::text, fd.person_id, fd.person_cleared, fd.timestamp_ms,
                        p.name as person_name
                 FROM face_detections fd
                 LEFT JOIN persons p ON fd.person_id = p.id
                 WHERE fd.media_id = :mid
-                ORDER BY fd.created_at
+                ORDER BY fd.timestamp_ms ASC, fd.created_at ASC
             """), {"mid": str(media_id)})
             rows = []
             for row in result.fetchall():

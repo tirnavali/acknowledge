@@ -120,8 +120,9 @@ class EventService(BaseService):
                 # Pre-generate thumbnail to make gallery load instantaneous
                 try:
                     if not os.path.exists(thumb_path):
-                        from PIL import Image
+                        from PIL import Image, ImageOps
                         with Image.open(dst) as img:
+                            img = ImageOps.exif_transpose(img)
                             if img.mode != "RGB":
                                 img = img.convert("RGB")
                             img.thumbnail((300, 300))

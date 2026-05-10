@@ -78,11 +78,14 @@ class BatchFaceWorker(QtCore.QThread):
                     self._face_svc.delete_faces_for_media(media_id)
 
                 if is_video:
-                    frames = extract_key_frames(file_path)
+                    frames_with_ts = extract_key_frames(file_path)
                     results = []
-                    for frame in frames:
+                    for frame, tms in frames_with_ts:
                         frame_results = self._face_svc.detect_faces_from_array(frame)
-                        results.extend(frame_results or [])
+                        if frame_results:
+                            for fr in frame_results:
+                                fr.timestamp_ms = tms
+                            results.extend(frame_results)
                 else:
                     results = self._face_svc.detect_faces(file_path)
 
@@ -362,47 +365,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
             Base.metadata.create_all(bind=engine)
         
-            # Add IPTC columns to existing medias table (create_all doesn't add columns to existing tables)
-            caption_columns = [
-                ("tags_en", "TEXT"),
-                ("tags_tr", "TEXT"),
-            ]
-            with get_db() as db:
-                for col_name, col_type in caption_columns:
-                    try:
-                        db.execute(text(f"ALTER TABLE medias ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                    except Exception:
-                        pass
-                db.commit()
+            # Initialize database schema and migrations via repository
+            try:
+                self.app_service.get_media_service().media_repository.apply_schema_migrations()
+            except Exception as e:
+                logger.error(f"Schema migration failed: {e}")
 
-            iptc_columns = [
-                ("iptc_headline", "VARCHAR(500)"),
-                ("iptc_caption", "TEXT"),
-                ("iptc_keywords", "TEXT"),
-                ("iptc_object_name", "VARCHAR(500)"),
-                ("iptc_city", "VARCHAR(250)"),
-                ("iptc_state", "VARCHAR(250)"),
-                ("iptc_country", "VARCHAR(250)"),
-                ("iptc_credit", "VARCHAR(500)"),
-                ("iptc_source", "VARCHAR(500)"),
-                ("iptc_copyright", "VARCHAR(500)"),
-                ("iptc_writer", "VARCHAR(250)"),
-                ("iptc_byline", "VARCHAR(250)"),
-                ("iptc_byline_title", "VARCHAR(250)"),
-                ("iptc_date_created", "VARCHAR(50)"),
-                ("iptc_category", "VARCHAR(100)"),
-                ("iptc_supplemental_categories", "VARCHAR(500)"),
-                ("title", "VARCHAR(500)"),
-            ]
-            with get_db() as db:
-                for col_name, col_type in iptc_columns:
-                    try:
-                        db.execute(text(f"ALTER TABLE medias ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                    except Exception as e:
-                        print(f"Warning: Could not add column {col_name}: {e}")
-                        pass  # Column already exists
-                db.commit()
-            
             print("✅ Veritabanı tabloları hazır.")
             logger.info("Application started, database ready", extra={"event": "APP_START"})
         except Exception as e:
