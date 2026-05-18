@@ -745,10 +745,10 @@ class MainWindow(QtWidgets.QMainWindow):
     # Background captioning queue
     # ------------------------------------------------------------------
 
-    def _resume_batch_captioning(self, event):
+    def _resume_batch_captioning(self, event, force=False):
         """Queue uncaptioned images in this event for background AI captioning."""
         from src.utils import config_util
-        if not config_util.get_setting("auto_captioning_enabled", False):
+        if not force and not config_util.get_setting("auto_captioning_enabled", False):
             return
 
         vault_path = event.vault_folder_path
@@ -1007,7 +1007,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         menu = QtWidgets.QMenu(self)
         details_action = menu.addAction("🔍 Detaylar")
-        process_action = menu.addAction("⚙️ Yüz Tanıma ve İndeksleme Başlat")
+        process_action = menu.addAction("🔍 Yüz Tanıma Başlat")
+        caption_action = menu.addAction("✨ AI Caption Başlat")
         persons_action = menu.addAction("👥 Kişileri Görüntüle")
         menu.addSeparator()
         open_folder_action = menu.addAction(_finder_label)
@@ -1020,7 +1021,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.on_event_details(event)
         elif action == process_action:
             self._resume_batch_face_detection(event, force=True)
-            self.statusBar().showMessage(f"🚀 '{event.name}' için işlem manuel olarak başlatıldı...", 4000)
+            self.statusBar().showMessage(f"🚀 '{event.name}' için yüz tanıma başlatıldı...", 4000)
+        elif action == caption_action:
+            self._resume_batch_captioning(event, force=True)
+            self.statusBar().showMessage(f"✨ '{event.name}' için altyazı işlemi başlatıldı...", 4000)
         elif action == persons_action:
             self._show_event_persons(event)
         elif action == open_folder_action:
