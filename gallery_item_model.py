@@ -35,6 +35,9 @@ class GalleryItem(QtGui.QStandardItem):
         # Star rating (0 = unrated, 1–5)
         self.star_rating = int(db_metadata.get('star_rating') or 0) if db_metadata else 0
 
+        # Face detection timestamp (non-None = detection was run)
+        self.face_detected_at = db_metadata.get('face_detected_at') if db_metadata else None
+
         # Pre-populate from DB if available to avoid disk I/O
         if db_metadata:
             self._pop_from_db(db_metadata)
@@ -270,16 +273,12 @@ class GalleryItemModel(QtGui.QStandardItemModel):
         painter = QtGui.QPainter(pixmap)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
 
-        if item.in_db:
-            badge_size = 22
-            cx, cy = pixmap.width() - badge_size // 2 - 4, badge_size // 2 + 4
-            painter.setBrush(QtGui.QColor("#2d7d46"))
-            painter.setPen(QtGui.QColor("white"))
-            painter.drawEllipse(QtCore.QPoint(cx, cy), badge_size // 2, badge_size // 2)
-            font = painter.font(); font.setBold(True); font.setPixelSize(13); painter.setFont(font)
-            painter.drawText(QtCore.QRect(cx-11, cy-11, 22, 22), QtCore.Qt.AlignCenter, "\u2713")
+        # Status strip (face detection + AI caption)
+        has_face    = bool(getattr(item, 'face_detected_at', None))
+        has_caption = bool(item.iptc_data.get('AI A\u00e7\u0131klama (TR)'))
+        status_h    = 16 if (has_face or has_caption) else 0
 
-        # Star rating strip at the bottom
+        # Star rating strip at the bottom (shift up when status strip present)
         rating = getattr(item, 'star_rating', 0)
         if rating and rating > 0:
             star_font = painter.font()
@@ -288,10 +287,37 @@ class GalleryItemModel(QtGui.QStandardItemModel):
             painter.setFont(star_font)
             stars_text = "★" * rating + "☆" * (5 - rating)
             strip_h = 18
-            strip_rect = QtCore.QRect(0, pixmap.height() - strip_h, pixmap.width(), strip_h)
+            strip_rect = QtCore.QRect(0, pixmap.height() - strip_h - status_h, pixmap.width(), strip_h)
             painter.fillRect(strip_rect, QtGui.QColor(0, 0, 0, 160))
             painter.setPen(QtGui.QColor("#FFD700"))
             painter.drawText(strip_rect, QtCore.Qt.AlignCenter, stars_text)
+
+        if status_h:
+            w = pixmap.width()
+            y = pixmap.height() - status_h
+            painter.fillRect(QtCore.QRect(0, y, w, status_h), QtGui.QColor(0, 0, 0, 160))
+
+            status_font = painter.font()
+            status_font.setPixelSize(11)
+            status_font.setBold(True)
+            painter.setFont(status_font)
+
+            pnames = item.iptc_data.get('People', '')
+            face_count = len([n for n in pnames.split('\n') if n.strip()]) if pnames else 0
+            face_label = f"👤 {face_count}" if face_count else "👤"
+
+            if has_face and has_caption:
+                mid = w // 2
+                painter.setPen(QtGui.QColor("#50C8FF"))
+                painter.drawText(QtCore.QRect(0, y, mid, status_h), QtCore.Qt.AlignCenter, face_label)
+                painter.setPen(QtGui.QColor("#FFD700"))
+                painter.drawText(QtCore.QRect(mid, y, w - mid, status_h), QtCore.Qt.AlignCenter, "AI")
+            elif has_face:
+                painter.setPen(QtGui.QColor("#50C8FF"))
+                painter.drawText(QtCore.QRect(0, y, w, status_h), QtCore.Qt.AlignCenter, face_label)
+            else:
+                painter.setPen(QtGui.QColor("#FFD700"))
+                painter.drawText(QtCore.QRect(0, y, w, status_h), QtCore.Qt.AlignCenter, "AI")
 
         # Play badge for videos
         if getattr(item, 'media_type', 'photo') == 'video':
