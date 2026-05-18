@@ -1008,7 +1008,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         details_action = menu.addAction("🔍 Detaylar")
         process_action = menu.addAction("🔍 Yüz Tanıma Başlat")
-        caption_action = menu.addAction("✨ AI Caption Başlat")
+        caption_action = menu.addAction("✨ Altyazı Başlat")
         persons_action = menu.addAction("👥 Kişileri Görüntüle")
         menu.addSeparator()
         open_folder_action = menu.addAction(_finder_label)
