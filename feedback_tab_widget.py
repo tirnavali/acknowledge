@@ -197,18 +197,10 @@ class FeedbackTabWidget(QtWidgets.QWidget):
         self.status_label.setText("⏳ Geri bildiriminiz iletiliyor...")
         self.status_label.setStyleSheet("color: #8ecfff;")
         
-        # Sentry expects a dictionary for capture_feedback
-        feedback_data = {
-            "message": f"[{category}]\n{message}",
-        }
-        if name:
-            feedback_data["name"] = name
-        if email:
-            feedback_data["contact_email"] = email
-
         try:
-            # Check if Sentry is initialized
-            if not sentry_sdk.Hub.current.client:
+            # Check if Sentry is initialized (compatible with v1 and v2)
+            client = sentry_sdk.get_client() if hasattr(sentry_sdk, "get_client") else getattr(sentry_sdk.Hub.current, "client", None)
+            if not client:
                 # Sentry is not initialized (no DSN in env)
                 logger.warning("Sentry is not initialized. Feedback logged locally only.")
                 # Simulate offline success since we still logged it
@@ -217,8 +209,17 @@ class FeedbackTabWidget(QtWidgets.QWidget):
                 )
                 self.status_label.setStyleSheet("color: #ffca28;")
             else:
-                # Send to Sentry
-                sentry_sdk.capture_feedback(feedback_data)
+                # Send to Sentry using a custom scope to associate user info & category
+                with sentry_sdk.push_scope() as scope:
+                    if name or email:
+                        scope.set_user({"email": email or "anonymous@user.feedback", "username": name or "Anonymous"})
+                    scope.set_tag("feedback.category", category)
+                    scope.set_level("info")
+                    
+                    sentry_sdk.capture_message(
+                        f"User Feedback: {category}\n\n{message}"
+                    )
+                    
                 self.status_label.setText("✅ Geri bildiriminiz başarıyla iletildi. Görüşleriniz için teşekkür ederiz!")
                 self.status_label.setStyleSheet("color: #8eff8e; font-weight: bold;")
                 
