@@ -56,6 +56,7 @@ from caption_stats_widget import CaptionStatsWidget
 from persons_tab_widget import PersonsTabWidget
 from toggle_switch import ToggleSwitch
 from faq_widget import FAQWidget
+from feedback_tab_widget import FeedbackTabWidget
 from event_persons_dialog import EventPersonsDialog
 import os
 
@@ -593,6 +594,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.faq_tab = FAQWidget(parent=self)
         self.tab_widget.addTab(self.faq_tab, "Yardım")
+
+        self.feedback_tab = FeedbackTabWidget(parent=self)
+        self.tab_widget.addTab(self.feedback_tab, "Geri Bildirim")
 
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.show()
