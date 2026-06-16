@@ -100,6 +100,34 @@ def apply_update() -> tuple[bool, str]:
         return False, str(e)
 
 
+def ensure_master_branch() -> tuple[bool, str, str]:
+    """Switch to master if on another branch.
+
+    Returns (success, previous_branch, error_message).
+    - Already on master  → (True, "master", "")
+    - Switched OK        → (True, "<prev>", "")
+    - Checkout failed    → (False, "<prev>", stderr)
+    """
+    try:
+        head = _git("rev-parse", "--abbrev-ref", "HEAD")
+        if head.returncode != 0:
+            return False, "", (head.stderr or "").strip()
+        current = head.stdout.strip()
+        if current == "master":
+            return True, "master", ""
+
+        checkout = _git("checkout", "master", timeout=15)
+        if checkout.returncode != 0:
+            err = (checkout.stderr or checkout.stdout or "").strip()
+            return False, current, err
+        return True, current, ""
+    except subprocess.TimeoutExpired:
+        return False, "", "İşlem zaman aşımına uğradı."
+    except Exception as e:
+        logger.warning("ensure_master_branch failed: %s", e)
+        return False, "", str(e)
+
+
 def restart_app():
     """Restart the application.
 

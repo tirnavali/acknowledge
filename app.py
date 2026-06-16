@@ -237,6 +237,26 @@ class UpdateApplyWorker(QtCore.QThread):
         self.finished.emit(success, error)
 
 
+class EnsureMasterBranchWorker(QtCore.QThread):
+    """Switches to master branch on startup if on a different branch."""
+    branch_ok      = QtCore.Signal(str)        # prev branch (already master)
+    branch_switched = QtCore.Signal(str)       # prev branch name (switched OK)
+    switch_failed  = QtCore.Signal(str, str)   # (prev branch, error)
+
+    def run(self):
+        from src.utils.update_util import ensure_master_branch
+        try:
+            ok, prev, err = ensure_master_branch()
+            if ok and prev == "master":
+                self.branch_ok.emit(prev)
+            elif ok:
+                self.branch_switched.emit(prev)
+            else:
+                self.switch_failed.emit(prev, err)
+        except Exception as e:
+            self.switch_failed.emit("", str(e))
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -261,7 +281,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._search_worker = None              # background FTS worker
         self._update_check_worker = None
         self._update_apply_worker = None
+        self._ensure_master_worker = None
         self._update_bar = self._make_update_bar()
+        self._branch_bar = self._make_branch_bar()
         self._search_mode = False               # True while cross-event search is active
         self._selected_event_card = None        # currently highlighted EventCardWidget
         self.init_db()
@@ -272,6 +294,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # singleShot(0) defers to the next event-loop iteration.
         QtCore.QTimer.singleShot(0, lambda: self._fit_to_screen(preferred_w=1400, preferred_h=900))
         QtCore.QTimer.singleShot(0, self._start_global_captioning_on_startup)
+        QtCore.QTimer.singleShot(500, self._ensure_master_branch_async)
         QtCore.QTimer.singleShot(3000, self._check_for_updates_async)
 
     # ------------------------------------------------------------------
@@ -308,6 +331,56 @@ class MainWindow(QtWidgets.QMainWindow):
 
         bar.hide()
         return bar
+
+    def _make_branch_bar(self) -> QtWidgets.QFrame:
+        bar = QtWidgets.QFrame()
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(12, 4, 8, 4)
+
+        self._branch_label = QtWidgets.QLabel("")
+        layout.addWidget(self._branch_label)
+        layout.addStretch()
+
+        dismiss = QtWidgets.QPushButton("✕")
+        dismiss.setObjectName("dismiss")
+        dismiss.clicked.connect(bar.hide)
+        layout.addWidget(dismiss)
+
+        bar.hide()
+        return bar
+
+    def _show_branch_bar(self, text: str, *, warning: bool = False):
+        color = "#a87b00" if warning else "#1a6ea8"
+        self._branch_bar.setStyleSheet(f"""
+            QFrame {{ background-color: {color}; }}
+            QLabel {{ color: white; font-size: 12px; font-weight: bold; background: transparent; }}
+            QPushButton#dismiss {{ background: transparent; color: white; font-size: 14px; padding: 0 6px; }}
+        """)
+        self._branch_label.setText(text)
+        self._branch_bar.show()
+
+    def _ensure_master_branch_async(self):
+        if self._ensure_master_worker and self._ensure_master_worker.isRunning():
+            return
+        self._ensure_master_worker = EnsureMasterBranchWorker(self)
+        self._ensure_master_worker.branch_ok.connect(self._on_branch_ok)
+        self._ensure_master_worker.branch_switched.connect(self._on_branch_switched)
+        self._ensure_master_worker.switch_failed.connect(self._on_branch_switch_failed)
+        self._ensure_master_worker.start()
+
+    def _on_branch_ok(self, _prev: str):
+        pass
+
+    def _on_branch_switched(self, prev: str):
+        self._show_branch_bar(f"ℹ  '{prev}' branch'inden master'a geçildi")
+        QtCore.QTimer.singleShot(5000, self._branch_bar.hide)
+
+    def _on_branch_switch_failed(self, prev: str, err: str):
+        branch_info = f" (şu an: {prev})" if prev else ""
+        self._show_branch_bar(
+            f"⚠  Master'a geçilemedi{branch_info}. Güncellemeler bu makineye gelmeyebilir.  {err[:200]}",
+            warning=True,
+        )
 
     def _check_for_updates_async(self):
         if self._update_check_worker and self._update_check_worker.isRunning():
@@ -531,6 +604,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._central_layout.setContentsMargins(0,0,0,0)
         self._central_layout.setSpacing(0)
         self._central_layout.addWidget(self._update_bar)
+        self._central_layout.addWidget(self._branch_bar)
         self._central_layout.addWidget(self.tab_widget)
         self._central_layout.addWidget(self._media_status_bar)
         
