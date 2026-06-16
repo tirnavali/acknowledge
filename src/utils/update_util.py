@@ -26,11 +26,23 @@ def check_for_updates() -> tuple[bool, int, str]:
     try:
         fetch = _git("fetch", "origin", timeout=15)
         if fetch.returncode != 0:
-            logger.debug(f"git fetch failed: {fetch.stderr.strip()}")
+            logger.warning(f"git fetch failed: {fetch.stderr.strip()}")
             return False, 0, ""
 
-        log = _git("log", "HEAD..@{u}", "--oneline")
+        # Get current branch name (e.g. master)
+        branch_res = _git("rev-parse", "--abbrev-ref", "HEAD")
+        if branch_res.returncode != 0:
+            logger.warning(f"git rev-parse failed: {branch_res.stderr.strip()}")
+            return False, 0, ""
+        branch_name = branch_res.stdout.strip()
+
+        # Try origin/<branch> comparison first, fallback to @{u} if it fails
+        log = _git("log", f"HEAD..origin/{branch_name}", "--oneline")
         if log.returncode != 0:
+            log = _git("log", "HEAD..@{u}", "--oneline")
+
+        if log.returncode != 0:
+            logger.warning(f"git log upstream check failed: {log.stderr.strip()}")
             return False, 0, ""
 
         lines = [l for l in log.stdout.strip().splitlines() if l]
@@ -40,7 +52,7 @@ def check_for_updates() -> tuple[bool, int, str]:
         latest_sha = lines[0].split()[0]
         return True, len(lines), latest_sha
     except Exception as e:
-        logger.debug(f"Update check error: {e}")
+        logger.warning(f"Update check error: {e}")
         return False, 0, ""
 
 
