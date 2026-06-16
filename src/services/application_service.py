@@ -86,5 +86,16 @@ class ApplicationService:
     def initialize_application(self):
         """Initialize the application."""
         self.logger.info("Initializing application...")
-        # Add any initialization logic here
-        pass
+        # Eagerly import heavy ML packages in the main thread to prevent
+        # threading race conditions and pydantic circular import errors.
+        try:
+            self.logger.info("Eagerly importing insightface in the main thread...")
+            from insightface.app import FaceAnalysis
+        except Exception as e:
+            self.logger.warning(f"Could not eagerly import insightface: {e}")
+
+        try:
+            self.logger.info("Eagerly importing transformers in the main thread...")
+            from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
+        except Exception as e:
+            self.logger.warning(f"Could not eagerly import transformers: {e}")

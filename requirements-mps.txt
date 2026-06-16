@@ -19,3 +19,4 @@ transformers>=4.40.0
 accelerate>=0.28.0
 qwen-vl-utils>=0.0.8
 av
+sentry-sdk>=2.0.0

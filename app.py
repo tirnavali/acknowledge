@@ -1,4 +1,35 @@
 import sys, os
+from dotenv import load_dotenv
+
+# Load environment variables early, before initializing anything else (especially Sentry)
+load_dotenv()
+
+import sentry_sdk
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        # Add data like request headers and IP for users
+        send_default_pii=True,
+        # Enable sending logs to Sentry
+        enable_logs=True,
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for tracing.
+        traces_sample_rate=1.0,
+        # Set profile_session_sample_rate to 1.0 to profile 100%
+        # of profile sessions.
+        profile_session_sample_rate=1.0,
+    )
+
+    def custom_excepthook(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        sentry_sdk.capture_exception((exc_type, exc_value, exc_traceback))
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = custom_excepthook
+
 import random
 import logging
 import time
@@ -12,7 +43,6 @@ from gallery_item_model import GalleryItemModel, GalleryItem
 from sqlalchemy import text
 from src.database import get_db, Base, engine
 import src.models
-from dotenv import load_dotenv
 import add_event_window
 from src.repositories.event_repository import EventRepository
 from src.repositories.media_repository import MediaRepository
@@ -26,6 +56,7 @@ from caption_stats_widget import CaptionStatsWidget
 from persons_tab_widget import PersonsTabWidget
 from toggle_switch import ToggleSwitch
 from faq_widget import FAQWidget
+from feedback_tab_widget import FeedbackTabWidget
 from event_persons_dialog import EventPersonsDialog
 import os
 
@@ -531,6 +562,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.faq_tab = FAQWidget(parent=self)
         self.tab_widget.addTab(self.faq_tab, "Yardım")
+
+        self.feedback_tab = FeedbackTabWidget(parent=self)
+        self.tab_widget.addTab(self.feedback_tab, "Geri Bildirim")
 
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.show()
