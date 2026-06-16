@@ -59,6 +59,13 @@ def check_for_updates() -> tuple[bool, int, str]:
 def requirements_changed() -> bool:
     """True if requirements.txt differs between HEAD and upstream."""
     try:
+        branch_res = _git("rev-parse", "--abbrev-ref", "HEAD")
+        if branch_res.returncode == 0:
+            branch_name = branch_res.stdout.strip()
+            result = _git("diff", f"HEAD..origin/{branch_name}", "--name-only", "--", "requirements.txt")
+            if result.returncode == 0:
+                return bool(result.stdout.strip())
+        # Fallback to @{u}
         result = _git("diff", "HEAD..@{u}", "--name-only", "--", "requirements.txt")
         return bool(result.stdout.strip())
     except Exception:
@@ -94,5 +101,15 @@ def apply_update() -> tuple[bool, str]:
 
 
 def restart_app():
-    """Replace the current process with a fresh instance of the app."""
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+    """Restart the application.
+
+    On POSIX systems uses os.execv to replace the current process.
+    On Windows uses subprocess.Popen (os.execv does not work reliably
+    on Windows) and then exits the current process.
+    """
+    if sys.platform == "win32":
+        import subprocess as _sp
+        _sp.Popen([sys.executable] + sys.argv)
+        os._exit(0)
+    else:
+        os.execv(sys.executable, [sys.executable] + sys.argv)
