@@ -8,40 +8,61 @@ from __future__ import annotations
 import json
 import logging
 import re
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 
-class CaptionOutput(BaseModel):
-    caption_tr: str = Field(..., description="20-40 kelimelik Türkçe sahne betimleme cümlesi")
-    tags_tr: str = Field(..., description="Virgülle ayrılmış 5-8 aranabilir etiket")
+# JSON schema sent to Ollama's `format` parameter for structured output.
+# Equivalent to what pydantic would generate — kept as a plain dict to avoid
+# the PySide6/shiboken ↔ pydantic v2 circular-import conflict at module load time.
+CAPTION_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "caption_tr": {"type": "string", "description": "20-40 kelimelik Türkçe sahne betimleme cümlesi"},
+        "tags_tr": {"type": "string", "description": "Virgülle ayrılmış 5-8 aranabilir etiket"},
+    },
+    "required": ["caption_tr", "tags_tr"],
+}
 
 
 def get_combined_prompt(person_names: list[str] = None) -> str:
     names_instruction = ""
     if person_names:
         names_str = ", ".join(person_names)
-        names_instruction = f"Fotoğraftaki kişilerin isimleri: {names_str}. Cümleyi kurarken bu isimleri doğal bir şekilde kullan. "
+        names_instruction = (
+            "Fotoğrafdaki kişiler: " + names_str + ". "
+            "Bu isimleri Türkçe açıklamada doğal bir şekilde kullan. "
+        )
 
-    return str((
-        "Bu fotoğrafı Türkçe analiz et. "
+    example = json.dumps({
+        "caption_tr": "Bir konuşmacı arkasında Türk bayrağı bulunan kürsüde konuşma yapıyor, önde oturan dinleyiciler izliyor.",
+        "tags_tr": "konuşma, kürsü, türk bayrağı, dinleyiciler, resmi toplantı, kapalı mekan",
+    }, ensure_ascii=False)
+
+    return (
+        "Aşağıdaki fotoğrafı Türkçe olarak belgele. "
         "Sadece aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma. "
-        f"{names_instruction}"
-        "Kurallar: "
-        "- Fotoğraf bir parlamento veya meclis ortamını gösteriyorsa, caption_tr içinde bunu açıkça belirt. "
-        "- Kravat renkleri görünüyorsa mutlaka belirt (örneğin: mavi kravat, kırmızı kravat). "
-        "- El sıkışma varsa mutlaka belirt. "
-        "- Bir kişi kürsüde konuşma yapıyorsa mutlaka belirt. "
-        "- Arka planda ülke bayrakları varsa mutlaka belirt. "
-        "- caption_tr alanında 25–40 kelimelik, tek cümlelik ayrıntılı bir açıklama yaz. "
-        "- Mekanı, rolleri (konuşmacı, milletvekili, dinleyici vb.) ve önemli görsel ayrıntıları belirt. "
-        "- Emin değilsen veya kişi isimleri verilmemişse ‘bir konuşmacı’, ‘bir milletvekili’ gibi genel ifadeler kullan. "
-        "- tags_tr alanında en fazla 8 adet, virgülle ayrılmış kısa etiketler yaz (mekan, rol, nesne, renk vb.). "
-        "JSON dışında hiçbir metin yazma.\n",
-        {"caption_tr": "Detaylı Türkçe açıklama cümlesi", 
-         "tags_tr": "etiket1, etiket2, etiket3, etiket4, etiket5"}
-    ))
+        + names_instruction
+        + "Kurallar: "
+        "- Yalnızca açıkça görünen şeyleri yaz; tahmin etme, çıkarım yapma. "
+        "- Giysi veya kravat rengini ancak kesinlikle emin olduğunda belirt; emin değilsen rengi hiç yazma. "
+        "- ‘bu fotoğrafta’, ‘fotoğrafta görülen’, ‘yer aldığı’, ‘vurgulanıyor’, ‘dikkat çekiyor’ "
+        "gibi meta ifadeler kullanma; sahneyi doğrudan betimle. "
+        "- ‘ihtişamlı’, ‘etkileyici’, ‘şık’, ‘görkemli’ gibi öznel/süslü sıfatlar kullanma; "
+        "yalnızca gözlemlenebilir olgular. "
+        "- Mekanı (parlamento salonu, ofis, bahçe vb.), kişi sayısını, rollerini "
+        "(konuşmacı, milletvekili, dinleyici vb.) ve öne çıkan nesneleri (kürsü, bayrak, masa vb.) yaz. "
+        "- Arka planı ve ortamı mutlaka betimle: duvarlar, perdeler, avize, mobilya, bayraklar, "
+        "tablo/çerçeveler ve genel mekan karakteri (büyük salon, küçük oda, açık alan vb.) dahil. "
+        "- Kişilerin kıyafetlerini betimle: takım elbise, gömlek, ceket, kravat, resmi/spor vb. "
+        "(rengi yalnızca kesinlikle eminsen yaz; emin değilsen rengi hiç yazma). "
+        "- Ortam bir meclis veya parlamento salonu ise, mümkünse bunu belirt. "
+        "- İsimler verilmemişse ‘bir konuşmacı’, ‘bir yetkili’ gibi genel ifadeler kullan. "
+        "- caption_tr: 25-45 kelimelik, gerektiğinde birden fazla cümle, doğrudan betimleme. "
+        "- tags_tr: en fazla 8 adet virgülle ayrılmış kısa etiket (mekan, rol, nesne vb.). "
+        "JSON dışında hiçbir metin yazma.\n"
+        + example
+    )
 
 
 

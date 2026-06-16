@@ -1,8 +1,32 @@
 import logging
+import os
 import requests
 import time
 
 logger = logging.getLogger(__name__)
+
+
+def correct_grammar_if_enabled(text: str) -> str:
+    """Module-level helper: run Ollama grammar correction if enabled and reachable.
+
+    Shared by CaptionService (Qwen) and OllamaCaptionService (Gemma) so both
+    backends apply the same post-processing step.  Returns the original text
+    unchanged when grammar correction is disabled or Ollama is unreachable.
+    """
+    from src.utils import config_util
+    if not config_util.get_setting("grammar_correction_enabled", True):
+        return text
+    try:
+        grammar_svc = OllamaGrammarService(
+            model=config_util.get_setting("grammar_correction_model", "gemma3:1b"),
+            url=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+        )
+        if grammar_svc.is_ready():
+            return grammar_svc.correct_text(text)
+        logger.warning("OllamaGrammarService is not ready or reachable. Skipping correction.")
+    except Exception as e:
+        logger.error(f"Failed to run grammar correction: {e}")
+    return text
 
 class OllamaGrammarService:
     """Corrects Turkish grammar of generated captions using a text LLM on Ollama."""

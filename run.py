@@ -139,10 +139,25 @@ def main():
 
 
     if os.path.exists(venv_python) and os.path.abspath(sys.executable) != os.path.abspath(venv_python):
-        print(f"Sanal ortam (.venv) algılandı. Uygulama sanal ortam python'ı ile yeniden başlatılıyor: {venv_python}", flush=True)
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os.execv(venv_python, [venv_python] + sys.argv)
+        # Sanity-check that the target venv has the core dependencies before re-execing.
+        # A broken/empty .venv would otherwise cause a cryptic ModuleNotFoundError on startup.
+        probe = subprocess.run(
+            [venv_python, "-c", "import sqlalchemy, PySide6"],
+            capture_output=True,
+        )
+        if probe.returncode != 0:
+            print(
+                "HATA: .venv sanal ortamı eksik bağımlılıklar içeriyor ve kullanılamaz.\n"
+                "Lütfen şu komutla sanal ortamı yeniden kurun:\n"
+                "  pip install -r requirements.txt   (veya requirements-cuda.txt / requirements-mps.txt)\n"
+                "Uygulama mevcut Python ortamıyla devam ediyor.",
+                flush=True,
+            )
+        else:
+            print(f"Sanal ortam (.venv) algılandı. Uygulama sanal ortam python'ı ile yeniden başlatılıyor: {venv_python}", flush=True)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.execv(venv_python, [venv_python] + sys.argv)
 
     if "--stop" in sys.argv:
         if not is_docker_running():

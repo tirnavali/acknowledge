@@ -52,7 +52,7 @@ class ApplicationService:
         if backend == "gemma":
             from src.services.ollama_caption_service import OllamaCaptionService
             svc = OllamaCaptionService(
-                model=os.environ.get("OLLAMA_CAPTION_MODEL", "gemma4:latest"),
+                model=os.environ.get("OLLAMA_CAPTION_MODEL", "gemma4:26b"),
                 url=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
                 # thinking=False: Gemma4 think-mode swallows structured-output
                 # responses (see OllamaCaptionService.__init__ note). Natural

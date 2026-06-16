@@ -240,24 +240,9 @@ class CaptionService:
         return resized
 
     def _correct_grammar_if_enabled(self, text: str) -> str:
-        """Runs Ollama-based grammar correction if enabled in settings and Ollama is ready."""
-        from src.utils import config_util
-        if not config_util.get_setting("grammar_correction_enabled", True):
-            return text
-
-        try:
-            from src.services.grammar_service import OllamaGrammarService
-            grammar_svc = OllamaGrammarService(
-                model=config_util.get_setting("grammar_correction_model", "gemma4:latest"),
-                url=os.environ.get("OLLAMA_URL", "http://localhost:11434")
-            )
-            if grammar_svc.is_ready():
-                return grammar_svc.correct_text(text)
-            else:
-                logger.warning("OllamaGrammarService is not ready or reachable. Skipping correction.")
-        except Exception as e:
-            logger.error(f"Failed to run grammar correction: {e}")
-        return text
+        """Delegate to the shared grammar helper in grammar_service."""
+        from src.services.grammar_service import correct_grammar_if_enabled
+        return correct_grammar_if_enabled(text)
 
     def analyse(self, img_path: str, person_names: list[str] = None) -> CaptionResult:
         """

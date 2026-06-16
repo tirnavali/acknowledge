@@ -21,7 +21,7 @@ import time
 import requests
 
 from src.domain.entities.caption_result import CaptionResult
-from src.services.caption_parsing import get_combined_prompt, parse_combined_response, CaptionOutput
+from src.services.caption_parsing import get_combined_prompt, parse_combined_response, CAPTION_JSON_SCHEMA
 from src.services.caption_service import CaptionService  # reuse _prepare_image staticmethod
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,7 @@ class OllamaCaptionService:
             "images": [b64],
             "stream": False,
             "think": self._thinking,
-            "format": CaptionOutput.model_json_schema(),
+            "format": CAPTION_JSON_SCHEMA,
             "options": {
                 "temperature": 0.3,           # low temp for deterministic JSON
                 "num_predict": 400,           # cap output tokens (caption + tags)
@@ -157,14 +157,15 @@ class OllamaCaptionService:
             extra={"event": "CAPTION_RESULT", "duration_ms": gen_ms},
         )
 
+        from src.services.grammar_service import correct_grammar_if_enabled
         caption_tr, tags_tr = parse_combined_response(raw, person_names)
         if caption_tr:
-            result.caption_tr = caption_tr
+            result.caption_tr = correct_grammar_if_enabled(caption_tr)
             result.tags_tr = tags_tr
         elif len(raw) > 20:
             # Fallback: JSON parse failed but model produced text. Save raw so
             # the caption is not silently lost (mirrors Qwen path fallback).
-            result.caption_tr = raw
+            result.caption_tr = correct_grammar_if_enabled(raw)
             logger.warning(
                 "OllamaCaptionService: JSON parse failed, saving raw text as "
                 "caption_tr for %s",

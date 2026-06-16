@@ -11,7 +11,7 @@ DEFAULT_CONFIG = {
     "auto_captioning_enabled": False,
     "language": "tr",
     "grammar_correction_enabled": True,
-    "grammar_correction_model": "gemma4:latest",
+    "grammar_correction_model": "gemma3:1b",
 }
 
 def load_config() -> dict:
