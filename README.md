@@ -52,14 +52,32 @@ pip install -r requirements.txt
 ### Step 2: Environment Configuration
 
 Copy `.env.example` to `.env` and fill in your values:
+
+```bash
+cp .env.example .env
 ```
-DB_USER=your_db_user
-DB_PASSWORD=your_db_password
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=your_db_name
-MEDIA_VAULT_PATH=media_vault
-```
+
+#### Available Environment Variables:
+
+* **Database Configuration**:
+  * `DB_USER`: PostgreSQL username (default: `tirnavali`).
+  * `DB_PASSWORD`: PostgreSQL password (default: `tbmm1920`).
+  * `DB_HOST`: Database host address (default: `localhost`).
+  * `DB_PORT`: Database port mapping on host (default: `5432`).
+  * `DB_NAME`: PostgreSQL database name (default: `tirnavali_acknowledge_db`).
+
+* **Media Storage**:
+  * `MEDIA_VAULT_PATH`: Local directory path to store imported media files (default: `media_vault`).
+
+* **Hugging Face Hub (Optional)**:
+  * `HF_TOKEN`: Hugging Face User Access Token (read). Used to authenticate with the Hugging Face Hub during model downloads and to avoid rate-limiting issues.
+
+* **Ollama Caption Backend (Optional)**:
+  * `OLLAMA_URL`: Connection URL for your Ollama instance (default: `http://localhost:11434`).
+  * `OLLAMA_CAPTION_MODEL`: Model tag to use for vision captioning (default: `gemma4:latest`).
+
+* **Sentry Monitoring (Optional)**:
+  * `SENTRY_DSN`: Sentry Data Source Name (DSN) URL for tracking runtime exceptions and application performance. Leave empty to disable Sentry integration.
 
 ### Step 3 (optional): Download the AI captioning model
 
@@ -115,3 +133,5 @@ pip install -r requirements-mps.txt --trusted-host pypi.org --trusted-host files
 **Database connection failed**: Ensure Docker Desktop is running, ports 5432 are not blocked by a firewall, and no other PostgreSQL instance is using the same port.
 
 **AI captioning model not found**: Run `python download_model.py` once to download the model locally. Set `HF_TOKEN` in `.env` if the HuggingFace Hub requires authentication.
+
+**Otomatik güncelleme çalışmıyor (Windows)**: `git` komutunun sistem PATH'inde bulunduğundan emin olun. Git kurulumu sırasında "Add Git to PATH" seçeneğinin işaretli olması gerekir.
