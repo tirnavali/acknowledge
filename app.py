@@ -1008,7 +1008,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         details_action = menu.addAction("🔍 Detaylar")
         process_action = menu.addAction("🔍 Yüz Tanıma Başlat")
-        caption_action = menu.addAction("✨ Altyazı Başlat")
+        caption_action = menu.addAction("✨ AI Altyazı Başlat")
         persons_action = menu.addAction("👥 Kişileri Görüntüle")
         menu.addSeparator()
         open_folder_action = menu.addAction(_finder_label)
@@ -2212,6 +2212,36 @@ class MainWindow(QtWidgets.QMainWindow):
         lang_layout.addStretch()
         layout.addWidget(lang_group)
 
+        # Caption Backend selector
+        backend_group = QtWidgets.QGroupBox("Altyazı Modeli / Caption Backend")
+        backend_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; border: 1px solid #3f3f46; margin-top: 10px; padding-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; }"
+        )
+        backend_layout = QtWidgets.QVBoxLayout(backend_group)
+        backend_row = QtWidgets.QHBoxLayout()
+        backend_row.addWidget(QtWidgets.QLabel("Model:"))
+        self._caption_backend_combo = QtWidgets.QComboBox()
+        # (display_text, settings_value)
+        self._caption_backend_combo.addItem("Qwen2.5-VL (Yerel, transformers)", "qwen")
+        self._caption_backend_combo.addItem("Gemma4 (Ollama)", "gemma")
+        current_backend = config_util.get_setting("caption_backend", "qwen")
+        idx = self._caption_backend_combo.findData(current_backend)
+        if idx >= 0:
+            self._caption_backend_combo.setCurrentIndex(idx)
+        self._caption_backend_combo.currentIndexChanged.connect(self._on_caption_backend_changed)
+        backend_row.addWidget(self._caption_backend_combo, 1)
+        backend_layout.addLayout(backend_row)
+        backend_info = QtWidgets.QLabel(
+            "Not: Değişiklik için uygulamayı yeniden başlatın. "
+            "İki model aynı anda VRAM'a yüklenmez. "
+            "Gemma4 → Ollama servisi çalışmalı (ollama serve, gemma4 yüklü)."
+        )
+        backend_info.setWordWrap(True)
+        backend_info.setStyleSheet("color: #aaa; font-style: italic; font-size: 11px;")
+        backend_layout.addWidget(backend_info)
+        layout.addWidget(backend_group)
+
         layout.addStretch()
 
     def _on_auto_caption_toggled(self, checked):
@@ -2221,6 +2251,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage("✅ Otomatik altyazı aktifleştirildi.", 3000)
         else:
             self.statusBar().showMessage("❌ Otomatik altyazı devre dışı bırakıldı.", 3000)
+
+    def _on_caption_backend_changed(self, _idx):
+        """Persist new caption backend; takes effect on next app restart."""
+        from src.utils import config_util
+        value = self._caption_backend_combo.currentData()
+        config_util.set_setting("caption_backend", value)
+        label = self._caption_backend_combo.currentText()
+        self.statusBar().showMessage(
+            f"✅ Altyazı modeli '{label}' olarak ayarlandı. Yeniden başlatın.", 5000
+        )
 
     def layouts(self):
         # Use a QSplitter for the three-column layout so each panel resizes

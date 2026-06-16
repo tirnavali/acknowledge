@@ -40,6 +40,37 @@ python download_model.py   # downloads ~3 GB to ./models/Qwen2.5-VL-3B-Instruct
 
 If the local copy exists at `./models/Qwen2.5-VL-3B-Instruct` or `./src/models/Qwen2.5-VL-3B-Instruct`, `CaptionService` loads from disk automatically; otherwise it falls back to HuggingFace Hub. Set `HF_TOKEN` in `.env` for authenticated hub access.
 
+## Caption Backend: Gemma4 via Ollama (alternative)
+
+`Settings → Altyazı Modeli` lets the user switch between two captioning backends. They are mutually exclusive (only one model loads into VRAM); switching requires an app restart.
+
+| Backend | Model | VRAM | Notes |
+|---------|-------|------|-------|
+| `qwen` (default) | Qwen2.5-VL-3B | ~6–8 GB | Local transformers, see section above |
+| `gemma` | gemma4:latest (8B, vision) | ~10–12 GB | Ollama HTTP API. Thinking mode off by default — Gemma4's think-mode swallows structured-output responses |
+
+Persisted setting key: `caption_backend` in `settings.json` (values: `qwen` / `gemma`).
+
+### Installing Ollama + Gemma4 on a new machine
+
+```bash
+# Linux / macOS
+curl -fsSL https://ollama.com/install.sh | sh
+# Windows: installer from https://ollama.com/download
+
+ollama pull gemma4
+ollama serve   # only needed if not running as a system service
+ollama show gemma4    # verify capabilities include 'vision'
+```
+
+Env vars (optional, defaults shown):
+```
+OLLAMA_URL=http://localhost:11434
+OLLAMA_CAPTION_MODEL=gemma4:latest
+```
+
+VRAM note: `gemma4:latest` + thinking + a 1024 px vision payload needs ~11 GB. On 8 GB GPUs use the Qwen backend, or lower `OllamaCaptionService.MAX_SIDE_PX` to 768.
+
 ## Architecture Overview
 
 **Acknowledge** is a PySide6 desktop application for media archiving, IPTC metadata editing, face detection, and AI-powered captioning, backed by PostgreSQL with pgvector.

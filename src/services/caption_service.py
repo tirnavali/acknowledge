@@ -33,6 +33,7 @@ requests.Session.__init__ = _patched_session_init
 
 
 from src.domain.entities.caption_result import CaptionResult
+from src.services.caption_parsing import COMBINED_PROMPT, parse_combined_response
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,9 @@ class CaptionService:
             generated_ids = self._model.generate(
                 **inputs,
                 max_new_tokens=300,  # 120 was too small: 25-40 word caption + JSON overhead truncated output
+                do_sample=False,
+                repetition_penalty=1.15,   # kills token-loop bug ("göğüslerindeki sakallar" repeating)
+                no_repeat_ngram_size=4,    # blocks any 4-gram from repeating verbatim
             )
         generation_time = time.perf_counter() - start_time
         logger.info(
@@ -202,8 +206,9 @@ class CaptionService:
         return decoded[0].strip() if decoded else ""
 
     # Longest side of the pre-resized image fed to the model.
-    # Keeps PIL memory and model input small regardless of original resolution.
-    MAX_SIDE_PX = 768
+    # 1024 preserves enough detail for color/tie/badge identification while
+    # staying under MAX_PIXELS (1280²) cap after Qwen2.5-VL's internal tiling.
+    MAX_SIDE_PX = 1024
 
     @staticmethod
     def _prepare_image(img_path: str, max_side: int):
@@ -230,59 +235,6 @@ class CaptionService:
         im.close()
         logger.debug(f"_prepare_image: {w}×{h} → {new_w}×{new_h} (in-memory)")
         return resized
-
-    def _parse_combined_response(self, raw: str) -> tuple[str, str]:
-        """Extract caption_tr and tags_tr from a JSON model response.
-
-        Handles three cases:
-        1. Clean JSON  → standard json.loads
-        2. Markdown-fenced JSON (```json ... ```) → strip fence then parse
-        3. Truncated JSON (max_new_tokens hit before closing brace)
-           → extract field values directly via regex so nothing is lost
-        """
-        import json
-        import re
-
-        def _coerce_str(val) -> str:
-            if isinstance(val, list):
-                return ", ".join(str(v) for v in val)
-            return str(val) if val is not None else ""
-
-        # Strip markdown code fences if present
-        stripped = re.sub(r'^```[a-z]*\s*', '', raw.strip(), flags=re.IGNORECASE)
-        stripped = re.sub(r'```\s*$', '', stripped).strip()
-
-        # Attempt 1: full JSON parse
-        try:
-            match = re.search(r'\{.*\}', stripped, re.DOTALL)
-            if match:
-                data = json.loads(match.group())
-                return (
-                    _coerce_str(data.get("caption_tr", "")).strip(),
-                    _coerce_str(data.get("tags_tr", "")).strip(),
-                )
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-        # Attempt 2: truncated JSON — extract field values via regex
-        # Model hit max_new_tokens before closing the JSON object.
-        caption_tr = ""
-        tags_tr = ""
-        m = re.search(r'"caption_tr"\s*:\s*"(.*?)"', stripped, re.DOTALL)
-        if m:
-            caption_tr = m.group(1).strip()
-        m = re.search(r'"tags_tr"\s*:\s*"(.*?)"', stripped, re.DOTALL)
-        if m:
-            tags_tr = m.group(1).strip()
-
-        if caption_tr:
-            logger.debug(
-                "CaptionService: partial JSON recovered via regex for raw: %s", raw[:80]
-            )
-            return caption_tr, tags_tr
-
-        logger.warning("CaptionService: JSON parse failed, raw response: %s", raw[:200])
-        return "", ""
 
     def analyse(self, img_path: str) -> CaptionResult:
         """
@@ -315,32 +267,8 @@ class CaptionService:
             try:
                 full_start = time.perf_counter()
 
-                # NOTE: This MUST be a single str, not a (str, dict) tuple.
-                # The old implementation accidentally created a tuple which silently
-                # dropped the JSON format example from the prompt, causing the model
-                # to produce free text instead of JSON => frequent parse failures.
-                combined_prompt = (
-                    "Bu fötoğrafı Türkçe analiz et. "
-                    "Sadece aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma. "
-                    "Emin olmadığın kişilerin adını yazma, kişi isimlerini tahmin etme. "
-                    "Kurallar: "
-                    "- Fötoğraf bir parlamento veya meclis ortamını gösteriyorsa, "
-                    "caption_tr içinde bunu açıkça belirt. "
-                    "- Kravat renkleri görünüyorsa mutlaka belirt (örneğin: mavi kravat, kırmızı kravat). "
-                    "- El sıkışma varsa mutlaka belirt. "
-                    "- Bir kişi kürsüde konuşma yapıyorsa mutlaka belirt. "
-                    "- Arka planda ülke bayrakları varsa mutlaka belirt. "
-                    "- caption_tr alanında 25-40 kelimelik, tek cümlelik ayrıntılı bir açıklama yaz. "
-                    "- Mekanı, rolleri (konuşmacı, milletvekili, dinleyici vb.) ve önemli görsel ayrıntıları belirt. "
-                    "- Emin değilsen 'bir konuşmacı', 'bir milletvekili' gibi genel ifadeler kullan. "
-                    "- tags_tr alanında en fazla 8 adet, virgülle ayrılmış kısa etiketler yaz (mekan, rol, nesne, renk vb.). "
-                    "JSON dışında hiçbir metin yazma.\n"
-                    '{"caption_tr": "Ayrıntılı Türkçe açıklama cümlesi", '
-                    '"tags_tr": "etiket1, etiket2, etiket3"}'
-                )
-
-                raw = self._run_prompt(pil_image, combined_prompt)
-                caption_tr, tags_tr = self._parse_combined_response(raw)
+                raw = self._run_prompt(pil_image, COMBINED_PROMPT)
+                caption_tr, tags_tr = parse_combined_response(raw)
 
                 if caption_tr:
                     result.caption_tr = caption_tr

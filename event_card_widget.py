@@ -45,7 +45,7 @@ class EventCardWidget(QtWidgets.QWidget):
     
     def mousePressEvent(self, event):
         """Handle mouse click events"""
-        if event.button() == QtCore.Qt.LeftButton:
+        if event.button() in (QtCore.Qt.LeftButton, QtCore.Qt.RightButton):
             self.clicked.emit()
         super().mousePressEvent(event)
 

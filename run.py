@@ -10,7 +10,6 @@ import sys
 import time
 import os
 
-DOCKER_DESKTOP_EXE = r"C:\Program Files\Docker\Docker\Docker Desktop.exe"
 COMPOSE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docker-compose.yml")
 CONTAINER_NAME = "tirnavali_acknowledge_db"
 
@@ -34,7 +33,33 @@ def start_docker_desktop() -> bool:
         return True
 
     print("Docker Desktop başlatılıyor, lütfen bekleyin…")
-    subprocess.Popen([DOCKER_DESKTOP_EXE], shell=False)
+    
+    if sys.platform == "win32":
+        docker_desktop_exe = r"C:\Program Files\Docker\Docker\Docker Desktop.exe"
+        if os.path.exists(docker_desktop_exe):
+            subprocess.Popen([docker_desktop_exe], shell=False)
+        else:
+            print(
+                f"HATA: Docker Desktop bulunamadı: {docker_desktop_exe}\n"
+                "Lütfen Docker Desktop'ı yükleyin veya manuel olarak başlatın."
+            )
+            return False
+    elif sys.platform == "darwin":
+        if os.path.exists("/Applications/Docker.app"):
+            try:
+                subprocess.Popen(["open", "-g", "-a", "Docker"])
+            except Exception as e:
+                print(f"Docker başlatılırken hata oluştu: {e}")
+                return False
+        else:
+            print(
+                "HATA: Docker Desktop bulunamadı (/Applications/Docker.app).\n"
+                "Lütfen Docker Desktop veya Docker daemon'ı manuel olarak başlatın."
+            )
+            return False
+    else:
+        print("Docker çalışmıyor. Lütfen sisteminizde Docker daemon'ını başlatın.")
+        return False
 
     deadline = time.time() + DOCKER_STARTUP_TIMEOUT
     while time.time() < deadline:
@@ -104,13 +129,6 @@ def main():
         return
 
     # --- Start flow ---
-    if not os.path.exists(DOCKER_DESKTOP_EXE):
-        print(
-            f"HATA: Docker Desktop bulunamadı: {DOCKER_DESKTOP_EXE}\n"
-            "Lütfen Docker Desktop'ı yükleyin veya DOCKER_DESKTOP_EXE yolunu run.py içinde düzeltin."
-        )
-        sys.exit(1)
-
     if not start_docker_desktop():
         sys.exit(1)
 
