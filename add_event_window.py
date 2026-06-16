@@ -106,8 +106,9 @@ class AddEvent(QtWidgets.QWidget):
             self.add_event_folder_line.setText(folder)
             
             event_name = basename
+            date_found = False
             
-            # Auto-fill date if DD.MM.YYYY pattern is found in folder name
+            # 1. Try to parse from folder name (DD.MM.YYYY)
             match = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", basename)
             if match:
                 day, month, year = map(int, match.groups())
@@ -118,6 +119,61 @@ class AddEvent(QtWidgets.QWidget):
                     # Remove the date from the name and cleanup whitespace
                     event_name = basename.replace(match.group(0), "").strip()
                     event_name = re.sub(r"\s+", " ", event_name)
+                    date_found = True
+
+            # 2. If not found in folder name, scan media files for the earliest EXIF/filesystem date
+            if not date_found:
+                earliest_time = None
+                from PIL import Image
+                
+                try:
+                    for filename in os.listdir(folder):
+                        ext = os.path.splitext(filename)[1].lower()
+                        file_path = os.path.join(folder, filename)
+                        
+                        if not os.path.isfile(file_path):
+                            continue
+                            
+                        # Image EXIF check
+                        if ext in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}:
+                            try:
+                                with Image.open(file_path) as img:
+                                    exif = img._getexif()
+                                    if exif:
+                                        # EXIF DateTimeOriginal tag is 36867
+                                        dt_str = exif.get(36867) 
+                                        if dt_str:
+                                            import datetime
+                                            try:
+                                                # EXIF format is usually "YYYY:MM:DD HH:MM:SS"
+                                                dt = datetime.datetime.strptime(dt_str, "%Y:%m:%d %H:%M:%S")
+                                                ts = dt.timestamp()
+                                                if earliest_time is None or ts < earliest_time:
+                                                    earliest_time = ts
+                                            except ValueError:
+                                                pass
+                            except Exception:
+                                pass
+                        
+                        # OS modification time fallback (for all supported formats)
+                        from src.utils.document_util import DOCUMENT_EXTS
+                        from src.utils.video_util import VIDEO_EXTS
+                        supported_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"} | DOCUMENT_EXTS | VIDEO_EXTS
+                        if ext in supported_exts:
+                            try:
+                                ts = os.path.getmtime(file_path)
+                                if earliest_time is None or ts < earliest_time:
+                                    earliest_time = ts
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                if earliest_time:
+                    import datetime
+                    dt = datetime.datetime.fromtimestamp(earliest_time)
+                    qdt = QtCore.QDateTime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+                    self.add_event_date_line.setDateTime(qdt)
 
             # Auto-fill event name from folder name if currently empty
             if not self.add_event_name_line.toPlainText().strip():
