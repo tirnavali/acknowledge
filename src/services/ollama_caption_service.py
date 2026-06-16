@@ -21,7 +21,7 @@ import time
 import requests
 
 from src.domain.entities.caption_result import CaptionResult
-from src.services.caption_parsing import COMBINED_PROMPT, parse_combined_response
+from src.services.caption_parsing import get_combined_prompt, parse_combined_response, CaptionOutput
 from src.services.caption_service import CaptionService  # reuse _prepare_image staticmethod
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ class OllamaCaptionService:
         pil.save(buf, "JPEG", quality=90)
         return base64.b64encode(buf.getvalue()).decode("ascii")
 
-    def analyse(self, img_path: str) -> CaptionResult:
+    def analyse(self, img_path: str, person_names: list[str] = None) -> CaptionResult:
         """Single-image captioning. Blocking — call from a QThread worker.
 
         Returns a CaptionResult with caption_tr / tags_tr / duration / error
@@ -107,12 +107,15 @@ class OllamaCaptionService:
             result.error = f"Resim hazırlanamadı: {e}"
             return result
 
+        prompt = get_combined_prompt(person_names)
+
         payload = {
             "model": self._model,
-            "prompt": COMBINED_PROMPT,
+            "prompt": prompt,
             "images": [b64],
             "stream": False,
             "think": self._thinking,
+            "format": CaptionOutput.model_json_schema(),
             "options": {
                 "temperature": 0.3,           # low temp for deterministic JSON
                 "num_predict": 400,           # cap output tokens (caption + tags)
@@ -125,6 +128,13 @@ class OllamaCaptionService:
             r = self._session.post(
                 f"{self._url}/api/generate", json=payload, timeout=self._timeout
             )
+            if r.status_code == 400 and "format" in payload:
+                # Maybe older Ollama version that doesn't support JSON Schema? Try falling back to "json"
+                logger.warning("Ollama returned 400, retrying with format='json'")
+                payload["format"] = "json"
+                r = self._session.post(
+                    f"{self._url}/api/generate", json=payload, timeout=self._timeout
+                )
             r.raise_for_status()
             data = r.json()
             gen_ms = int((time.perf_counter() - gen_start) * 1000)
@@ -147,7 +157,7 @@ class OllamaCaptionService:
             extra={"event": "CAPTION_RESULT", "duration_ms": gen_ms},
         )
 
-        caption_tr, tags_tr = parse_combined_response(raw)
+        caption_tr, tags_tr = parse_combined_response(raw, person_names)
         if caption_tr:
             result.caption_tr = caption_tr
             result.tags_tr = tags_tr

@@ -8,32 +8,41 @@ from __future__ import annotations
 import json
 import logging
 import re
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 
-# Single combined prompt shared by all caption backends.
-# English instructions (Qwen/Gemma both instruction-tuned ~85% English).
-# Turkish output (caption_tr, tags_tr) for the media archive UI.
-COMBINED_PROMPT = (
-    "You are a Turkish media archivist cataloging a press/event photograph. "
-    "Your task: write ONE concise Turkish sentence describing exactly what is visible, "
-    "plus 5-8 searchable tags. Be specific about setting, people, clothing colors, and actions.\n\n"
-    "WHAT TO DESCRIBE:\n"
-    "- The physical setting and environment (parliament, office, park, street, indoor, outdoor, etc.).\n"
-    "- Number and roles of people visible (speaker, attendee, official, journalist, etc.).\n"
-    "- Clothing colors (look carefully; if ambiguous, use general term like 'koyu renkli').\n"
-    "- Significant background objects (flags, podium, banners, screens, furniture, trees, etc.).\n"
-    "- Visible actions only (speaking at podium, standing, sitting, handshake, signing, etc.).\n\n"
-    "WHAT NOT TO DO:\n"
-    "- Never write placeholder tokens: <NAME>, <PERSON>, [isim], ___, etc.\n"
-    "- Never invent details you don't see. Never guess names. Never assume unseen actions.\n"
-    "- If unsure about a color, omit it or use 'koyu renkli' / 'açık renkli'.\n\n"
-    "OUTPUT FORMAT (valid JSON only, no markdown fences, no extra text):\n"
-    '{"caption_tr": "One 20–35 word Turkish sentence describing the scene.", "tags_tr": "tag1, tag2, tag3, ..."}\n\n'
-    "EXAMPLE OUTPUT:\n"
-    '{"caption_tr": "Lacivert takım elbiseli bir konuşmacı, arkasında Türk bayrağı bulunan kürsüde konuşma yapıyor. Dinleyiciler oturmuş dikkatle izliyor.", "tags_tr": "konuşma, kürsü, türk bayrağı, lacivert takım, resmi toplantı, kapalı mekan"}'
-)
+class CaptionOutput(BaseModel):
+    caption_tr: str = Field(..., description="20-40 kelimelik Türkçe sahne betimleme cümlesi")
+    tags_tr: str = Field(..., description="Virgülle ayrılmış 5-8 aranabilir etiket")
+
+
+def get_combined_prompt(person_names: list[str] = None) -> str:
+    names_instruction = ""
+    if person_names:
+        names_str = ", ".join(person_names)
+        names_instruction = f"Fotoğraftaki kişilerin isimleri: {names_str}. Cümleyi kurarken bu isimleri doğal bir şekilde kullan. "
+
+    return str((
+        "Bu fotoğrafı Türkçe analiz et. "
+        "Sadece aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma. "
+        f"{names_instruction}"
+        "Kurallar: "
+        "- Fotoğraf bir parlamento veya meclis ortamını gösteriyorsa, caption_tr içinde bunu açıkça belirt. "
+        "- Kravat renkleri görünüyorsa mutlaka belirt (örneğin: mavi kravat, kırmızı kravat). "
+        "- El sıkışma varsa mutlaka belirt. "
+        "- Bir kişi kürsüde konuşma yapıyorsa mutlaka belirt. "
+        "- Arka planda ülke bayrakları varsa mutlaka belirt. "
+        "- caption_tr alanında 25–40 kelimelik, tek cümlelik ayrıntılı bir açıklama yaz. "
+        "- Mekanı, rolleri (konuşmacı, milletvekili, dinleyici vb.) ve önemli görsel ayrıntıları belirt. "
+        "- Emin değilsen veya kişi isimleri verilmemişse ‘bir konuşmacı’, ‘bir milletvekili’ gibi genel ifadeler kullan. "
+        "- tags_tr alanında en fazla 8 adet, virgülle ayrılmış kısa etiketler yaz (mekan, rol, nesne, renk vb.). "
+        "JSON dışında hiçbir metin yazma.\n",
+        {"caption_tr": "Detaylı Türkçe açıklama cümlesi", 
+         "tags_tr": "etiket1, etiket2, etiket3, etiket4, etiket5"}
+    ))
+
 
 
 # Placeholder tokens VLMs leak from their redacted training data
@@ -46,14 +55,30 @@ _PLACEHOLDER_RE = re.compile(
 )
 
 
-def sanitize_placeholders(text: str, replacement: str = "bir kişi", capitalize_first: bool = True) -> str:
-    """Replace <NAME>/<PERSON>/[isim]/___ leaks with a generic role term.
+def sanitize_placeholders(text: str, person_names: list[str] = None, replacement: str = "bir kişi", capitalize_first: bool = True) -> str:
+    """Replace <NAME>/<PERSON>/[isim]/___ leaks with generic roles or actual names.
 
     capitalize_first: True for sentence-like captions, False for tag lists
     (otherwise "a, b, c" becomes "A, b, c").
     """
     if not text:
         return text
+
+    if person_names:
+        # Resolve placeholders with detected name list in order
+        matches = list(_PLACEHOLDER_RE.finditer(text))
+        if matches:
+            new_text = text
+            # Replace in reverse order so string indices do not shift
+            for i, match in reversed(list(enumerate(matches))):
+                if i < len(person_names):
+                    rep = person_names[i]
+                else:
+                    rep = replacement
+                start, end = match.span()
+                new_text = new_text[:start] + rep + new_text[end:]
+            text = new_text
+
     cleaned = _PLACEHOLDER_RE.sub(replacement, text)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     cleaned = re.sub(r'\s+([.,;:!?])', r'\1', cleaned)
@@ -68,13 +93,13 @@ def _coerce_str(val) -> str:
     return str(val) if val is not None else ""
 
 
-def parse_combined_response(raw: str) -> tuple[str, str]:
+def parse_combined_response(raw: str, person_names: list[str] = None) -> tuple[str, str]:
     """Extract (caption_tr, tags_tr) from a model JSON response.
 
-    Handles three cases:
-    1. Clean JSON  → standard json.loads
+    Handles four cases:
+    1. Clean JSON  → standard json.loads + Pydantic validation
     2. Markdown-fenced JSON (```json ... ```) → strip fence then parse
-    3. Truncated JSON (max_new_tokens hit before closing brace)
+    3. Truncated JSON (max_new_tokens hit before closing brace or quote)
        → extract field values directly via regex so nothing is lost
 
     All returned strings pass through `sanitize_placeholders`.
@@ -83,30 +108,69 @@ def parse_combined_response(raw: str) -> tuple[str, str]:
     stripped = re.sub(r'```\s*$', '', stripped).strip()
 
     try:
-        match = re.search(r'\{.*\}', stripped, re.DOTALL)
+        # Pre-clean trailing commas commonly generated by LLMs in objects and arrays
+        cleaned = re.sub(r',\s*\}', '}', stripped)
+        cleaned = re.sub(r',\s*\]', ']', cleaned)
+        match = re.search(r'\{.*\}', cleaned, re.DOTALL)
         if match:
             data = json.loads(match.group())
-            return (
-                sanitize_placeholders(_coerce_str(data.get("caption_tr", "")).strip()),
-                sanitize_placeholders(_coerce_str(data.get("tags_tr", "")).strip(), replacement="kişi", capitalize_first=False),
-            )
-    except (json.JSONDecodeError, ValueError):
+            
+            # Map alternative keys from model generation
+            caption_val = data.get("caption_tr") or data.get("caption") or ""
+            tags_val = data.get("tags_tr") or data.get("tags_tr_") or data.get("tags") or ""
+            
+            # Coerce list/array values to comma-separated string
+            caption_str = _coerce_str(caption_val).strip()
+            tags_str = _coerce_str(tags_val).strip()
+            
+            if caption_str or tags_str:
+                return (
+                    sanitize_placeholders(caption_str, person_names),
+                    sanitize_placeholders(tags_str, person_names, replacement="kişi", capitalize_first=False),
+                )
+    except Exception:
         pass
 
+    # Fallback to regex parsing for malformed or truncated JSON
     caption_tr = ""
     tags_tr = ""
-    m = re.search(r'"caption_tr"\s*:\s*"(.*?)"', stripped, re.DOTALL)
-    if m:
-        caption_tr = m.group(1).strip()
-    m = re.search(r'"tags_tr"\s*:\s*"(.*?)"', stripped, re.DOTALL)
-    if m:
-        tags_tr = m.group(1).strip()
+
+    # Try to extract caption_tr or alternate keys
+    for key in ["caption_tr", "caption"]:
+        m = re.search(rf'"{key}"\s*:\s*"(.*?)"', stripped, re.DOTALL)
+        if m:
+            caption_tr = m.group(1).strip()
+            break
+        else:
+            m = re.search(rf'"{key}"\s*:\s*"(.*)', stripped, re.DOTALL)
+            if m:
+                val = m.group(1).strip()
+                for alt_key in ["tags_tr", "tags_tr_", "tags"]:
+                    if f'"{alt_key}"' in val:
+                        val = val.split(f'"{alt_key}"')[0].strip()
+                val = re.sub(r'["\s,]+$', '', val)
+                caption_tr = val
+                break
+
+    # Try to extract tags_tr or alternate keys
+    for key in ["tags_tr", "tags_tr_", "tags"]:
+        m = re.search(rf'"{key}"\s*:\s*"(.*?)"', stripped, re.DOTALL)
+        if m:
+            tags_tr = m.group(1).strip()
+            break
+        else:
+            m = re.search(rf'"{key}"\s*:\s*"(.*)', stripped, re.DOTALL)
+            if m:
+                val = m.group(1).strip()
+                val = re.sub(r'["\}\s,]+$', '', val)
+                tags_tr = val
+                break
 
     if caption_tr:
         logger.debug("caption_parsing: partial JSON recovered via regex for raw: %s", raw[:80])
         return (
-            sanitize_placeholders(caption_tr),
-            sanitize_placeholders(tags_tr, replacement="kişi", capitalize_first=False),
+            sanitize_placeholders(caption_tr, person_names),
+            sanitize_placeholders(tags_tr, person_names, replacement="kişi", capitalize_first=False),
         )
 
     logger.warning("caption_parsing: JSON parse failed, raw response: %s", raw[:200])

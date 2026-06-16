@@ -10,6 +10,12 @@ import sys
 import time
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 COMPOSE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docker-compose.yml")
 CONTAINER_NAME = "tirnavali_acknowledge_db"
 
@@ -95,9 +101,10 @@ def start_containers() -> bool:
 
     # Wait for PostgreSQL to be ready (up to 30 s)
     deadline = time.time() + 30
+    db_user = os.getenv("DB_USER", "tirnavali")
     while time.time() < deadline:
         health = _run(
-            ["docker", "exec", CONTAINER_NAME, "pg_isready", "-U", "tirnavali"],
+            ["docker", "exec", CONTAINER_NAME, "pg_isready", "-U", db_user],
         )
         if health.returncode == 0:
             print("Veritabanı hazır.")
@@ -121,6 +128,22 @@ def stop_containers():
 
 
 def main():
+    # Enforce execution inside the local virtual environment (.venv) to prevent 
+    # dependency conflicts and tokenizer corruption between Anaconda and the venv.
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if sys.platform == "win32":
+        venv_python = os.path.join(current_dir, ".venv", "Scripts", "python.exe")
+    else:
+        venv_python = os.path.join(current_dir, ".venv", "bin", "python")
+
+
+
+    if os.path.exists(venv_python) and os.path.abspath(sys.executable) != os.path.abspath(venv_python):
+        print(f"Sanal ortam (.venv) algılandı. Uygulama sanal ortam python'ı ile yeniden başlatılıyor: {venv_python}", flush=True)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.execv(venv_python, [venv_python] + sys.argv)
+
     if "--stop" in sys.argv:
         if not is_docker_running():
             print("Docker zaten çalışmıyor.")

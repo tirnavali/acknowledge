@@ -39,14 +39,21 @@ class CaptionWorker(QtCore.QThread):
     finished = QtCore.Signal(object)   # CaptionResult
     error    = QtCore.Signal(str)
 
-    def __init__(self, caption_service, img_path, parent=None):
+    def __init__(self, caption_service, media_service, person_service, img_path, parent=None):
         super().__init__(parent)
-        self._svc      = caption_service
-        self._img_path = img_path
+        self._svc        = caption_service
+        self._media_svc  = media_service
+        self._person_svc = person_service
+        self._img_path   = img_path
 
     def run(self):
         try:
-            result = self._svc.analyse(self._img_path)
+            person_names = None
+            if self._media_svc and self._person_svc:
+                record = self._media_svc.get_by_file_path(self._img_path)
+                if record:
+                    person_names = self._person_svc.get_persons_for_media(record["id"])
+            result = self._svc.analyse(self._img_path, person_names=person_names)
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
@@ -58,11 +65,13 @@ class BatchCaptionWorker(QtCore.QThread):
     finished = QtCore.Signal(list)       # list[CaptionResult]
     error    = QtCore.Signal(str)
 
-    def __init__(self, caption_service, img_paths, parent=None):
+    def __init__(self, caption_service, media_service, person_service, img_paths, parent=None):
         super().__init__(parent)
-        self._svc       = caption_service
-        self._img_paths = img_paths
-        self._stop      = False
+        self._svc        = caption_service
+        self._media_svc  = media_service
+        self._person_svc = person_service
+        self._img_paths  = img_paths
+        self._stop       = False
 
     def stop(self):
         self._stop = True
@@ -74,7 +83,12 @@ class BatchCaptionWorker(QtCore.QThread):
             if self._stop:
                 break
             try:
-                result = self._svc.analyse(path)
+                person_names = None
+                if self._media_svc and self._person_svc:
+                    record = self._media_svc.get_by_file_path(path)
+                    if record:
+                        person_names = self._person_svc.get_persons_for_media(record["id"])
+                result = self._svc.analyse(path, person_names=person_names)
             except Exception as e:
                 from src.domain.entities.caption_result import CaptionResult
                 result = CaptionResult(img_path=path, error=str(e))
@@ -92,10 +106,11 @@ class BatchCaptionWorker(QtCore.QThread):
 class CaptionTabWidget(QtWidgets.QWidget):
     stats_updated = QtCore.Signal(object)  # Emitted with CaptionResult
 
-    def __init__(self, caption_service, media_service, parent=None):
+    def __init__(self, caption_service, media_service, person_service=None, parent=None):
         super().__init__(parent)
         self._svc         = caption_service
         self._media_svc   = media_service
+        self._person_svc  = person_service
         self._model_worker  = None
         self._caption_worker = None
         self._batch_worker  = None
@@ -350,7 +365,7 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._status_label.setText("Analiz ediliyor…")
         self._spinner.setVisible(True)
 
-        self._caption_worker = CaptionWorker(self._svc, self._selected_path, parent=self)
+        self._caption_worker = CaptionWorker(self._svc, self._media_svc, self._person_svc, self._selected_path, parent=self)
         self._caption_worker.finished.connect(self._on_single_finished)
         self._caption_worker.error.connect(self._on_worker_error)
         self._caption_worker.start()
@@ -413,7 +428,7 @@ class CaptionTabWidget(QtWidgets.QWidget):
         self._status_label.setText("Toplu analiz başladı…")
 
         self._batch_start = time.monotonic()
-        self._batch_worker = BatchCaptionWorker(self._svc, paths, parent=self)
+        self._batch_worker = BatchCaptionWorker(self._svc, self._media_svc, self._person_svc, paths, parent=self)
         self._batch_worker.progress.connect(self._on_batch_progress)
         self._batch_worker.one_done.connect(self._on_batch_one_done)
         self._batch_worker.finished.connect(self._on_batch_finished)

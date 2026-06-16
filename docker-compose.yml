@@ -4,11 +4,11 @@ services:
     image: ankane/pgvector:latest # Yüz tanıma vektörleri için özel imaj
     container_name: tirnavali_acknowledge_db
     environment:
-      POSTGRES_USER: tirnavali
-      POSTGRES_PASSWORD: tbmm1920
-      POSTGRES_DB: tirnavali_acknowledge_db
+      POSTGRES_USER: ${DB_USER:-tirnavali}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tbmm1920}
+      POSTGRES_DB: ${DB_NAME:-tirnavali_acknowledge_db}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped

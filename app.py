@@ -157,13 +157,14 @@ class BackgroundCaptionWorker(QtCore.QThread):
     image_captioned = QtCore.Signal(str)        # file_path when one image is done
     result_ready    = QtCore.Signal(object)     # CaptionResult after each image
 
-    def __init__(self, file_paths, event_id, caption_service, media_service, parent=None, event_name=""):
+    def __init__(self, file_paths, event_id, caption_service, media_service, person_service=None, parent=None, event_name=""):
         super().__init__(parent)
         self._file_paths  = file_paths
         self._event_id    = event_id
         self._event_name  = event_name
         self._caption_svc = caption_service
         self._media_svc   = media_service
+        self._person_svc  = person_service
 
     def run(self):
         import time as _time
@@ -176,7 +177,10 @@ class BackgroundCaptionWorker(QtCore.QThread):
         for i, file_path in enumerate(self._file_paths, 1):
             try:
                 media_id = self._media_svc.ensure_media_exists(self._event_id, file_path, "photo")
-                result = self._caption_svc.analyse(file_path)
+                person_names = None
+                if self._person_svc:
+                    person_names = self._person_svc.get_persons_for_media(media_id)
+                result = self._caption_svc.analyse(file_path, person_names=person_names)
                 if result.has_data and not result.error:
                     self._media_svc.save_captions(media_id, result)
             except Exception as e:
@@ -626,6 +630,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.caption_tab = CaptionTabWidget(
             caption_service=self.app_service.get_caption_service(),
             media_service=self.app_service.get_media_service(),
+            person_service=self.app_service.get_person_service(),
             parent=self,
         )
         self.tab_widget.addTab(self.caption_tab, "Altyazı")
@@ -913,6 +918,7 @@ class MainWindow(QtWidgets.QMainWindow):
             event.id,
             svc.get_caption_service(),
             svc.get_media_service(),
+            person_service=svc.get_person_service(),
             parent=self,
             event_name=getattr(event, 'name', ''),
         )

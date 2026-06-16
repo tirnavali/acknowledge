@@ -9,6 +9,12 @@ After this completes, app.py will load the model from disk automatically.
 """
 import ssl
 import sys
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Patch SSL BEFORE importing anything that touches the network
 ssl._create_default_https_context = ssl._create_unverified_context

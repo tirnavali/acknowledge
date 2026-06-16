@@ -33,7 +33,7 @@ requests.Session.__init__ = _patched_session_init
 
 
 from src.domain.entities.caption_result import CaptionResult
-from src.services.caption_parsing import COMBINED_PROMPT, parse_combined_response
+from src.services.caption_parsing import get_combined_prompt, parse_combined_response
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,10 @@ class CaptionService:
                 # Direct import fallback for environments where top-level exports might be missing
                 from transformers.models.qwen2_5_vl import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
 
+            import transformers
+            logger.info(f"Loaded transformers from: {transformers.__file__} (version: {transformers.__version__})")
+            logger.info(f"Loaded torch from: {torch.__file__} (version: {torch.__version__})")
+
             cuda_available = torch.cuda.is_available()
             mps_available  = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
@@ -108,13 +112,12 @@ class CaptionService:
                 )
                 self._model.to("cuda")
             elif mps_available:
-                # float16 instead of bfloat16: MPS backend has limited bfloat16 support
-                # and crashes on several Qwen2.5-VL ops. float16 is stable on MPS.
-                # Limit CPU threads used by non-MPS ops (attention mask, tokenizer, etc.)
+                # Use bfloat16: PyTorch 2.5+ / 2.11.0 on MPS has native bfloat16 support.
+                # bfloat16 prevents numerical overflow/NaN attention loops (which caused !!! repetition bugs).
                 torch.set_num_threads(max(2, (os.cpu_count() or 4) // 2))
                 self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     model_id,
-                    torch_dtype=torch.float16,
+                    torch_dtype=torch.bfloat16,
                 )
                 self._model.to("mps")
             else:
@@ -184,7 +187,7 @@ class CaptionService:
         with torch.no_grad():
             generated_ids = self._model.generate(
                 **inputs,
-                max_new_tokens=300,  # 120 was too small: 25-40 word caption + JSON overhead truncated output
+                max_new_tokens=400,  # 400 provides extra headroom to prevent JSON truncation with detailed captions
                 do_sample=False,
                 repetition_penalty=1.15,   # kills token-loop bug ("göğüslerindeki sakallar" repeating)
                 no_repeat_ngram_size=4,    # blocks any 4-gram from repeating verbatim
@@ -236,7 +239,27 @@ class CaptionService:
         logger.debug(f"_prepare_image: {w}×{h} → {new_w}×{new_h} (in-memory)")
         return resized
 
-    def analyse(self, img_path: str) -> CaptionResult:
+    def _correct_grammar_if_enabled(self, text: str) -> str:
+        """Runs Ollama-based grammar correction if enabled in settings and Ollama is ready."""
+        from src.utils import config_util
+        if not config_util.get_setting("grammar_correction_enabled", True):
+            return text
+
+        try:
+            from src.services.grammar_service import OllamaGrammarService
+            grammar_svc = OllamaGrammarService(
+                model=config_util.get_setting("grammar_correction_model", "gemma4:latest"),
+                url=os.environ.get("OLLAMA_URL", "http://localhost:11434")
+            )
+            if grammar_svc.is_ready():
+                return grammar_svc.correct_text(text)
+            else:
+                logger.warning("OllamaGrammarService is not ready or reachable. Skipping correction.")
+        except Exception as e:
+            logger.error(f"Failed to run grammar correction: {e}")
+        return text
+
+    def analyse(self, img_path: str, person_names: list[str] = None) -> CaptionResult:
         """
         Run a single combined Turkish JSON prompt and return a CaptionResult.
         Blocking — must be called from a QThread worker.
@@ -267,18 +290,19 @@ class CaptionService:
             try:
                 full_start = time.perf_counter()
 
-                raw = self._run_prompt(pil_image, COMBINED_PROMPT)
-                caption_tr, tags_tr = parse_combined_response(raw)
+                prompt = get_combined_prompt(person_names)
+                raw = self._run_prompt(pil_image, prompt)
+                caption_tr, tags_tr = parse_combined_response(raw, person_names)
 
                 if caption_tr:
-                    result.caption_tr = caption_tr
+                    result.caption_tr = self._correct_grammar_if_enabled(caption_tr)
                     result.tags_tr = tags_tr
                 else:
                     # Fallback: JSON parse failed but model produced text output.
                     # Save raw text directly so the caption is not silently lost.
                     raw_stripped = raw.strip()
                     if len(raw_stripped) > 20:
-                        result.caption_tr = raw_stripped
+                        result.caption_tr = self._correct_grammar_if_enabled(raw_stripped)
                         logger.warning(
                             "CaptionService: JSON parse failed, saving raw text as "
                             "caption_tr for %s",

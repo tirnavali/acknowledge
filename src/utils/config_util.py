@@ -10,6 +10,8 @@ CONFIG_FILE = os.path.join(PROJECT_ROOT, "settings.json")
 DEFAULT_CONFIG = {
     "auto_captioning_enabled": False,
     "language": "tr",
+    "grammar_correction_enabled": True,
+    "grammar_correction_model": "gemma4:latest",
 }
 
 def load_config() -> dict:
