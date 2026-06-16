@@ -190,6 +190,20 @@ class AddEvent(QtWidgets.QWidget):
 
         service = self.parent().app_service.get_event_service()
 
+        existing_event = service.get_by_name(event_name)
+        if existing_event:
+            reply = QtWidgets.QMessageBox.warning(
+                self,
+                "Aynı İsimde Etkinlik Mevcut",
+                f"'{event_name}' adında bir etkinlik zaten mevcut!\n\n"
+                "Bu işlem mevcut veritabanı ile çakışacaktır. Devam ederek klasördeki "
+                "yeni (benzersiz) dosyaları bu etkinliğe eklemek istiyor musunuz?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
+
         self._progress_dialog = QtWidgets.QProgressDialog(
             "Dosyalar kopyalanıyor...", None, 0, 100, self
         )

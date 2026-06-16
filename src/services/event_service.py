@@ -70,6 +70,14 @@ class EventService(BaseService):
         """Get event by ID (alias for get_by_id)."""
         return self.get_by_id(event_id)
 
+    def get_by_name(self, name: str) -> Event | None:
+        """Get event by name."""
+        try:
+            return self.event_repository.get_by_name(name)
+        except Exception as e:
+            self.logger.error(f"Error getting event by name '{name}': {e}")
+            raise
+
     def create_and_import_event(
         self,
         name: str,
@@ -82,18 +90,29 @@ class EventService(BaseService):
         Create an event and copy media files from source_folder into the vault.
 
         Steps:
-        1. Create a vault subfolder named after the event.
-        2. Copy all image files from source_folder into it.
-        3. Persist the event record and return it.
+        1. Check if event with this name already exists. If yes, re-use its vault path.
+        2. Otherwise, create a vault subfolder named after the event.
+        3. Copy unique files from source_folder into it.
+        4. Persist/update the event record and return it.
 
         progress_callback(current: int, total: int) is called after each file is copied.
         """
         from src.utils.document_util import DOCUMENT_EXTS, extract_docx_text, extract_doc_metadata, generate_document_thumbnail
         from src.utils.video_util import VIDEO_EXTS, generate_video_thumbnail, extract_video_metadata
 
-        safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in name).strip()
-        vault_folder = os.path.join(vault_base_path, safe_name)
-        os.makedirs(vault_folder, exist_ok=True)
+        existing_event = self.get_by_name(name)
+        if existing_event:
+            event = existing_event
+            vault_folder = event.vault_folder_path
+        else:
+            safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in name).strip()
+            vault_folder = os.path.join(vault_base_path, safe_name)
+            os.makedirs(vault_folder, exist_ok=True)
+            event = Event.create(
+                name=name,
+                event_date=event_date,
+                imported_folder_path=source_folder,
+            )
 
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
         supported_exts = image_exts | DOCUMENT_EXTS | VIDEO_EXTS
@@ -109,8 +128,14 @@ class EventService(BaseService):
             src = os.path.join(source_folder, filename)
             dst = os.path.join(vault_folder, filename)
             ext = os.path.splitext(filename)[1].lower()
-            if not os.path.exists(dst):
-                shutil.copy2(src, dst)
+            
+            # Unique files only: If already exists in vault, skip copy and DB import for it
+            if os.path.exists(dst):
+                if progress_callback is not None:
+                    progress_callback(i, total)
+                continue
+
+            shutil.copy2(src, dst)
 
             thumb_dir = os.path.join(vault_folder, ".thumbnails")
             os.makedirs(thumb_dir, exist_ok=True)
@@ -152,13 +177,9 @@ class EventService(BaseService):
             if progress_callback is not None:
                 progress_callback(i, total)
 
-        event = Event.create(
-            name=name,
-            event_date=event_date,
-            imported_folder_path=source_folder,
-        )
-        event.mark_as_imported(vault_folder)
-        self.event_repository.save(event)
+        if not existing_event:
+            event.mark_as_imported(vault_folder)
+            self.event_repository.save(event)
 
         if doc_metadata and self.media_repository:
             for filename, doc_meta in doc_metadata.items():

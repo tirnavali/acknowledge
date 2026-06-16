@@ -35,6 +35,24 @@ class EventRepository:
                     _import_success=row.import_success
                 )
             return None
+            
+    def get_by_name(self, name: str) -> Event | None:
+        with get_db() as db:
+            result = db.execute(
+                text("SELECT * FROM events WHERE LOWER(name) = LOWER(:name)"),
+                {"name": name}
+            )
+            row = result.fetchone()
+            if row:
+                return Event(
+                    _id=row.id if isinstance(row.id, UUID) else UUID(row.id),
+                    _name=row.name,
+                    _event_date=row.event_date,
+                    _imported_folder_path=row.imported_folder_path,
+                    _vault_folder_path=row.vault_folder_path,
+                    _import_success=row.import_success
+                )
+            return None
 
     def delete(self, event_id: UUID) -> None:
         """Delete an event and all its associated data."""
