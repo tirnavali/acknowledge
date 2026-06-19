@@ -213,6 +213,14 @@ class MediaService(BaseService):
             self.logger.error(f"Error saving captions for media {media_id}: {e}")
             raise
 
+    def update_ai_caption_and_tags(self, media_id, caption_tr: str, tags_tr: str) -> None:
+        """Save user-edited AI caption and tags to the database."""
+        try:
+            self.media_repository.update_ai_caption_and_tags(media_id, caption_tr, tags_tr)
+        except Exception as e:
+            self.logger.error(f"Error updating AI caption/tags for media {media_id}: {e}")
+            raise
+
     def mark_captioned(self, media_id) -> None:
         try:
             self.media_repository.mark_captioned(media_id)

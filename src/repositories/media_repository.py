@@ -134,6 +134,8 @@ class MediaRepository:
                 UPDATE medias
                 SET caption_en = :caption_en, caption_tr = :caption_tr,
                     tags_en    = :tags_en,    tags_tr    = :tags_tr,
+                    ai_caption_tr_orig = :caption_tr,
+                    ai_tags_tr_orig = :tags_tr,
                     captioned_at = now()
                 WHERE id = :media_id
             """), {
@@ -142,6 +144,23 @@ class MediaRepository:
                 "caption_tr": sanitize_str(result.caption_tr),
                 "tags_en":    sanitize_str(result.tags_en),
                 "tags_tr":    sanitize_str(result.tags_tr),
+            })
+            db.commit()
+
+    def update_ai_caption_and_tags(self, media_id: UUID, caption_tr: str, tags_tr: str) -> None:
+        """Update user-edited AI caption and tags in the database."""
+        with get_db() as db:
+            db.execute(text("""
+                UPDATE medias
+                SET ai_caption_tr_orig = COALESCE(ai_caption_tr_orig, caption_tr),
+                    ai_tags_tr_orig = COALESCE(ai_tags_tr_orig, tags_tr),
+                    caption_tr = :caption_tr,
+                    tags_tr = :tags_tr
+                WHERE id = :media_id
+            """), {
+                "media_id": str(media_id),
+                "caption_tr": sanitize_str(caption_tr),
+                "tags_tr": sanitize_str(tags_tr),
             })
             db.commit()
 

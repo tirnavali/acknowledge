@@ -277,6 +277,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Tirnavali Acknowledge")
         self.current_event_id = None
         self.current_media_id = None
+        self._current_ai_caption_orig = ""
+        self._current_ai_tags_orig = ""
         self.app_service = ApplicationService()
         self._face_detection_queue: list = []   # list of (file_paths, event)
         self._batch_face_worker = None
@@ -964,9 +966,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # --- 1. Update single view panel if this file is currently open ---
             if self.single_view_widget.current_img_path == file_path:
+                self._current_ai_caption_orig = (media_row.get('ai_caption_tr_orig') or media_row.get('caption_tr') or '') if media_row else ''
+                self._current_ai_tags_orig = (media_row.get('ai_tags_tr_orig') or media_row.get('tags_tr') or '') if media_row else ''
                 self._ai_caption_en.setPlainText(caption_tr)
                 self._ai_caption_tr.setPlainText('')
                 self._ai_tags_en.setText(tags_tr)
+                self._update_ai_status_ui()
 
             # --- 2. Update the GalleryItem in the model so the gallery grid
             #        reflects the new caption without reopening the event. ---
@@ -1407,10 +1412,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 rating = item.star_rating
             self._set_star_display(rating)
 
+            # Store original values from DB (with fallback to current if original is not populated yet)
+            if media_row:
+                self._current_ai_caption_orig = media_row.get('ai_caption_tr_orig') or media_row.get('caption_tr') or ''
+                self._current_ai_tags_orig = media_row.get('ai_tags_tr_orig') or media_row.get('tags_tr') or ''
+            else:
+                self._current_ai_caption_orig = ''
+                self._current_ai_tags_orig = ''
+
             # AI caption fields (always from media_row; clear if not yet captioned)
             self._ai_caption_en.setPlainText((media_row.get('caption_tr') or '') if media_row else '')
             self._ai_caption_tr.setPlainText('')
             self._ai_tags_en.setText((media_row.get('tags_tr') or '') if media_row else '')
+            self._update_ai_status_ui()
 
 
     def save_media_iptc(self, silent=False):
@@ -1460,6 +1474,11 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self.current_media_id = media_id
             self.app_service.get_media_service().save_iptc_data(media_id, iptc_data)
+            
+            # Save user-edited AI caption & tags
+            ai_caption = self._ai_caption_en.toPlainText()
+            ai_tags = self._ai_tags_en.text()
+            self.app_service.get_media_service().update_ai_caption_and_tags(media_id, ai_caption, ai_tags)
             
             # 3. Handle persons
             self.app_service.get_person_service().unlink_all_from_media(media_id)
@@ -1817,6 +1836,63 @@ class MainWindow(QtWidgets.QMainWindow):
             logging.warning(f"Error updating faces: {e}")
 
     # ------------------------------------------------------------------
+    # AI caption/tags status and revert helpers
+    # ------------------------------------------------------------------
+
+    def _update_ai_status_ui(self):
+        """Update the badges and revert button visibility based on whether the current
+        text matches the original AI text.
+        """
+        # Read current UI text
+        curr_caption = self._ai_caption_en.toPlainText().strip()
+        curr_tags = self._ai_tags_en.text().strip()
+        
+        orig_caption = self._current_ai_caption_orig.strip()
+        orig_tags = self._current_ai_tags_orig.strip()
+        
+        # 1. AI Caption status
+        if not orig_caption:
+            # No AI caption yet
+            self._ai_caption_badge.setText("")
+            self._ai_caption_badge.setStyleSheet("")
+            self._ai_caption_revert_btn.hide()
+        elif curr_caption == orig_caption:
+            # Match original
+            self._ai_caption_badge.setText("🤖 AI Orijinal")
+            self._ai_caption_badge.setStyleSheet("font-size: 10px; font-weight: bold; color: #4caf50; background: rgba(76, 175, 80, 0.15); border-radius: 3px; padding: 2px 5px;")
+            self._ai_caption_revert_btn.hide()
+        else:
+            # Edited
+            self._ai_caption_badge.setText("✍️ Düzenlendi")
+            self._ai_caption_badge.setStyleSheet("font-size: 10px; font-weight: bold; color: #ff9f43; background: rgba(255, 159, 67, 0.15); border-radius: 3px; padding: 2px 5px;")
+            self._ai_caption_revert_btn.show()
+            
+        # 2. AI Tags status
+        if not orig_tags:
+            # No AI tags yet
+            self._ai_tags_badge.setText("")
+            self._ai_tags_badge.setStyleSheet("")
+            self._ai_tags_revert_btn.hide()
+        elif curr_tags == orig_tags:
+            # Match original
+            self._ai_tags_badge.setText("🤖 AI Orijinal")
+            self._ai_tags_badge.setStyleSheet("font-size: 10px; font-weight: bold; color: #4caf50; background: rgba(76, 175, 80, 0.15); border-radius: 3px; padding: 2px 5px;")
+            self._ai_tags_revert_btn.hide()
+        else:
+            # Edited
+            self._ai_tags_badge.setText("✍️ Düzenlendi")
+            self._ai_tags_badge.setStyleSheet("font-size: 10px; font-weight: bold; color: #ff9f43; background: rgba(255, 159, 67, 0.15); border-radius: 3px; padding: 2px 5px;")
+            self._ai_tags_revert_btn.show()
+
+    def _on_ai_caption_revert_clicked(self):
+        """Restore the original AI caption to the UI field."""
+        self._ai_caption_en.setPlainText(self._current_ai_caption_orig)
+
+    def _on_ai_tags_revert_clicked(self):
+        """Restore the original AI tags to the UI field."""
+        self._ai_tags_en.setText(self._current_ai_tags_orig)
+
+    # ------------------------------------------------------------------
     # Star rating helpers
     # ------------------------------------------------------------------
 
@@ -2129,10 +2205,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_tags")), self.media_tags_input)
         self.media_details_form.addRow(QtWidgets.QLabel("👥 Kişiler:"), self.media_people_input)
 
-        # AI-generated caption fields (read-only, populated by background captioning)
-        _ai_style = "background: #1a1a2e; color: #ccc; border: 1px solid #333; border-radius: 3px; font-size: 10px;"
+        # AI-generated caption fields (editable, with status/revert UI)
+        _ai_style = """
+            QTextEdit {
+                background: #1a1a2e;
+                color: #ccc;
+                border: 1px solid #333;
+                border-radius: 3px;
+                font-size: 11px;
+            }
+            QTextEdit:focus {
+                border: 1px solid #ff9f43;
+            }
+        """
+        _ai_tags_style = """
+            QLineEdit {
+                background: #1a1a2e;
+                color: #ccc;
+                border: 1px solid #333;
+                border-radius: 3px;
+                font-size: 11px;
+                padding: 2px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #ff9f43;
+            }
+        """
+
         self._ai_caption_en = QtWidgets.QTextEdit()
-        self._ai_caption_en.setReadOnly(True)
+        self._ai_caption_en.setReadOnly(False)
         self._ai_caption_en.setMaximumHeight(70)
         self._ai_caption_en.setMaximumWidth(fixed_width)
         self._ai_caption_en.setPlaceholderText("(AI açıklaması bekleniyor…)")
@@ -2144,16 +2245,92 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ai_caption_tr.setMaximumWidth(fixed_width)
         self._ai_caption_tr.setPlaceholderText("(AI Türkçe açıklama bekleniyor…)")
         self._ai_caption_tr.setStyleSheet(_ai_style)
+        self._ai_caption_tr.hide()
 
         self._ai_tags_en = QtWidgets.QLineEdit()
-        self._ai_tags_en.setReadOnly(True)
+        self._ai_tags_en.setReadOnly(False)
         self._ai_tags_en.setMaximumWidth(fixed_width)
         self._ai_tags_en.setPlaceholderText("(AI etiketler…)")
-        self._ai_tags_en.setStyleSheet(_ai_style)
+        self._ai_tags_en.setStyleSheet(_ai_tags_style)
 
-        self._ai_caption_tr.hide()
-        self.media_details_form.addRow(QtWidgets.QLabel("🤖 AI Açıklama:"), self._ai_caption_en)
-        self.media_details_form.addRow(QtWidgets.QLabel("🏷 AI Etiket:"), self._ai_tags_en)
+        # AI Caption Field Side layout with status badge and revert button
+        self._ai_caption_layout_widget = QtWidgets.QWidget()
+        self._ai_caption_layout_widget.setMaximumWidth(fixed_width)
+        _ai_cap_vbox = QtWidgets.QVBoxLayout(self._ai_caption_layout_widget)
+        _ai_cap_vbox.setContentsMargins(0, 0, 0, 0)
+        _ai_cap_vbox.setSpacing(2)
+
+        _cap_status_hbar = QtWidgets.QHBoxLayout()
+        self._ai_caption_badge = QtWidgets.QLabel("")
+        self._ai_caption_badge.setStyleSheet("font-size: 10px; font-weight: bold; border-radius: 3px; padding: 2px;")
+        
+        self._ai_caption_revert_btn = QtWidgets.QPushButton("↩️ Orijinale Dön")
+        self._ai_caption_revert_btn.setToolTip("Orijinal AI açıklamasına geri dön")
+        self._ai_caption_revert_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 10px;
+                color: #ff9f43;
+                background: transparent;
+                border: 1px solid #ff9f43;
+                border-radius: 3px;
+                padding: 1px 5px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 159, 67, 0.1);
+            }
+        """)
+        self._ai_caption_revert_btn.hide()
+        _cap_status_hbar.addWidget(self._ai_caption_badge)
+        _cap_status_hbar.addStretch()
+        _cap_status_hbar.addWidget(self._ai_caption_revert_btn)
+
+        _ai_cap_vbox.addLayout(_cap_status_hbar)
+        _ai_cap_vbox.addWidget(self._ai_caption_en)
+
+        # AI Tags Field Side layout with status badge and revert button
+        self._ai_tags_layout_widget = QtWidgets.QWidget()
+        self._ai_tags_layout_widget.setMaximumWidth(fixed_width)
+        _ai_tags_vbox = QtWidgets.QVBoxLayout(self._ai_tags_layout_widget)
+        _ai_tags_vbox.setContentsMargins(0, 0, 0, 0)
+        _ai_tags_vbox.setSpacing(2)
+
+        _tags_status_hbar = QtWidgets.QHBoxLayout()
+        self._ai_tags_badge = QtWidgets.QLabel("")
+        self._ai_tags_badge.setStyleSheet("font-size: 10px; font-weight: bold; border-radius: 3px; padding: 2px;")
+        
+        self._ai_tags_revert_btn = QtWidgets.QPushButton("↩️ Orijinale Dön")
+        self._ai_tags_revert_btn.setToolTip("Orijinal AI etiketlerine geri dön")
+        self._ai_tags_revert_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 10px;
+                color: #ff9f43;
+                background: transparent;
+                border: 1px solid #ff9f43;
+                border-radius: 3px;
+                padding: 1px 5px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 159, 67, 0.1);
+            }
+        """)
+        self._ai_tags_revert_btn.hide()
+        _tags_status_hbar.addWidget(self._ai_tags_badge)
+        _tags_status_hbar.addStretch()
+        _tags_status_hbar.addWidget(self._ai_tags_revert_btn)
+
+        _ai_tags_vbox.addLayout(_tags_status_hbar)
+        _ai_tags_vbox.addWidget(self._ai_tags_en)
+
+        self.media_details_form.addRow(QtWidgets.QLabel("🤖 AI Açıklama:"), self._ai_caption_layout_widget)
+        self.media_details_form.addRow(QtWidgets.QLabel("🏷 AI Etiket:"), self._ai_tags_layout_widget)
+
+        # Connect text change listeners for real-time status badge updating
+        self._ai_caption_en.textChanged.connect(self._update_ai_status_ui)
+        self._ai_tags_en.textChanged.connect(self._update_ai_status_ui)
+
+        # Connect revert buttons
+        self._ai_caption_revert_btn.clicked.connect(self._on_ai_caption_revert_clicked)
+        self._ai_tags_revert_btn.clicked.connect(self._on_ai_tags_revert_clicked)
 
         self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_credit")), self.media_credit_input)
         self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_source")), self.media_source_input)
