@@ -43,6 +43,15 @@ class EventCardWidget(QtWidgets.QWidget):
         # Make the widget focusable so it can receive keyboard events
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
     
+    def sizeHint(self):
+        w = self.width()
+        if w <= 0 or w == 640:
+            w = 184
+        if self.layout.hasHeightForWidth():
+            h = self.layout.heightForWidth(w)
+            return QtCore.QSize(w, h)
+        return super().sizeHint()
+
     def mousePressEvent(self, event):
         """Handle mouse click events"""
         if event.button() in (QtCore.Qt.LeftButton, QtCore.Qt.RightButton):
