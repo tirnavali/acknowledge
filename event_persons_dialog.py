@@ -68,25 +68,22 @@ def _crop_face(file_path: str, bbox, timestamp_ms: float | None = None) -> QtGui
 
 
 class _PersonRow(QtWidgets.QFrame):
-    clicked = QtCore.Signal(str)   # person name
+    clicked = QtCore.Signal()   # Emitted when row is clicked
 
     def __init__(self, person: dict, parent=None):
         super().__init__(parent)
         self._name = person["name"]
         self.setCursor(QtCore.Qt.PointingHandCursor)
-        self.setStyleSheet("""
-            QFrame {
-                background: rgba(45,45,50,200);
-                border-radius: 6px;
-            }
-            QFrame:hover {
-                background: rgba(0,120,215,180);
-            }
-        """)
 
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(8, 6, 12, 6)
         layout.setSpacing(12)
+
+        # Custom checkbox label
+        self.check_label = QtWidgets.QLabel()
+        self.check_label.setFixedSize(18, 18)
+        self.check_label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(self.check_label)
 
         # Face thumbnail
         thumb_label = QtWidgets.QLabel()
@@ -128,24 +125,75 @@ class _PersonRow(QtWidgets.QFrame):
         layout.addLayout(text_layout)
         layout.addStretch()
 
-        arrow = QtWidgets.QLabel("›")
-        arrow.setStyleSheet("color: #50C8FF; font-size: 18px; background: transparent;")
-        layout.addWidget(arrow)
+        self._is_checked = False
+        self.update_style(False)
+
+    def toggle_checked(self):
+        self.set_checked(not self._is_checked)
+
+    def set_checked(self, checked: bool):
+        self._is_checked = checked
+        self.update_style(checked)
+
+    def update_style(self, is_checked: bool):
+        if is_checked:
+            self.check_label.setText("✓")
+            self.check_label.setStyleSheet("""
+                QLabel {
+                    color: #14141e;
+                    background-color: #50C8FF;
+                    border: 1px solid #50C8FF;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    font-size: 11px;
+                }
+            """)
+            self.setStyleSheet("""
+                QFrame {
+                    background: rgba(80, 200, 255, 40);
+                    border: 1px solid rgba(80, 200, 255, 150);
+                    border-radius: 6px;
+                }
+                QFrame:hover {
+                    background: rgba(80, 200, 255, 70);
+                }
+            """)
+        else:
+            self.check_label.setText("")
+            self.check_label.setStyleSheet("""
+                QLabel {
+                    background-color: #1e1e1e;
+                    border: 2px solid #5a5a5e;
+                    border-radius: 4px;
+                }
+            """)
+            self.setStyleSheet("""
+                QFrame {
+                    background: rgba(45,45,50,200);
+                    border: 1px solid transparent;
+                    border-radius: 6px;
+                }
+                QFrame:hover {
+                    background: rgba(0,120,215,180);
+                }
+            """)
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
-            self.clicked.emit(self._name)
+            self.toggle_checked()
+            self.clicked.emit()
         super().mousePressEvent(event)
 
 
 class EventPersonsDialog(QtWidgets.QDialog):
-    person_selected = QtCore.Signal(str)   # person name
+    person_selected = QtCore.Signal(str)     # kept for compatibility
+    persons_selected = QtCore.Signal(list)   # list of selected person names
 
-    def __init__(self, persons: list[dict], event_name: str, parent=None):
+    def __init__(self, persons: list[dict], event_name: str, active_persons: set[str] = None, parent=None):
         super().__init__(parent, QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle("Etkinlik Kişileri")
-        self.setMinimumWidth(340)
+        self.setMinimumWidth(360)
 
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -160,8 +208,8 @@ class EventPersonsDialog(QtWidgets.QDialog):
             }
         """)
         c_layout = QtWidgets.QVBoxLayout(container)
-        c_layout.setContentsMargins(10, 10, 10, 10)
-        c_layout.setSpacing(8)
+        c_layout.setContentsMargins(12, 12, 12, 12)
+        c_layout.setSpacing(10)
 
         # Header
         header_row = QtWidgets.QHBoxLayout()
@@ -191,18 +239,22 @@ class EventPersonsDialog(QtWidgets.QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         scroll.setStyleSheet("background: transparent;")
-        scroll.setMaximumHeight(420)
+        scroll.setMaximumHeight(380)
 
         inner = QtWidgets.QWidget()
         inner.setStyleSheet("background: transparent;")
         inner_layout = QtWidgets.QVBoxLayout(inner)
         inner_layout.setContentsMargins(0, 0, 0, 0)
-        inner_layout.setSpacing(4)
+        inner_layout.setSpacing(6)
 
+        self.rows: list[_PersonRow] = []
         if persons:
             for p in persons:
                 row = _PersonRow(p)
-                row.clicked.connect(self._on_person_clicked)
+                if active_persons and p["name"] in active_persons:
+                    row.set_checked(True)
+                row.clicked.connect(self._on_row_clicked)
+                self.rows.append(row)
                 inner_layout.addWidget(row)
         else:
             empty = QtWidgets.QLabel("Bu etkinlikte henüz kişi bulunamadı.")
@@ -214,16 +266,113 @@ class EventPersonsDialog(QtWidgets.QDialog):
         scroll.setWidget(inner)
         c_layout.addWidget(scroll)
 
-        hint = QtWidgets.QLabel("Kişiye tıkla → galeride filtrele   ·   ESC kapat")
+        # Action Buttons
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setSpacing(8)
+
+        self.toggle_all_btn = QtWidgets.QPushButton("Tümünü Seç")
+        self.toggle_all_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.toggle_all_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 10);
+                color: #e0e0e0;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                padding: 5px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 20);
+            }
+        """)
+        self.toggle_all_btn.clicked.connect(self._toggle_all_selection)
+        btn_layout.addWidget(self.toggle_all_btn)
+
+        btn_layout.addStretch()
+
+        cancel_btn = QtWidgets.QPushButton("İptal")
+        cancel_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #a0a0a0;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                padding: 5px 14px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 10);
+                color: white;
+            }
+        """)
+        cancel_btn.clicked.connect(self.close)
+        btn_layout.addWidget(cancel_btn)
+
+        self.filter_btn = QtWidgets.QPushButton("Filtrele")
+        self.filter_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.filter_btn.clicked.connect(self._on_filter_clicked)
+        btn_layout.addWidget(self.filter_btn)
+        c_layout.addLayout(btn_layout)
+
+        # Initial button setup
+        self._on_row_clicked()
+
+        hint = QtWidgets.QLabel("Seçimleri yapıp Filtrele butonuna tıklayın  ·  ESC kapat")
         hint.setAlignment(QtCore.Qt.AlignCenter)
-        hint.setStyleSheet("color: #555; font-size: 10px;")
+        hint.setStyleSheet("color: #555; font-size: 10px; margin-top: 2px;")
         c_layout.addWidget(hint)
 
         outer.addWidget(container)
 
-    def _on_person_clicked(self, name: str):
-        self.person_selected.emit(name)
-        self.accept()
+    def _on_row_clicked(self):
+        any_checked = any(row._is_checked for row in self.rows)
+        self.filter_btn.setEnabled(any_checked)
+        if any_checked:
+            self.filter_btn.setStyleSheet("""
+                QPushButton {
+                    background: #0078D7;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 5px 16px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background: #0086f0;
+                }
+            """)
+        else:
+            self.filter_btn.setStyleSheet("""
+                QPushButton {
+                    background: #2b2b2b;
+                    color: #777;
+                    border: 1px solid #3f3f46;
+                    border-radius: 4px;
+                    padding: 5px 16px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+            """)
+        
+        all_checked = all(row._is_checked for row in self.rows) if self.rows else False
+        self.toggle_all_btn.setText("Seçimleri Kaldır" if all_checked else "Tümünü Seç")
+
+    def _toggle_all_selection(self):
+        any_checked = any(row._is_checked for row in self.rows)
+        target_state = not any_checked
+        for row in self.rows:
+            row.set_checked(target_state)
+        self._on_row_clicked()
+
+    def _on_filter_clicked(self):
+        selected_names = [row._name for row in self.rows if row._is_checked]
+        if selected_names:
+            self.persons_selected.emit(selected_names)
+            # Emit compatibility signal with the first person name
+            self.person_selected.emit(selected_names[0])
+            self.accept()
 
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_Escape:

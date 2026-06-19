@@ -1,4 +1,14 @@
 import sys, os
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 from dotenv import load_dotenv
 
 # Load environment variables early, before initializing anything else (especially Sentry)
@@ -1148,14 +1158,55 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_event_persons(self, event):
         persons = self.app_service.get_person_service().get_persons_for_event(event.id)
-        dlg = EventPersonsDialog(persons, event.name, parent=self)
-        dlg.person_selected.connect(self._filter_gallery_by_person)
+        
+        # Get currently active person filter if we are inside this event
+        active_persons = set()
+        if hasattr(self, 'gallery_search_proxy') and self.current_event_id == event.id:
+            active_persons = set(self.gallery_search_proxy._person_filter)
+
+        dlg = EventPersonsDialog(persons, event.name, active_persons=active_persons, parent=self)
+        dlg.persons_selected.connect(lambda names: self._filter_gallery_by_persons(event, names))
         dlg.exec()
 
     def _filter_gallery_by_person(self, person_name: str):
+        # Kept for compatibility / single person callback fallback
         self.event_gallery_search.setText(person_name)
         if hasattr(self, 'gallery_search_proxy'):
             self.gallery_search_proxy.setFilterText(person_name)
+
+    def _filter_gallery_by_persons(self, event, person_names: list[str]):
+        # Load the event first if it's not the current one
+        if self.current_event_id != event.id:
+            self.on_event_card_clicked(event)
+
+        if hasattr(self, 'gallery_search_proxy'):
+            # Clear text search box to avoid confusion/conflict
+            self.event_gallery_search.clear()
+            self.gallery_search_proxy.setFilterText("")
+
+            # Apply person filter
+            self.gallery_search_proxy.setPersonFilter(set(person_names))
+
+            # Show the blue filter bar
+            names_str = ", ".join(person_names)
+            count = self.gallery_search_proxy.rowCount()
+            self._person_filter_label.setText(f"Kişi filtresi: {names_str}  —  {count} fotoğraf")
+            self._person_filter_bar.show()
+
+            # Ensure grid view is active
+            self.tab_widget.setCurrentWidget(self.events_tab)
+            self.gallery_stack.setCurrentIndex(0)
+
+            # Sync with the left sidebar checkbox panel if visible
+            if hasattr(self, '_persons_list') and self._persons_filter_panel.isVisible():
+                self._persons_list.blockSignals(True)
+                for i in range(self._persons_list.count()):
+                    item = self._persons_list.item(i)
+                    if item.text() in person_names:
+                        item.setCheckState(QtCore.Qt.Checked)
+                    else:
+                        item.setCheckState(QtCore.Qt.Unchecked)
+                self._persons_list.blockSignals(False)
 
     def _open_event_folder(self, event):
         """Open the event's vault folder in the native file manager (Finder / Explorer)."""
@@ -2279,16 +2330,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persons_list.blockSignals(False)
         if hasattr(self, 'gallery_search_proxy'):
             self.gallery_search_proxy.setPersonFilter(set())
+        self._person_filter_bar.hide()
 
     def _clear_person_filter(self):
         self._person_filter_bar.hide()
-        self.current_event_id = None
-        self.gallery_item_model = GalleryItemModel([])
-        if hasattr(self, "gallery_search_proxy"):
-            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
-            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setPersonFilter(set())
+            
+        if self.current_event_id:
+            # Inside an event, keep items and just reload/refresh view
+            if hasattr(self, 'gallery_search_proxy'):
+                self.gallery_search_proxy.invalidateFilter()
+                count = self.gallery_search_proxy.rowCount()
+                event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
+                event_name = event.name if event else ""
+                self._media_status_bar.setText(f"📂 Etkinlik: {event_name} — Toplam {count} Medya")
         else:
-            self.event_gallery_list_widget.setModel(self.gallery_item_model)
+            # Global search or persons gallery mode, clear it completely
+            self.current_event_id = None
+            self.gallery_item_model = GalleryItemModel([])
+            if hasattr(self, "gallery_search_proxy"):
+                self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+                self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            else:
+                self.event_gallery_list_widget.setModel(self.gallery_item_model)
 
     def _init_settings_tab(self):
         layout = QtWidgets.QVBoxLayout(self.settings_tab)
