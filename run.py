@@ -131,12 +131,12 @@ def main():
     # Enforce execution inside the local virtual environment (.venv) to prevent 
     # dependency conflicts and tokenizer corruption between Anaconda and the venv.
     current_dir = os.path.dirname(os.path.abspath(__file__))
+    is_pythonw = sys.executable.lower().endswith("pythonw.exe")
     if sys.platform == "win32":
-        venv_python = os.path.join(current_dir, ".venv", "Scripts", "python.exe")
+        exe_name = "pythonw.exe" if is_pythonw else "python.exe"
+        venv_python = os.path.join(current_dir, ".venv", "Scripts", exe_name)
     else:
         venv_python = os.path.join(current_dir, ".venv", "bin", "python")
-
-
 
     if os.path.exists(venv_python) and os.path.abspath(sys.executable) != os.path.abspath(venv_python):
         # Sanity-check that the target venv has the core dependencies before re-execing.
