@@ -273,7 +273,6 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.face_overlay = FaceOverlayWidget(self._image_container)
         self.face_overlay.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
         self.face_overlay.face_named.connect(self._on_face_named)
-        self.face_overlay.face_reset.connect(self._on_face_reset)
         self.face_overlay.face_cleared.connect(self._on_face_cleared)
         self.face_overlay.face_note_saved.connect(self._on_face_note_saved)
         self.face_overlay.hide()
@@ -918,29 +917,6 @@ class SingleViewWidget(QtWidgets.QWidget):
         # Update only this face's badge in the overlay
         self.face_overlay.update_person_name(face_index, "")
         self._status_label.setText("✕ Yüz etiketi temizlendi.")
-        self.facesChanged.emit()
-
-    def _on_face_reset(self, face_index: int):
-        """Delete all face detections for this media from DB and re-run inference."""
-        if not self.current_img_path:
-            return
-
-        # Delete DB records
-        if self._current_media_id and self._face_service:
-            try:
-                self._face_service.delete_faces_for_media(self._current_media_id)
-            except Exception as e:
-                logger.warning(f"delete_faces_for_media failed: {e}")
-
-        # Clear overlay and re-detect WITHOUT similarity matching
-        self.face_overlay.clear_faces()
-        self._pending_results = []
-        self._skip_similarity = True  # skip auto-matching on next detection
-        self._status_label.setText("🔄 Yüzler yeniden algılanıyor…")
-
-        if self._face_service:
-            self._start_detection(self.current_img_path)
-            
         self.facesChanged.emit()
 
     # ------------------------------------------------------------------

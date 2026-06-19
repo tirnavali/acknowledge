@@ -86,7 +86,6 @@ class FaceZoomPopup(QtWidgets.QDialog):
 
     # Forwarded signals
     face_named   = QtCore.Signal(int, str)  # (face_index, name)
-    face_reset   = QtCore.Signal(int)       # (face_index) — re-detect all faces
     face_cleared = QtCore.Signal(int)       # (face_index) — clear this face's person only
     note_saved   = QtCore.Signal(int, str)  # (face_index, note_text)
 
@@ -166,27 +165,6 @@ class FaceZoomPopup(QtWidgets.QDialog):
         """)
         clear_btn.clicked.connect(self._on_clear)
         row.addWidget(clear_btn)
-
-        # Reset button — deletes all faces and re-detects
-        reset_btn = QtWidgets.QPushButton("🔄")
-        reset_btn.setFixedSize(28, 28)
-        reset_btn.setToolTip("Tüm yüzleri sil ve yeniden algıla")
-        reset_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        reset_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(200, 60, 60, 180);
-                color: white;
-                border: 1px solid rgba(255,100,100,200);
-                border-radius: 4px;
-                font-size: 13px;
-                padding: 0;
-            }
-            QPushButton:hover {
-                background: rgba(255, 80, 80, 220);
-            }
-        """)
-        reset_btn.clicked.connect(self._on_reset)
-        row.addWidget(reset_btn)
 
         cLayout.addLayout(row)
 
@@ -282,10 +260,6 @@ class FaceZoomPopup(QtWidgets.QDialog):
         self.face_cleared.emit(self._face_index)
         self.close()
 
-    def _on_reset(self) -> None:
-        self.face_reset.emit(self._face_index)
-        self.close()
-
     def mousePressEvent(self, event):
         # Close only if click is outside the container
         child = self.childAt(event.pos())
@@ -312,8 +286,6 @@ class FaceOverlayWidget(QtWidgets.QWidget):
 
     # Emitted when user types a name and presses Enter in the zoom popup
     face_named      = QtCore.Signal(int, str)
-    # Emitted when user clicks the reset button (re-detect all)
-    face_reset      = QtCore.Signal(int)
     # Emitted when user clicks the clear button (clear this face's person only)
     face_cleared    = QtCore.Signal(int)
     # Emitted when user saves a note in the zoom popup — (face_index, note_text)
@@ -456,7 +428,6 @@ class FaceOverlayWidget(QtWidgets.QWidget):
             existing_note=face.get("note", ""),
         )
         popup.face_named.connect(self.face_named)
-        popup.face_reset.connect(self.face_reset)
         popup.face_cleared.connect(self.face_cleared)
         popup.note_saved.connect(self.face_note_saved)
 
