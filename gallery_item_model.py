@@ -27,7 +27,18 @@ class GalleryItem(QtGui.QStandardItem):
         self.event_id = str(db_metadata.get('event_id', '')) if db_metadata else None
 
         # Store media_type for format-specific behaviour (e.g. documents)
-        self.media_type = db_metadata.get('media_type', 'photo') if db_metadata else 'photo'
+        if db_metadata and db_metadata.get('media_type'):
+            self.media_type = db_metadata.get('media_type')
+        else:
+            ext = os.path.splitext(img_path)[1].lower()
+            from src.utils.video_util import VIDEO_EXTS
+            from src.utils.document_util import DOCUMENT_EXTS
+            if ext in VIDEO_EXTS:
+                self.media_type = 'video'
+            elif ext in DOCUMENT_EXTS:
+                self.media_type = 'document'
+            else:
+                self.media_type = 'photo'
 
         # Store DB search rank (set by FTS query; 0 for non-search items)
         self.search_rank = float(db_metadata.get('rank') or 0) if db_metadata else 0.0
@@ -372,6 +383,7 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         self._filter_event_id = None   # set during search mode to narrow by event
         self._filter_min_stars = 0     # 0 = no star filter
         self._person_filter: frozenset = frozenset()
+        self._filter_media_type = "all"  # 'all', 'photo', 'video', 'document'
 
     def setPersonFilter(self, person_names: set):
         self._person_filter = frozenset(person_names)
@@ -387,6 +399,11 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
         self._filter_event_id = str(event_id) if event_id is not None else None
         self.invalidateFilter()
 
+    def setMediaTypeFilter(self, media_type: str):
+        """Filter by media type: 'all', 'photo', 'video', or 'document'."""
+        self._filter_media_type = str(media_type).lower()
+        self.invalidateFilter()
+
     def setFilterText(self, text, filter_date=None):
         self._filter_text = text.strip().lower()
         self._filter_date = filter_date
@@ -397,13 +414,22 @@ class GallerySearchProxyModel(QtCore.QSortFilterProxyModel):
             self.sort(-1)
 
     def filterAcceptsRow(self, source_row, source_parent):
-        if not self._filter_text and not self._filter_date and not self._filter_event_id and not self._filter_min_stars and not self._person_filter:
+        if (not self._filter_text and 
+            not self._filter_date and 
+            not self._filter_event_id and 
+            not self._filter_min_stars and 
+            not self._person_filter and 
+            (not self._filter_media_type or self._filter_media_type == "all")):
             return True
 
         model = self.sourceModel()
         index = model.index(source_row, 0, source_parent)
         item = model.itemFromIndex(index)
         if not item: return False
+
+        if self._filter_media_type and self._filter_media_type != "all":
+            if getattr(item, 'media_type', 'photo') != self._filter_media_type:
+                return False
 
         if self._person_filter:
             people = set(n.strip() for n in item.iptc_data.get('People', '').split('\n') if n.strip())

@@ -62,6 +62,16 @@ class FaceService(BaseService):
     def detect_faces(self, image_path):
         """Detect faces in an image."""
         try:
+            import os
+            from src.utils.document_util import DOCUMENT_EXTS
+            ext = os.path.splitext(image_path)[1].lower()
+            if ext in DOCUMENT_EXTS:
+                raise ValueError(f"Yüz tanıma doküman dosyaları için desteklenmemektedir: {ext}")
+            
+            image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+            if ext not in image_exts:
+                raise ValueError(f"Yüz tanıma bu dosya türü için desteklenmemektedir: {ext}")
+
             return self.face_analysis_service.detect(image_path)
         except Exception as e:
             self.logger.error(f"Error detecting faces in {image_path}: {e}")

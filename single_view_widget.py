@@ -408,6 +408,12 @@ class SingleViewWidget(QtWidgets.QWidget):
             if self._face_service is None:
                 return  # face detection disabled
 
+            from src.utils.document_util import DOCUMENT_EXTS
+            ext = os.path.splitext(path)[1].lower()
+            if ext in DOCUMENT_EXTS or ext not in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}:
+                logger.info(f"Skipping automatic face detection on unsupported format: {ext}")
+                return
+
             # DB-first: if background worker already processed this media, load from DB and skip re-detection
             if self._current_media_id and self._face_detected_at and self._face_service:
                 try:

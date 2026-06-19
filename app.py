@@ -105,6 +105,15 @@ class BatchFaceWorker(QtCore.QThread):
             try:
                 ext = os.path.splitext(file_path)[1].lower()
                 is_video = ext in VIDEO_EXTS
+                
+                from src.utils.document_util import DOCUMENT_EXTS
+                if ext in DOCUMENT_EXTS:
+                    raise ValueError(f"Yüz tanıma doküman dosyaları için desteklenmemektedir: {ext}")
+                
+                image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+                if not is_video and ext not in image_exts:
+                    raise ValueError(f"Yüz tanıma bu dosya türü için desteklenmemektedir: {ext}")
+
                 media_type = "video" if is_video else "photo"
 
                 media_id = self._media_svc.ensure_media_exists(
@@ -119,7 +128,7 @@ class BatchFaceWorker(QtCore.QThread):
                     self._face_svc.delete_faces_for_media(media_id)
 
                 if is_video:
-                    frames_with_ts = extract_key_frames(file_path)
+                    frames_with_ts = extract_key_frames(file_path, interval_seconds=1.0)
                     results = []
                     for frame, tms in frames_with_ts:
                         frame_results = self._face_svc.detect_faces_from_array(frame)
@@ -276,6 +285,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("Tirnavali Acknowledge")
         self.current_event_id = None
+        self.current_event_name = None
         self.current_media_id = None
         self._current_ai_caption_orig = ""
         self._current_ai_tags_orig = ""
@@ -1043,6 +1053,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.switch_to_grid_view()
         self.current_event_id = event.id
+        self.current_event_name = event.name
 
         if self._search_mode:
             # In search mode: just narrow the already-loaded cross-event results by this event
@@ -1066,15 +1077,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.gallery_search_proxy.setEventFilter(None)
             self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
             self.gallery_search_proxy.setFilterText(self.event_gallery_search.text())
-            txt = self.event_gallery_search.text().strip()
-            if txt:
-                count = self.gallery_search_proxy.rowCount()
-                self._media_status_bar.setText(f"📂 {event.name} — {count} / {len(items)} Medya")
-            else:
-                self._media_status_bar.setText(f"📂 Etkinlik: {event.name} — Toplam {len(items)} Medya")
+            self._update_gallery_status_bar()
         else:
             self.event_gallery_list_widget.setModel(self.gallery_item_model)
-            self._media_status_bar.setText(f"📂 Etkinlik: {event.name} — Toplam {len(items)} Medya")
+            self._update_gallery_status_bar()
 
         self.gallery_item_model.start_loading()
         _gallery_ms = int((time.monotonic() - _gallery_t0) * 1000)
@@ -1660,6 +1666,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_date.setEnabled(False)
         self.event_gallery_date_cb.toggled.connect(self.event_gallery_date.setEnabled)
 
+        # Media Type Filter Dropdown
+        self._media_type_filter_combo = QtWidgets.QComboBox()
+        self._media_type_filter_combo.setFixedHeight(28)
+        self._media_type_filter_combo.addItems([
+            "Tüm Medyalar",
+            "Fotoğraflar",
+            "Videolar",
+            "Dokümanlar"
+        ])
+        self._media_type_filter_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 11px;
+                background: #2a2a2e;
+                color: #fff;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 2px 6px;
+            }
+            QComboBox:focus {
+                border: 1px solid #0078D7;
+            }
+        """)
+
         # Star filter: ❡1❡²2❡²3❡²4❡²5  (click = min-star filter; click active = clear)
         self._star_filter_btns: list[QtWidgets.QPushButton] = []
         _star_filter_style = (
@@ -1682,6 +1711,11 @@ class MainWindow(QtWidgets.QMainWindow):
         _filter_row.addWidget(self.event_gallery_search_all_cb)
         _filter_row.addWidget(self.event_gallery_date_cb)
         _filter_row.addWidget(self.event_gallery_date)
+        _filter_row.addSpacing(6)
+        _type_lbl = QtWidgets.QLabel("Tür:")
+        _type_lbl.setStyleSheet("color: #aaa; font-size: 11px;")
+        _filter_row.addWidget(_type_lbl)
+        _filter_row.addWidget(self._media_type_filter_combo)
         _filter_row.addSpacing(4)
         for btn in self._star_filter_btns:
             _filter_row.addWidget(btn)
@@ -1738,6 +1772,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Connect search
         self.event_gallery_search.returnPressed.connect(self.on_gallery_search)
         self.event_gallery_search_btn.clicked.connect(self.on_gallery_search)
+        self._media_type_filter_combo.currentIndexChanged.connect(self._on_media_type_filter_changed)
         self.event_gallery_search.installEventFilter(self)
         
         # Install event filter to capture Space bar properly before QListView consumes it
@@ -1758,7 +1793,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
             
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
-        is_photo = os.path.splitext(item.img_path)[1].lower() in image_exts
+        ext = os.path.splitext(item.img_path)[1].lower()
+        is_photo = ext in image_exts
+        from src.utils.video_util import VIDEO_EXTS
+        is_video = ext in VIDEO_EXTS
 
         menu = QtWidgets.QMenu(self)
         reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
@@ -1766,7 +1804,7 @@ class MainWindow(QtWidgets.QMainWindow):
         caption_action = menu.addAction("✨ Yeniden Altyazıla")
         caption_action.setEnabled(is_photo and bool(self.current_event_id))
         face_action = menu.addAction("🔍 Yüzleri Yeniden Tara")
-        face_action.setEnabled(bool(self.current_event_id))
+        face_action.setEnabled((is_photo or is_video) and bool(self.current_event_id))
         menu.addSeparator()
         delete_action = menu.addAction("🗑️ Medyayı Sil")
 
@@ -1947,13 +1985,69 @@ class MainWindow(QtWidgets.QMainWindow):
         _inactive = "QPushButton { background: transparent; border: none; font-size: 18px; color: #bbb; padding: 0 1px; } QPushButton:hover { color: #FFD700; }"
         for i, btn in enumerate(self._star_filter_btns, 1):
             btn.setStyleSheet(_active if i <= new_min else _inactive)
+        self._update_gallery_status_bar()
+
+    def _on_media_type_filter_changed(self):
+        """Filter gallery by selected media type."""
+        if not hasattr(self, 'gallery_search_proxy'):
+            return
+        idx = self._media_type_filter_combo.currentIndex()
+        mapping = {0: "all", 1: "photo", 2: "video", 3: "document"}
+        media_type = mapping.get(idx, "all")
+        self.gallery_search_proxy.setMediaTypeFilter(media_type)
+        self._update_gallery_status_bar()
+
+    def _update_gallery_status_bar(self):
+        """Update the gallery status bar text based on current filters and search mode."""
+        if not hasattr(self, 'gallery_search_proxy') or not hasattr(self, 'gallery_item_model'):
+            return
+            
+        count = self.gallery_search_proxy.rowCount()
+        total = self.gallery_item_model.rowCount()
+        
+        text = self.event_gallery_search.text().strip()
+        
+        active_filters = []
+        
+        # Star filter
+        min_stars = self.gallery_search_proxy._filter_min_stars
+        if min_stars > 0:
+            active_filters.append(f"★{min_stars}+")
+            
+        # Date filter
+        if self.event_gallery_date_cb.isChecked():
+            date_str = self.event_gallery_date.date().toString("dd.MM.yyyy")
+            active_filters.append(date_str)
+            
+        # Media type filter
+        media_type = getattr(self.gallery_search_proxy, '_filter_media_type', 'all')
+        if media_type != "all":
+            type_mapping = {"photo": "Fotoğraf", "video": "Video", "document": "Doküman"}
+            active_filters.append(type_mapping.get(media_type, media_type.capitalize()))
+            
+        filter_suffix = f" ({', '.join(active_filters)})" if active_filters else ""
+        
+        if text:
+            self._media_status_bar.setText(f"🔍 '{text}' — {count} / {total} Medya Bulundu{filter_suffix}")
+        elif self._search_mode:
+            self._media_status_bar.setText(f"🔍 Arama Sonucu — {count} / {total} Medya{filter_suffix}")
+        elif hasattr(self, 'current_event_name') and self.current_event_name:
+            self._media_status_bar.setText(f"📂 {self.current_event_name} — {count} / {total} Medya{filter_suffix}")
+        else:
+            self._media_status_bar.setText(f"📂 Medya Listesi — {count} / {total} Medya{filter_suffix}")
 
     def _on_clear_search(self):
         """Clear search text, reset all filters, reload gallery and update status bar."""
         self.event_gallery_search.clear()
         self.event_gallery_date_cb.setChecked(False)
+        if hasattr(self, '_media_type_filter_combo'):
+            self._media_type_filter_combo.blockSignals(True)
+            self._media_type_filter_combo.setCurrentIndex(0)
+            self._media_type_filter_combo.blockSignals(False)
+        
         if hasattr(self, 'gallery_search_proxy'):
             self.gallery_search_proxy.setStarFilter(0)
+            self.gallery_search_proxy.setMediaTypeFilter("all")
             self.gallery_search_proxy.setFilterText("", None)
             self.gallery_search_proxy.setEventFilter(None)
         self._clear_persons_filter()
@@ -1973,9 +2067,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
             self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
             self.gallery_item_model.start_loading()
-            self._media_status_bar.setText("✅ Arama temizlendi")
+            self._update_gallery_status_bar()
         else:
-            self._media_status_bar.setText("✅ Arama ve filtreler temizlendi")
+            self._update_gallery_status_bar()
 
     def _select_newest_event(self):
         """Select the newest event card (item 0, ordered by date DESC) and load its gallery."""
@@ -2023,7 +2117,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if text:
                 count = self.gallery_search_proxy.rowCount()
                 _filter_ms = int((time.monotonic() - _filter_t0) * 1000)
-                self._media_status_bar.setText(f"🔍 '{text}' — {count} Medya Bulundu")
+                self._update_gallery_status_bar()
                 logger.info(
                     f"Gallery filter: '{text}' → {count} results in {_filter_ms}ms",
                     extra={"event": "GALLERY_FILTER", "duration_ms": _filter_ms, "event_id": str(self.current_event_id) if self.current_event_id else None},
@@ -2031,6 +2125,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._update_persons_panel()
             else:
                 self._persons_filter_panel.hide()
+                self._update_gallery_status_bar()
             return
 
         # All-events mode: FTS across all events
@@ -2086,8 +2181,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
         self.gallery_item_model.start_loading()
         self.gallery_stack.setCurrentIndex(0)
-        count = self.gallery_search_proxy.rowCount()
-        self._media_status_bar.setText(f"🔍 '{query_text}' — {count} Medya Bulundu")
+        self._update_gallery_status_bar()
         _fts_ms = int((time.monotonic() - getattr(self, '_pending_search_t0', time.monotonic())) * 1000)
         logger.info(
             f"FTS search: '{query_text}' → {count} results in {_fts_ms}ms",

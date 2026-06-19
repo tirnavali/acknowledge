@@ -81,7 +81,7 @@ def generate_video_thumbnail(video_path: str, thumb_path: str) -> bool:
     return False
 
 
-def extract_key_frames(video_path: str, interval_seconds: float = 2.0) -> list[tuple]:
+def extract_key_frames(video_path: str, interval_seconds: float = 1.0) -> list[tuple]:
     """Return (frame_array, timestamp_ms) sampled every `interval_seconds` for face detection."""
     frames = []
     try:
