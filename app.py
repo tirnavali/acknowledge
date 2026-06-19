@@ -1127,7 +1127,7 @@ class MainWindow(QtWidgets.QMainWindow):
         import sys as _sys
         _is_mac = _sys.platform == "darwin"
         _is_win = _sys.platform == "win32"
-        _finder_label = "🗂️ Finder'da Aç" if _is_mac else "🗂️ Dosya Gezgini'nde Aç"
+        _finder_label = "📁 Finder'da Aç" if _is_mac else "📁 Dosya Gezgini'nde Aç"
 
         menu = QtWidgets.QMenu(self)
         details_action = menu.addAction("🔍 Detaylar")
@@ -1744,7 +1744,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
         menu.addSeparator()
-        caption_action = menu.addAction("Yeniden Altyazıla")
+        caption_action = menu.addAction("✨ Yeniden Altyazıla")
         caption_action.setEnabled(is_photo and bool(self.current_event_id))
         face_action = menu.addAction("🔍 Yüzleri Yeniden Tara")
         face_action.setEnabled(bool(self.current_event_id))
@@ -2586,6 +2586,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QMenuBar { background-color: #1e1e1e; color: #ffffff; }
             QMenuBar::item:selected { background-color: #333333; }
             QMenu { background-color: #252526; color: #ffffff; border: 1px solid #3f3f46; }
+            QMenu::item { padding: 4px 24px 4px 20px; }
             QMenu::item:selected { background-color: #0078D7; color: white;}
             QScrollArea { background-color: #252526; border: none; }
             QWidget { background-color: #1e1e1e; color: #ffffff; }
