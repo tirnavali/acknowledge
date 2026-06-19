@@ -1800,7 +1800,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         menu = QtWidgets.QMenu(self)
         reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
-        menu.addSeparator()
+        
+        go_to_event_action = None
+        if is_photo and item.event_id and (not self.current_event_id or str(item.event_id) != str(self.current_event_id)):
+            event = self.app_service.get_event_service().get_event_by_id(item.event_id)
+            if event:
+                go_to_event_action = menu.addAction(f"📅 Etkinliğe Git ({event.name})")
+                menu.addSeparator()
+
         caption_action = menu.addAction("✨ Yeniden Altyazıla")
         caption_action.setEnabled(is_photo and bool(self.current_event_id))
         face_action = menu.addAction("🔍 Yüzleri Yeniden Tara")
@@ -1813,6 +1820,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if action == reveal_action:
             from src.utils import path_util
             path_util.reveal_in_explorer(item.img_path)
+        elif go_to_event_action and action == go_to_event_action:
+            self._go_to_event(item.event_id)
         elif action == caption_action:
             event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
             if event:
@@ -1823,6 +1832,64 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._start_batch_face_detection_for_files([item.img_path], event, force=True)
         elif action == delete_action:
             self._delete_current_media(item)
+
+    def _go_to_event(self, event_id):
+        """Navigate to the event with the given ID, exiting search mode."""
+        if not event_id:
+            return
+            
+        event = self.app_service.get_event_service().get_event_by_id(event_id)
+        if not event:
+            return
+
+        # Reset all search parameters and exit search mode
+        self.event_gallery_search.clear()
+        self.event_gallery_date_cb.setChecked(False)
+        if hasattr(self, '_media_type_filter_combo'):
+            self._media_type_filter_combo.blockSignals(True)
+            self._media_type_filter_combo.setCurrentIndex(0)
+            self._media_type_filter_combo.blockSignals(False)
+        
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setStarFilter(0)
+            self.gallery_search_proxy.setMediaTypeFilter("all")
+            self.gallery_search_proxy.setFilterText("", None)
+            self.gallery_search_proxy.setEventFilter(None)
+        
+        self._clear_persons_filter()
+        if hasattr(self, '_persons_filter_panel'):
+            self._persons_filter_panel.hide()
+            
+        _inactive = "QPushButton { background: transparent; border: none; font-size: 18px; color: #bbb; padding: 0 1px; } QPushButton:hover { color: #FFD700; }"
+        for btn in self._star_filter_btns:
+            btn.setStyleSheet(_inactive)
+
+        self._search_mode = False
+
+        # Clear event search line edit if it was active
+        if self.event_search.text().strip():
+            self.event_search.clear()
+            self.event_card_list_widget.clear()
+            self.load_events()
+
+        # Find and select the event card in the left list widget
+        found_card = None
+        found_item = None
+        for i in range(self.event_card_list_widget.count()):
+            item = self.event_card_list_widget.item(i)
+            card = self.event_card_list_widget.itemWidget(item)
+            if card and hasattr(card, 'event') and str(card.event.id) == str(event_id):
+                found_card = card
+                found_item = item
+                break
+
+        if found_card and found_item:
+            self.event_card_list_widget.setCurrentItem(found_item)
+            self.event_card_list_widget.scrollToItem(found_item)
+            self.on_event_card_clicked(event, found_card)
+        else:
+            # Fallback if card is not in the list widget (should not happen)
+            self.on_event_card_clicked(event)
 
     def _delete_current_media(self, item):
         """Confirm then delete a media item from DB and disk."""
