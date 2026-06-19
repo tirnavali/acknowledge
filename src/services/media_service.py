@@ -77,8 +77,8 @@ class MediaService(BaseService):
             
             # Fetch ALL metadata from DB in one query for this event
             db_records = self.media_repository.get_all_for_event(event_id)
-            # Create a lookup map: resolved absolute path -> record dict
-            db_map = {path_util.from_db_path(r['file_path']): r for r in db_records}
+            # Create a lookup map: resolved absolute path -> record dict (case-insensitive on Windows)
+            db_map = {os.path.normcase(path_util.from_db_path(r['file_path'])): r for r in db_records if r.get('file_path')}
             
             from src.utils.video_util import VIDEO_EXTS
             _gallery_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".doc", ".docx"} | VIDEO_EXTS
@@ -87,7 +87,7 @@ class MediaService(BaseService):
                 if os.path.splitext(filename)[1].lower() in _gallery_exts:
                     img_path = os.path.join(abs_folder_path, filename)
                     abs_path = path_util.normalize_path(img_path)
-                    db_record = db_map.get(abs_path)
+                    db_record = db_map.get(os.path.normcase(abs_path))
                     
                     # Create lazy item (metadata from DB if available)
                     from gallery_item_model import GalleryItem

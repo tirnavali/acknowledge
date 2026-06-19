@@ -27,18 +27,17 @@ class GalleryItem(QtGui.QStandardItem):
         self.event_id = str(db_metadata.get('event_id', '')) if db_metadata else None
 
         # Store media_type for format-specific behaviour (e.g. documents)
-        if db_metadata and db_metadata.get('media_type'):
+        ext = os.path.splitext(img_path)[1].lower()
+        from src.utils.video_util import VIDEO_EXTS
+        from src.utils.document_util import DOCUMENT_EXTS
+        if ext in VIDEO_EXTS:
+            self.media_type = 'video'
+        elif ext in DOCUMENT_EXTS:
+            self.media_type = 'document'
+        elif db_metadata and db_metadata.get('media_type'):
             self.media_type = db_metadata.get('media_type')
         else:
-            ext = os.path.splitext(img_path)[1].lower()
-            from src.utils.video_util import VIDEO_EXTS
-            from src.utils.document_util import DOCUMENT_EXTS
-            if ext in VIDEO_EXTS:
-                self.media_type = 'video'
-            elif ext in DOCUMENT_EXTS:
-                self.media_type = 'document'
-            else:
-                self.media_type = 'photo'
+            self.media_type = 'photo'
 
         # Store DB search rank (set by FTS query; 0 for non-search items)
         self.search_rank = float(db_metadata.get('rank') or 0) if db_metadata else 0.0

@@ -167,16 +167,28 @@ class MediaRepository:
     def ensure_media_exists(self, event_id: UUID, file_path: str, media_type: str = "photo") -> UUID:
         """Ensure a media record exists for the given file_path. Returns the media_id."""
         clean_path = _abs(sanitize_str(file_path))
+        
+        # Override media_type based on actual extension to be safe
+        ext = os.path.splitext(clean_path)[1].lower()
+        from src.utils.video_util import VIDEO_EXTS
+        from src.utils.document_util import DOCUMENT_EXTS
+        if ext in VIDEO_EXTS:
+            media_type = 'video'
+        elif ext in DOCUMENT_EXTS:
+            media_type = 'document'
+        else:
+            media_type = 'photo'
+
         with get_db() as db:
             # We use PostgreSQL's ON CONFLICT to avoid race conditions.
-            # 1. Try to INSERT. If file_path exists, DO NOTHING.
+            # 1. Try to INSERT. If file_path exists, update media_type.
             import uuid
             new_id = uuid.uuid4()
             
             result = db.execute(text("""
                 INSERT INTO medias (id, event_id, file_path, media_type)
                 VALUES (:id, :event_id, :file_path, :media_type)
-                ON CONFLICT (file_path) DO NOTHING
+                ON CONFLICT (file_path) DO UPDATE SET media_type = EXCLUDED.media_type
                 RETURNING id
             """), {
                 "id": str(new_id),
@@ -188,11 +200,11 @@ class MediaRepository:
             row = result.fetchone()
             if row:
                 db.commit()
-                # Return the ID from the INSERT
+                # Return the ID from the INSERT/UPDATE
                 val = row[0] if hasattr(row, "__getitem__") else row.id
                 return val if isinstance(val, UUID) else UUID(str(val))
             
-            # 2. If INSERT returned nothing (conflict), fetch the existing ID.
+            # 2. If INSERT returned nothing, fetch the existing ID.
             result = db.execute(
                 text("SELECT id FROM medias WHERE file_path = :file_path"),
                 {"file_path": clean_path}
@@ -204,6 +216,7 @@ class MediaRepository:
                 return val if isinstance(val, UUID) else UUID(str(val))
             
             raise RuntimeError(f"Failed to ensure media exists: {clean_path}")
+
 
     def get_all_for_event(self, event_id: UUID) -> list[dict]:
         """Return all media records and their metadata for a given event."""
@@ -403,6 +416,7 @@ class MediaRepository:
                 INSERT INTO medias (id, event_id, file_path, media_type, title, text_content, technical_metadata)
                 VALUES (:id, :event_id, :file_path, 'document', :title, :text_content, CAST(:technical_metadata AS jsonb))
                 ON CONFLICT (file_path) DO UPDATE SET
+                    media_type = EXCLUDED.media_type,
                     title = EXCLUDED.title,
                     text_content = EXCLUDED.text_content,
                     technical_metadata = EXCLUDED.technical_metadata
@@ -441,6 +455,7 @@ class MediaRepository:
                 INSERT INTO medias (id, event_id, file_path, media_type, title, technical_metadata, iptc_date_created)
                 VALUES (:id, :event_id, :file_path, 'video', :title, CAST(:technical_metadata AS jsonb), :iptc_date_created)
                 ON CONFLICT (file_path) DO UPDATE SET
+                    media_type = EXCLUDED.media_type,
                     title = EXCLUDED.title,
                     technical_metadata = EXCLUDED.technical_metadata,
                     iptc_date_created = EXCLUDED.iptc_date_created
@@ -549,5 +564,26 @@ class MediaRepository:
                     END $$;
                 """))
             
+            # 4. Correct media_type for existing records (documents & videos)
+            try:
+                db.execute(text("""
+                    UPDATE medias 
+                    SET media_type = 'document' 
+                    WHERE media_type != 'document' AND (
+                        file_path LIKE '%.doc' OR file_path LIKE '%.docx' OR 
+                        file_path LIKE '%.DOC' OR file_path LIKE '%.DOCX'
+                    )
+                """))
+                db.execute(text("""
+                    UPDATE medias 
+                    SET media_type = 'video' 
+                    WHERE media_type != 'video' AND (
+                        file_path LIKE '%.mp4' OR file_path LIKE '%.mov' OR 
+                        file_path LIKE '%.MP4' OR file_path LIKE '%.MOV'
+                    )
+                """))
+            except Exception:
+                pass
+
             db.commit()
 

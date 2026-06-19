@@ -50,8 +50,26 @@ def init_db():
             db.execute(text("ALTER TABLE medias ADD COLUMN IF NOT EXISTS ai_caption_tr_orig TEXT"))
             db.execute(text("ALTER TABLE medias ADD COLUMN IF NOT EXISTS ai_tags_tr_orig TEXT"))
             db.execute(text("ALTER TABLE persons ADD COLUMN IF NOT EXISTS reference_embedding vector(512)"))
+            
+            # Correct media_type for existing records (documents & videos)
+            db.execute(text("""
+                UPDATE medias 
+                SET media_type = 'document' 
+                WHERE media_type != 'document' AND (
+                    file_path LIKE '%.doc' OR file_path LIKE '%.docx' OR 
+                    file_path LIKE '%.DOC' OR file_path LIKE '%.DOCX'
+                )
+            """))
+            db.execute(text("""
+                UPDATE medias 
+                SET media_type = 'video' 
+                WHERE media_type != 'video' AND (
+                    file_path LIKE '%.mp4' OR file_path LIKE '%.mov' OR 
+                    file_path LIKE '%.MP4' OR file_path LIKE '%.MOV'
+                )
+            """))
             db.commit()
-            print("✅ 'face_detected_at', 'person_cleared', 'tags_en', 'tags_tr', 'star_rating', 'captioned_at', 'reference_embedding' kolonları eklendi (veya zaten vardı).")
+            print("✅ 'face_detected_at', 'person_cleared', 'tags_en', 'tags_tr', 'star_rating', 'captioned_at', 'reference_embedding' kolonları eklendi ve media_type değerleri düzeltildi.")
 
         # Migrate absolute file_path values to relative (for cross-platform support)
         with get_db() as db:
