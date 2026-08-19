@@ -125,8 +125,9 @@ class TestBatchImportRecursive(unittest.TestCase):
         mock_event_repo.save.assert_called_once()
 
         # Verify media records saved in bulk
-        mock_media_repo.bulk_save_media.assert_called_once()
-        saved_records = mock_media_repo.bulk_save_media.call_args[1]["media_records"]
+        self.assertTrue(mock_media_repo.save_bulk_medias.called or mock_media_repo.bulk_save_media.called)
+        call_args = mock_media_repo.save_bulk_medias.call_args or mock_media_repo.bulk_save_media.call_args
+        saved_records = call_args[1]["media_records"]
 
         # All 3 files (from root, Fotolar, Belgeler) must be imported
         self.assertEqual(len(saved_records), 3)

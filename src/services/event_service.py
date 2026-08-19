@@ -277,10 +277,16 @@ class EventService(BaseService):
 
         if self.media_repository and media_records_to_save:
             try:
-                self.media_repository.bulk_save_media(
-                    event_id=event.id,
-                    media_records=media_records_to_save
-                )
+                if hasattr(self.media_repository, "save_bulk_medias"):
+                    self.media_repository.save_bulk_medias(
+                        event_id=event.id,
+                        media_records=media_records_to_save
+                    )
+                elif hasattr(self.media_repository, "bulk_save_media"):
+                    self.media_repository.bulk_save_media(
+                        event_id=event.id,
+                        media_records=media_records_to_save
+                    )
             except Exception as e:
                 self.logger.error(f"Could not bulk persist media records for {name}: {e}")
 

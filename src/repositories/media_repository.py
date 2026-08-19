@@ -567,6 +567,9 @@ class MediaRepository:
                 })
             db.commit()
 
+    # Alias for convenience
+    bulk_save_media = save_bulk_medias
+
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""
         import os
