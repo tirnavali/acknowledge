@@ -54,6 +54,56 @@ class EventRepository:
                 )
             return None
 
+    def get_by_name_and_year(self, name: str, year: int) -> Event | None:
+        with get_db() as db:
+            result = db.execute(
+                text("""
+                    SELECT * FROM events 
+                    WHERE LOWER(name) = LOWER(:name) 
+                      AND EXTRACT(YEAR FROM event_date) = :year
+                """),
+                {"name": name, "year": year}
+            )
+            row = result.fetchone()
+            if row:
+                return Event(
+                    _id=row.id if isinstance(row.id, UUID) else UUID(row.id),
+                    _name=row.name,
+                    _event_date=row.event_date,
+                    _imported_folder_path=row.imported_folder_path,
+                    _vault_folder_path=row.vault_folder_path,
+                    _import_success=row.import_success
+                )
+            return None
+
+    def get_by_name_and_date(self, name: str, event_date) -> Event | None:
+        if not event_date:
+            return self.get_by_name(name)
+        year = getattr(event_date, "year", None)
+        if year:
+            return self.get_by_name_and_year(name, year)
+        return self.get_by_name(name)
+
+    def save_bulk(self, events: list[Event]) -> None:
+        if not events:
+            return
+        with get_db() as db:
+            for event in events:
+                db.execute(text("""
+                    INSERT INTO events (id, name, event_date, imported_folder_path, vault_folder_path, import_success)
+                    VALUES (:id, :name, :event_date, :imported_folder_path, :vault_folder_path, :import_success)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = :name, vault_folder_path = :vault_folder_path, import_success = :import_success
+                """), {
+                    "id": str(event.id),
+                    "name": event.name,
+                    "event_date": event.event_date,
+                    "imported_folder_path": event.imported_folder_path,
+                    "vault_folder_path": event.vault_folder_path,
+                    "import_success": event.import_success
+                })
+            db.commit()
+
     def delete(self, event_id: UUID) -> None:
         """Delete an event and all its associated data."""
         with get_db() as db:

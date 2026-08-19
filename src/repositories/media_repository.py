@@ -172,8 +172,11 @@ class MediaRepository:
         ext = os.path.splitext(clean_path)[1].lower()
         from src.utils.video_util import VIDEO_EXTS
         from src.utils.document_util import DOCUMENT_EXTS
+        from src.utils.pdf_util import PDF_EXTS
         if ext in VIDEO_EXTS:
             media_type = 'video'
+        elif ext in PDF_EXTS:
+            media_type = 'pdf'
         elif ext in DOCUMENT_EXTS:
             media_type = 'document'
         else:
@@ -436,6 +439,45 @@ class MediaRepository:
                 return val if isinstance(val, UUID) else UUID(str(val))
             raise RuntimeError(f"Failed to save document media: {clean_path}")
 
+    def save_pdf_media(
+        self,
+        event_id: UUID,
+        file_path: str,
+        title: str | None = None,
+        text_content: str | None = None,
+        technical_metadata: dict | None = None,
+    ) -> UUID:
+        """Insert or update a PDF media record including extracted text and metadata."""
+        import uuid as _uuid
+        import json
+        clean_path = _abs(sanitize_str(file_path))
+        new_id = _uuid.uuid4()
+        tech_meta_json = json.dumps(technical_metadata) if technical_metadata else None
+        with get_db() as db:
+            result = db.execute(text("""
+                INSERT INTO medias (id, event_id, file_path, media_type, title, text_content, technical_metadata)
+                VALUES (:id, :event_id, :file_path, 'pdf', :title, :text_content, CAST(:technical_metadata AS jsonb))
+                ON CONFLICT (file_path) DO UPDATE SET
+                    media_type = 'pdf',
+                    title = EXCLUDED.title,
+                    text_content = EXCLUDED.text_content,
+                    technical_metadata = EXCLUDED.technical_metadata
+                RETURNING id
+            """), {
+                "id": str(new_id),
+                "event_id": str(event_id),
+                "file_path": clean_path,
+                "title": sanitize_str(title) if title else None,
+                "text_content": sanitize_str(text_content) if text_content else None,
+                "technical_metadata": tech_meta_json,
+            })
+            row = result.fetchone()
+            db.commit()
+            if row:
+                val = row[0] if hasattr(row, "__getitem__") else row.id
+                return val if isinstance(val, UUID) else UUID(str(val))
+            raise RuntimeError(f"Failed to save pdf media: {clean_path}")
+
     def save_video_media(
         self,
         event_id: UUID,
@@ -455,7 +497,7 @@ class MediaRepository:
                 INSERT INTO medias (id, event_id, file_path, media_type, title, technical_metadata, iptc_date_created)
                 VALUES (:id, :event_id, :file_path, 'video', :title, CAST(:technical_metadata AS jsonb), :iptc_date_created)
                 ON CONFLICT (file_path) DO UPDATE SET
-                    media_type = EXCLUDED.media_type,
+                    media_type = 'video',
                     title = EXCLUDED.title,
                     technical_metadata = EXCLUDED.technical_metadata,
                     iptc_date_created = EXCLUDED.iptc_date_created
@@ -474,6 +516,56 @@ class MediaRepository:
                 val = row[0] if hasattr(row, "__getitem__") else row.id
                 return val if isinstance(val, UUID) else UUID(str(val))
             raise RuntimeError(f"Failed to save video media: {clean_path}")
+
+    def save_bulk_medias(self, event_id: UUID, media_records: list[dict]) -> None:
+        """
+        Batch insert/update a list of media records in a single database transaction.
+        Each record in media_records should be a dict with:
+        - file_path (required)
+        - media_type ('photo', 'video', 'pdf', 'document')
+        - title (optional)
+        - text_content (optional)
+        - technical_metadata (optional dict)
+        - iptc_date_created (optional)
+        """
+        if not media_records:
+            return
+        import uuid as _uuid
+        import json
+
+        with get_db() as db:
+            for rec in media_records:
+                clean_path = _abs(sanitize_str(rec.get("file_path", "")))
+                if not clean_path:
+                    continue
+                new_id = _uuid.uuid4()
+                m_type = rec.get("media_type", "photo")
+                tech_meta = rec.get("technical_metadata")
+                tech_meta_json = json.dumps(tech_meta) if tech_meta else None
+                title = sanitize_str(rec.get("title")) if rec.get("title") else None
+                text_content = sanitize_str(rec.get("text_content")) if rec.get("text_content") else None
+                iptc_date = sanitize_str(rec.get("iptc_date_created")) if rec.get("iptc_date_created") else None
+
+                db.execute(text("""
+                    INSERT INTO medias (id, event_id, file_path, media_type, title, text_content, technical_metadata, iptc_date_created)
+                    VALUES (:id, :event_id, :file_path, :media_type, :title, :text_content, CAST(:technical_metadata AS jsonb), :iptc_date_created)
+                    ON CONFLICT (file_path) DO UPDATE SET
+                        media_type = EXCLUDED.media_type,
+                        title = COALESCE(EXCLUDED.title, medias.title),
+                        text_content = COALESCE(EXCLUDED.text_content, medias.text_content),
+                        technical_metadata = COALESCE(EXCLUDED.technical_metadata, medias.technical_metadata),
+                        iptc_date_created = COALESCE(EXCLUDED.iptc_date_created, medias.iptc_date_created)
+                """), {
+                    "id": str(new_id),
+                    "event_id": str(event_id),
+                    "file_path": clean_path,
+                    "media_type": m_type,
+                    "title": title,
+                    "text_content": text_content,
+                    "technical_metadata": tech_meta_json,
+                    "iptc_date_created": iptc_date,
+                })
+            db.commit()
 
     def get_file_paths_for_event(self, event_id: UUID) -> set:
         """Return a set of normalised file_paths stored in DB for the given event."""

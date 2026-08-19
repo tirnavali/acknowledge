@@ -608,9 +608,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def init_toolbar(self):
         self.toolbar_widget = self.addToolBar("Toolbar")
         
-        self.add_event = QAction("Yeni Etkinlik", self)
+        self.add_event = QAction("➕ Yeni Etkinlik", self)
         self.add_event.triggered.connect(self.add_event_window)
         self.toolbar_widget.addAction(self.add_event)
+
+        self.batch_import_action = QAction("📁 Toplu İçe Aktar", self)
+        self.batch_import_action.triggered.connect(self.batch_import_window)
+        self.toolbar_widget.addAction(self.batch_import_action)
 
         exit_toolbar_action = QAction("Çıkış", self)
         exit_toolbar_action.triggered.connect(self.close)
@@ -619,6 +623,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def add_event_window(self):
         self.add_event_win = add_event_window.AddEvent(parent=self)
+
+    def batch_import_window(self):
+        from batch_import_dialog import BatchImportDialog
+        dialog = BatchImportDialog(self.app_service, parent=self)
+        dialog.importCompleted.connect(self.refresh_events)
+        dialog.exec()
 
 
     def tabWidget(self):

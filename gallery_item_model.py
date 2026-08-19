@@ -30,8 +30,11 @@ class GalleryItem(QtGui.QStandardItem):
         ext = os.path.splitext(img_path)[1].lower()
         from src.utils.video_util import VIDEO_EXTS
         from src.utils.document_util import DOCUMENT_EXTS
+        from src.utils.pdf_util import PDF_EXTS
         if ext in VIDEO_EXTS:
             self.media_type = 'video'
+        elif ext in PDF_EXTS:
+            self.media_type = 'pdf'
         elif ext in DOCUMENT_EXTS:
             self.media_type = 'document'
         elif db_metadata and db_metadata.get('media_type'):
@@ -106,7 +109,7 @@ class GalleryItem(QtGui.QStandardItem):
         Fast path: if metadata was already populated from the DB, skip disk I/O
         entirely — only read from file when DB had no data.
         """
-        if self.media_type == 'document':
+        if self.media_type in ('document', 'pdf'):
             self.is_loaded = True
             return
         if self._db_populated:
@@ -248,7 +251,12 @@ class GalleryItemModel(QtGui.QStandardItemModel):
 
         if not pixmap or pixmap.isNull():
             media_type = getattr(item, 'media_type', 'photo')
-            if media_type == 'document':
+            if media_type == 'pdf':
+                from src.utils.pdf_util import generate_pdf_thumbnail
+                os.makedirs(thumb_dir, exist_ok=True)
+                generate_pdf_thumbnail(item.img_path, thumb_path)
+                pixmap = QtGui.QPixmap(thumb_path)
+            elif media_type == 'document':
                 from src.utils.document_util import generate_document_thumbnail
                 os.makedirs(thumb_dir, exist_ok=True)
                 generate_document_thumbnail(item.img_path, thumb_path)

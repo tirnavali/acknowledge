@@ -14,6 +14,7 @@ env/
 # Media/Data Directories
 /image_vault/
 /media_vault/
+/test_archive/
 
 # Environment Variables
 .env

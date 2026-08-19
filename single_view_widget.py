@@ -48,24 +48,60 @@ class ImageLoaderWorker(QtCore.QThread):
             image = QtGui.QImage(data, width, height, bytes_per_line, QtGui.QImage.Format_RGB888)
             image = image.copy()
         except Exception:
-            # Fallback for videos: use OpenCV to extract the first frame
-            try:
-                import cv2
-                cap = cv2.VideoCapture(self._img_path)
-                ret, frame = cap.read()
-                cap.release()
-                if not ret:
+            ext = os.path.splitext(self._img_path)[1].lower()
+            from src.utils.pdf_util import PDF_EXTS
+            from src.utils.document_util import DOCUMENT_EXTS
+
+            if ext in PDF_EXTS:
+                try:
+                    from PySide6.QtPdf import QPdfDocument
+                    doc = QPdfDocument()
+                    if doc.load(self._img_path) == QPdfDocument.Status.Ready and doc.pageCount() > 0:
+                        ps = doc.pagePointSize(0)
+                        # Render at high resolution
+                        scale = min(1800 / max(1, ps.width()), 1800 / max(1, ps.height()))
+                        rw = max(1, int(ps.width() * scale))
+                        rh = max(1, int(ps.height() * scale))
+                        image = doc.render(0, QtCore.QSize(rw, rh))
+                        doc.close()
+                    else:
+                        image = QtGui.QImage()
+                except Exception as e:
+                    logger.error(f"Failed to load PDF via QtPdf: {e}")
                     image = QtGui.QImage()
+
+            elif ext in DOCUMENT_EXTS:
+                # Load pre-generated thumbnail for document
+                thumb_path = os.path.join(
+                    os.path.dirname(self._img_path), ".thumbnails",
+                    os.path.basename(self._img_path) + ".thumb.jpg"
+                )
+                if os.path.exists(thumb_path):
+                    image = QtGui.QImage(thumb_path)
                 else:
-                    # Convert BGR to RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    h, w, ch = frame_rgb.shape
-                    bytes_per_line = ch * w
-                    image = QtGui.QImage(frame_rgb.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888)
-                    image = image.copy()
-            except Exception as e:
-                logger.error(f"Failed to load image/video via Pillow/CV2: {e}")
-                image = QtGui.QImage()
+                    from src.utils.document_util import generate_document_thumbnail
+                    generate_document_thumbnail(self._img_path, thumb_path)
+                    image = QtGui.QImage(thumb_path) if os.path.exists(thumb_path) else QtGui.QImage()
+
+            else:
+                # Fallback for videos: use OpenCV to extract the first frame
+                try:
+                    import cv2
+                    cap = cv2.VideoCapture(self._img_path)
+                    ret, frame = cap.read()
+                    cap.release()
+                    if not ret:
+                        image = QtGui.QImage()
+                    else:
+                        # Convert BGR to RGB
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        h, w, ch = frame_rgb.shape
+                        bytes_per_line = ch * w
+                        image = QtGui.QImage(frame_rgb.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888)
+                        image = image.copy()
+                except Exception as e:
+                    logger.error(f"Failed to load image/video via Pillow/CV2: {e}")
+                    image = QtGui.QImage()
         self.loaded.emit(self._img_path, image)
 
 

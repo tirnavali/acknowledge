@@ -88,10 +88,20 @@ def generate_document_thumbnail(dst_path: str, thumb_path: str) -> bool:
         badge_x0, badge_y0 = px + 14, py + ph - 44
         badge_x1, badge_y1 = px + 14 + 50, py + ph - 44 + 22
         draw.rounded_rectangle([badge_x0, badge_y0, badge_x1, badge_y1], radius=5, fill="#4a6fa5")
-        try:
-            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 13)
-        except Exception:
-            font = ImageFont.load_default()
+        
+        font = None
+        for font_candidate in ["arial.ttf", "segoeui.ttf", "Helvetica.ttc", "DejaVuSans.ttf"]:
+            try:
+                font = ImageFont.truetype(font_candidate, 13)
+                break
+            except Exception:
+                continue
+        if font is None:
+            try:
+                font = ImageFont.load_default()
+            except Exception:
+                font = None
+
         draw.text(((badge_x0 + badge_x1) / 2, (badge_y0 + badge_y1) / 2),
                   ext, fill="white", font=font, anchor="mm")
 

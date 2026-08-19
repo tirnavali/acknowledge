@@ -1,7 +1,15 @@
 from PySide6 import QtWidgets, QtCore
 import os
-import re
+import datetime
 from dotenv import load_dotenv
+
+from src.utils.folder_scanner_util import (
+    parse_date_and_name_from_folder,
+    detect_earliest_file_date,
+    format_event_name,
+    NamingTemplate,
+    normalize_unicode,
+)
 
 load_dotenv()
 
@@ -54,6 +62,22 @@ class AddEvent(QtWidgets.QWidget):
 
     def widgets(self):
         self.add_event_label = QtWidgets.QLabel("Etkinlik Ekleyin")
+        self.add_event_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        
+        self.batch_import_btn = QtWidgets.QPushButton("📁 Toplu Klasör İçe Aktar (Sub-Folders)")
+        self.batch_import_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.batch_import_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2b5b84;
+                color: white;
+                font-weight: bold;
+                padding: 6px 14px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #3872a5; }
+        """)
+        self.batch_import_btn.clicked.connect(self._open_batch_import)
+
         self.add_event_seperator = QtWidgets.QFrame()
         self.add_event_seperator.setFrameShape(QtWidgets.QFrame.HLine)
         self.add_event_seperator.setFrameShadow(QtWidgets.QFrame.Sunken)
@@ -81,8 +105,11 @@ class AddEvent(QtWidgets.QWidget):
         self.main_layout = QtWidgets.QVBoxLayout()
         self.top_layout = QtWidgets.QHBoxLayout()
         self.bottom_layout = QtWidgets.QFormLayout()
+        
         self.top_layout.addWidget(self.add_event_label)
-        self.top_layout.addWidget(self.add_event_seperator)
+        self.top_layout.addStretch(1)
+        self.top_layout.addWidget(self.batch_import_btn)
+
         self.bottom_layout.addWidget(self.add_event_name_label)
         self.bottom_layout.addWidget(self.add_event_name_line)
         self.bottom_layout.addWidget(self.add_event_date_label)
@@ -96,93 +123,42 @@ class AddEvent(QtWidgets.QWidget):
         self.bottom_layout.addWidget(self.submit_button)
 
         self.main_layout.addLayout(self.top_layout)
+        self.main_layout.addWidget(self.add_event_seperator)
         self.main_layout.addLayout(self.bottom_layout)
         self.setLayout(self.main_layout)
 
+    def _open_batch_import(self):
+        from batch_import_dialog import BatchImportDialog
+        dialog = BatchImportDialog(self.parent().app_service, parent=self.parent())
+        dialog.importCompleted.connect(self.parent().refresh_events)
+        dialog.exec()
+        self.close()
+
     def select_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Klasör Seç")
-        if folder:
-            basename = os.path.basename(folder)
-            self.add_event_folder_line.setText(folder)
-            
-            event_name = basename
-            date_found = False
-            
-            # 1. Try to parse from folder name (DD.MM.YYYY)
-            match = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", basename)
-            if match:
-                day, month, year = map(int, match.groups())
-                qdate = QtCore.QDate(year, month, day)
-                if qdate.isValid():
-                    qtime = QtCore.QTime(12, 0)
-                    self.add_event_date_line.setDateTime(QtCore.QDateTime(qdate, qtime))
-                    # Remove the date from the name and cleanup whitespace
-                    event_name = basename.replace(match.group(0), "").strip()
-                    event_name = re.sub(r"\s+", " ", event_name)
-                    date_found = True
+        if not folder:
+            return
 
-            # 2. If not found in folder name, scan media files for the earliest EXIF/filesystem date
-            if not date_found:
-                earliest_time = None
-                from PIL import Image
-                
-                try:
-                    for filename in os.listdir(folder):
-                        ext = os.path.splitext(filename)[1].lower()
-                        file_path = os.path.join(folder, filename)
-                        
-                        if not os.path.isfile(file_path):
-                            continue
-                            
-                        # Image EXIF check
-                        if ext in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}:
-                            try:
-                                with Image.open(file_path) as img:
-                                    exif = img._getexif()
-                                    if exif:
-                                        # EXIF DateTimeOriginal tag is 36867
-                                        dt_str = exif.get(36867) 
-                                        if dt_str:
-                                            import datetime
-                                            try:
-                                                # EXIF format is usually "YYYY:MM:DD HH:MM:SS"
-                                                dt = datetime.datetime.strptime(dt_str, "%Y:%m:%d %H:%M:%S")
-                                                ts = dt.timestamp()
-                                                if earliest_time is None or ts < earliest_time:
-                                                    earliest_time = ts
-                                            except ValueError:
-                                                pass
-                            except Exception:
-                                pass
-                        
-                        # OS modification time fallback (for all supported formats)
-                        from src.utils.document_util import DOCUMENT_EXTS
-                        from src.utils.video_util import VIDEO_EXTS
-                        supported_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"} | DOCUMENT_EXTS | VIDEO_EXTS
-                        if ext in supported_exts:
-                            try:
-                                ts = os.path.getmtime(file_path)
-                                if earliest_time is None or ts < earliest_time:
-                                    earliest_time = ts
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+        basename = os.path.basename(os.path.normpath(folder))
+        self.add_event_folder_line.setText(folder)
 
-                if earliest_time:
-                    import datetime
-                    dt = datetime.datetime.fromtimestamp(earliest_time)
-                    qdt = QtCore.QDateTime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-                    self.add_event_date_line.setDateTime(qdt)
+        parsed_date, clean_title = parse_date_and_name_from_folder(basename)
+        if parsed_date is None:
+            parsed_date = detect_earliest_file_date(folder)
 
-            # Auto-fill event name from folder name if currently empty
-            if not self.add_event_name_line.toPlainText().strip():
-                self.add_event_name_line.setPlainText(event_name)
+        if parsed_date:
+            qdate = QtCore.QDate(parsed_date.year, parsed_date.month, parsed_date.day)
+            qtime = QtCore.QTime(parsed_date.hour, parsed_date.minute)
+            self.add_event_date_line.setDateTime(QtCore.QDateTime(qdate, qtime))
+
+        # Format event name keeping year to prevent duplicate collision
+        target_name = format_event_name(basename, clean_title, parsed_date, NamingTemplate.YEAR_PREFIX)
+        self.add_event_name_line.setPlainText(target_name)
 
     def add_event(self):
-        event_name   = self.add_event_name_line.toPlainText().strip()
+        event_name   = normalize_unicode(self.add_event_name_line.toPlainText().strip())
         event_date   = self.add_event_date_line.dateTime().toPython()
-        event_folder = self.add_event_folder_line.text()
+        event_folder = os.path.normpath(self.add_event_folder_line.text().strip())
 
         if not (event_name and event_folder):
             QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen tüm alanları doldurun.")
@@ -190,14 +166,13 @@ class AddEvent(QtWidgets.QWidget):
 
         service = self.parent().app_service.get_event_service()
 
-        existing_event = service.get_by_name(event_name)
+        existing_event = service.get_by_name_and_date(event_name, event_date)
         if existing_event:
             reply = QtWidgets.QMessageBox.warning(
                 self,
-                "Aynı İsimde Etkinlik Mevcut",
-                f"'{event_name}' adında bir etkinlik zaten mevcut!\n\n"
-                "Bu işlem mevcut veritabanı ile çakışacaktır. Devam ederek klasördeki "
-                "yeni (benzersiz) dosyaları bu etkinliğe eklemek istiyor musunuz?",
+                "Aynı İsim ve Tarihte Etkinlik Mevcut",
+                f"'{event_name}' adında ve aynı tarihte bir etkinlik zaten mevcut!\n\n"
+                "Devam ederek klasördeki yeni (benzersiz) dosyaları bu etkinliğe eklemek istiyor musunuz?",
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No
             )
@@ -205,7 +180,7 @@ class AddEvent(QtWidgets.QWidget):
                 return
 
         self._progress_dialog = QtWidgets.QProgressDialog(
-            "Dosyalar kopyalanıyor...", None, 0, 100, self
+            "Dosyalar kopyalanıyor ve işleniyor...", None, 0, 100, self
         )
         self._progress_dialog.setWindowTitle("Etkinlik İçe Aktarılıyor")
         self._progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
@@ -228,7 +203,7 @@ class AddEvent(QtWidgets.QWidget):
         if total > 0:
             pct = int(current * 100 / total)
             self._progress_dialog.setLabelText(
-                f"Dosyalar kopyalanıyor... ({current}/{total})"
+                f"Dosyalar işleniyor... ({current}/{total})"
             )
             self._progress_dialog.setValue(pct)
 
