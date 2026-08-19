@@ -98,7 +98,7 @@ DB Setup         → src/database.py  (engine, session, connection management)
 
 **Caption Service** — `CaptionService` (`src/services/caption_service.py`) is a singleton wrapping Qwen2.5-VL-3B-Instruct. It loads lazily on first call, auto-selects CUDA > MPS > CPU, and outputs Turkish-only JSON (`caption_tr`, `tags_tr`). Images are pre-resized to 768 px on the longest side before inference. `caption_en` / `tags_en` columns exist in the DB but are currently left empty. All caption work runs in `QThread` workers (`CaptionTabWidget`) to keep the UI responsive.
 
-**Search/Filter** — `GallerySearchProxyModel` (in `gallery_item_model.py`) wraps the gallery model as a Qt proxy model, enabling keyword filtering and relevance-based sorting without reloading from DB.
+**Search/Filter** — `GallerySearchProxyModel` (in `src/ui/models/gallery_item_model.py`) wraps the gallery model as a Qt proxy model, enabling keyword filtering and relevance-based sorting without reloading from DB.
 
 **Path Storage** — `src/utils/path_util.py` stores file paths in the DB as relative paths from the project root (forward slashes). `to_db_path()` converts absolute → relative on write; `from_db_path()` converts back on read. Absolute legacy paths are handled as a fallback. Always use these helpers when reading/writing `file_path` columns to avoid cross-machine path breakage.
 
@@ -120,15 +120,16 @@ Key tables: `events` → `medias` (cascade delete) ↔ `persons` (via `media_per
 
 ### UI Structure
 
-`MainWindow` in `app.py` owns the full layout:
-- Left panel: event list (`QScrollArea` of `EventCardWidget` items) — `event_card_widget.py`
-- Center: gallery grid (`QListView` + `GalleryItemModel`) — `gallery_item_model.py`
-- Right panel: IPTC metadata form + face detection controls
-- Bottom: `SingleViewWidget` for full-size image with `FaceOverlayWidget` overlay — `single_view_widget.py`, `face_overlay_widget.py`
-- Tab widget: Events tab (main view) + Settings tab + Caption (Altyazı) tab
+All UI components, dialogs, views, and models reside under `src/ui/`:
+- `MainWindow` in `src/ui/main_window.py` (entry point wrapped by root `app.py`) owns the full layout:
+  - Left panel: event list (`QScrollArea` of `EventCardWidget` items) — `src/ui/components/event_card_widget.py`
+  - Center: gallery grid (`QListView` + `GalleryItemModel`) — `src/ui/models/gallery_item_model.py`
+  - Right panel: IPTC metadata form + face detection controls
+  - Single View: `SingleViewWidget` for full-size image with `FaceOverlayWidget` overlay — `src/ui/views/single_view_widget.py`, `src/ui/components/face_overlay_widget.py`
+  - Tabs: Events tab, Persons tab (`src/ui/views/persons_tab_widget.py`), Caption tab (`src/ui/views/caption_tab_widget.py`), Feedback tab (`src/ui/views/feedback_tab_widget.py`), FAQ tab (`src/ui/views/faq_widget.py`)
 
-Caption tab (`caption_tab_widget.py`) hosts single-image and batch captioning modes with `ModelLoadWorker`, `CaptionWorker`, and `BatchCaptionWorker` QThread subclasses. After each run it attempts to persist results to the DB via `MediaService.save_captions()`. Batch results are also auto-saved to `batch_results.json` in the working directory.
+Caption tab (`src/ui/views/caption_tab_widget.py`) hosts single-image and batch captioning modes with `ModelLoadWorker`, `CaptionWorker`, and `BatchCaptionWorker` QThread subclasses. After each run it attempts to persist results to the DB via `MediaService.save_captions()`. Batch results are also auto-saved to `batch_results.json` in the working directory.
 
-`CaptionStatsWidget` (`caption_stats_widget.py`) is a separate stats panel showing the last 5 inference runs and overall averages. It receives `CaptionResult` objects via the `stats_updated` signal on `CaptionTabWidget`.
+`CaptionStatsWidget` (`src/ui/components/caption_stats_widget.py`) is a separate stats panel showing the last 5 inference runs and overall averages. It receives `CaptionResult` objects via the `stats_updated` signal on `CaptionTabWidget`.
 
-Event import dialog is `add_event_window.py`. `BatchFaceWorker` (QThread subclass in `app.py`) runs face detection + auto-person-matching in the background.
+Event import dialog is `src/ui/dialogs/add_event_window.py`. `BatchFaceWorker` (QThread subclass in `src/ui/main_window.py`) runs face detection + auto-person-matching in the background.

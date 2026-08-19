@@ -13,7 +13,7 @@ import time
 from uuid import UUID
 from PySide6 import QtCore, QtWidgets, QtGui
 
-from face_overlay_widget import FaceOverlayWidget
+from src.ui.components.face_overlay_widget import FaceOverlayWidget
 from src.utils import path_util
 
 logger = logging.getLogger(__name__)
@@ -197,7 +197,6 @@ class SingleViewWidget(QtWidgets.QWidget):
     - Background face detection via FaceDetectionWorker
 
     Dependencies injected at construction:
-        face_service    — FaceAnalysisService (optional, can be None to disable)
         face_service    — FaceService (optional, can be None to disable)
         person_service  — PersonService (optional, can be None to disable)
         media_service   — MediaService (optional, can be None to disable)
@@ -221,7 +220,6 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.customContextMenuRequested.connect(self.show_context_menu)
 
         self._face_service      = face_service
-        self._face_service      = face_service  # Use the actual service
         self._person_service    = person_service
         self._media_service     = media_service
 
@@ -327,7 +325,7 @@ class SingleViewWidget(QtWidgets.QWidget):
         self._status_label.setStyleSheet("color: #888; font-size: 11px;")
         layout.addWidget(self._status_label)
 
-        # NEW: Face list area (hidden by default, used for videos)
+        # Face list area (used for videos)
         self.face_list_scroll = QtWidgets.QScrollArea()
         self.face_list_scroll.setFixedHeight(130)
         self.face_list_scroll.setWidgetResizable(True)
@@ -422,7 +420,7 @@ class SingleViewWidget(QtWidgets.QWidget):
             self.image_label.setText("Geçersiz resim dosyası.")
             return
 
-        # Convert QImage → QPixmap on the UI thread (the only safe place)
+        # Convert QImage → QPixmap on the UI thread
         pixmap = QtGui.QPixmap.fromImage(image)
         self._source_pixmap = pixmap
         self._scale_and_show(pixmap, smooth=True)
@@ -704,7 +702,6 @@ class SingleViewWidget(QtWidgets.QWidget):
         try:
             from uuid import UUID
             self._person_service.save_note(UUID(str(person_id)), self._current_media_id, note)
-            # Keep the cached note in the face dict so re-opening the popup shows it
             if face is not None:
                 face["note"] = note
         except Exception as e:
@@ -741,7 +738,7 @@ class SingleViewWidget(QtWidgets.QWidget):
             # Remove the stretch we added in _clear_face_list
             self.face_list_layout.takeAt(self.face_list_layout.count()-1)
 
-            from event_persons_dialog import _crop_face
+            from src.ui.dialogs.event_persons_dialog import _crop_face
             for f in faces:
                 thumb = _VideoFaceThumb(f)
                 thumb.clicked.connect(self._on_face_thumb_clicked)
@@ -765,20 +762,16 @@ class SingleViewWidget(QtWidgets.QWidget):
             pil_img = get_video_frame(self.current_img_path, t_ms)
             
             if pil_img:
-                # Convert PIL to QImage
                 from PIL import ImageQt
                 qimg = ImageQt.ImageQt(pil_img)
                 pix = QtGui.QPixmap.fromImage(qimg)
                 
-                # Show in main label and update zoom state
                 self._source_pixmap = pix
                 self._zoom_factor = 1.0  # Reset zoom to fit
                 self.image_label.setPixmap(pix)
-                # Update overlay with the new source pixmap
                 self.face_overlay.set_source_pixmap(pix)
                 self.face_overlay.clear_faces()
                 
-                # Position and show overlay correctly
                 img_rect = self._get_image_display_rect()
                 self.face_overlay.add_face(
                     face_data["bbox"], 
@@ -794,14 +787,6 @@ class SingleViewWidget(QtWidgets.QWidget):
             logger.error(f"_on_face_thumb_clicked failed: {e}")
 
     def _on_face_named(self, face_index: int, name: str):
-        """
-        Called when user presses Enter in a name input.
-
-        Decision tree:
-        1. Face has NO person yet → find_or_create(name), assign
-        2. Face HAS person, new name matches ANOTHER existing person → REASSIGN
-        3. Face HAS person, new name does NOT exist yet → RENAME in place (global)
-        """
         if not name or not self._person_service:
             return
 
@@ -825,12 +810,10 @@ class SingleViewWidget(QtWidgets.QWidget):
         # Ensure face row is in DB
         if not face_id and self._current_media_id and self._face_service and face_index < len(self._pending_results):
             try:
-                # Save ALL pending results, not just this one, to avoid wiping other faces
                 saved_ids = self._face_service.save_faces(
                     self._current_media_id, self._pending_results
                 )
                 if saved_ids:
-                    # Update ALL face_ids in the overlay
                     for i, sid in enumerate(saved_ids):
                         if i < len(self.face_overlay._faces):
                             self.face_overlay._faces[i]["face_id"] = str(sid)
@@ -838,7 +821,6 @@ class SingleViewWidget(QtWidgets.QWidget):
             except Exception as e:
                 logger.warning(f"save_faces fallback failed: {e}")
 
-        # --- Look up OLD person currently assigned to this face ---
         old_person_id = None
         old_person_name = None
         if face_id and self._face_service and self._current_media_id:
@@ -852,28 +834,21 @@ class SingleViewWidget(QtWidgets.QWidget):
             except Exception as e:
                 logger.warning(f"Could not look up old person: {e}")
 
-        # --- Check if new name already exists (WITHOUT creating) ---
         existing_person_id = self._person_service.find_by_name(name) if self._person_service else None
 
-        # Same person, same name → noop
         if old_person_id and existing_person_id and str(old_person_id) == str(existing_person_id):
             self._status_label.setText(f"ℹ️ '{name}' zaten atanmış.")
             return
 
-        # --- Decide: rename vs reassign vs new ---
         if old_person_id and not existing_person_id:
-            # Name doesn't exist yet → RENAME the existing person in-place
-            # This propagates to ALL photos that reference this person_id
             self._person_service.rename(old_person_id, name)
             final_person_id = old_person_id
             action = "yeniden adlandırıldı (tüm fotoğraflara yansıdı)"
 
         elif old_person_id and existing_person_id:
-            # Name belongs to a DIFFERENT existing person → REASSIGN
             final_person_id = existing_person_id
             action = "yeniden atandı"
 
-            # Unlink old person from this media if no other face still uses them
             try:
                 all_faces = self._face_service.get_faces_for_media(self._current_media_id) if self._face_service else []
                 still_linked = any(
@@ -887,23 +862,19 @@ class SingleViewWidget(QtWidgets.QWidget):
                 logger.warning(f"Old person unlink failed: {e}")
 
         else:
-            # No old person → create/find and assign fresh
             final_person_id = self._person_service.find_or_create(name)
             action = "kaydedildi"
 
         if not final_person_id:
             return
 
-        # Assign person to face detection row
         if face_id and self._face_service:
             self._face_service.assign_person(UUID(str(face_id)), final_person_id)
 
-        # Link person to media
         if self._current_media_id and self._person_service:
             self._person_service.link_to_media(final_person_id, self._current_media_id)
 
         self.face_overlay.update_person_name(face_index, name)
-        # Update person_id in the face dict so the note textarea is enabled on re-open
         for f in self.face_overlay._faces:
             if f["face_index"] == face_index:
                 f["person_id"] = str(final_person_id)
@@ -912,7 +883,6 @@ class SingleViewWidget(QtWidgets.QWidget):
         self.facesChanged.emit()
 
     def _on_face_cleared(self, face_index: int):
-        """Clear the person assignment for a single face without re-detecting anything."""
         if face_index >= len(self.face_overlay._faces):
             return
 
@@ -920,9 +890,8 @@ class SingleViewWidget(QtWidgets.QWidget):
         face_id = face_info.get("face_id")
 
         if not face_id:
-            return  # face not saved to DB yet — nothing to clear
+            return
 
-        # Find the old person_id so we can unlink from media_persons if needed
         old_person_id = None
         if self._current_media_id and self._face_service:
             try:
@@ -934,7 +903,6 @@ class SingleViewWidget(QtWidgets.QWidget):
             except Exception as e:
                 logger.warning(f"_on_face_cleared: could not fetch faces: {e}")
 
-        # Clear person_id on just this face row
         if self._face_service:
             try:
                 self._face_service.clear_person_for_face(UUID(str(face_id)))
@@ -942,7 +910,6 @@ class SingleViewWidget(QtWidgets.QWidget):
                 logger.warning(f"clear_person_for_face failed: {e}")
                 return
 
-        # Unlink the person from media_persons if no other face in this media still uses them
         if old_person_id and self._current_media_id and self._person_service:
             try:
                 all_faces = self._face_service.get_faces_for_media(self._current_media_id)
@@ -956,7 +923,6 @@ class SingleViewWidget(QtWidgets.QWidget):
             except Exception as e:
                 logger.warning(f"_on_face_cleared: unlink_from_media failed: {e}")
 
-        # Update only this face's badge in the overlay
         self.face_overlay.update_person_name(face_index, "")
         self._status_label.setText("✕ Yüz etiketi temizlendi.")
         self.facesChanged.emit()
@@ -966,12 +932,10 @@ class SingleViewWidget(QtWidgets.QWidget):
     # ------------------------------------------------------------------
 
     def _scale_and_show(self, pixmap: QtGui.QPixmap, smooth: bool = True):
-        """Scale pixmap based on zoom factor and fit to container."""
         if pixmap.isNull():
             return
 
-        # Base scale that fits the image into the visible container
-        container_size = self.scroll_area.size() - QtCore.QSize(20, 20) # padding
+        container_size = self.scroll_area.size() - QtCore.QSize(20, 20)
         pw, ph = pixmap.width(), pixmap.height()
         cw, ch = container_size.width(), container_size.height()
 
@@ -984,7 +948,6 @@ class SingleViewWidget(QtWidgets.QWidget):
         new_width = int(pw * total_scale)
         new_height = int(ph * total_scale)
 
-        # Scale and show
         mode = QtCore.Qt.SmoothTransformation if smooth else QtCore.Qt.FastTransformation
         scaled = pixmap.scaled(
             new_width, new_height,
@@ -992,26 +955,16 @@ class SingleViewWidget(QtWidgets.QWidget):
             mode,
         )
         self.image_label.setPixmap(scaled)
-        # Ensure label matches the pixmap size so scrollbars work correctly
         self.image_label.setFixedSize(scaled.size())
 
     def _refresh_pixmap(self):
-        """Re-scale the cached source pixmap on resize — never reloads from disk."""
         if self._source_pixmap and not self._source_pixmap.isNull():
             self._scale_and_show(self._source_pixmap, smooth=False)
 
     def _get_image_display_rect(self) -> QtCore.QRect:
-        """
-        Calculate the pixel rect of the scaled image within the image container.
-        Needed to translate normalised bbox coords to display coords.
-        """
         pm = self.image_label.pixmap()
         if pm is None or pm.isNull():
             return self._image_container.rect()
-
-        # The image_label's geometry inside _image_container perfectly describes
-        # where the scaled image pixels reside, because we did setFixedSize()
-        # on the label to precisely match the scaled pixmap.
         return self.image_label.geometry()
 
     # ------------------------------------------------------------------
@@ -1032,24 +985,21 @@ class SingleViewWidget(QtWidgets.QWidget):
         elif event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Up):
             self.prevRequested.emit()
         elif event.key() == QtCore.Qt.Key_Space:
-            self.doubleClicked.emit() # space bar toggles back to gallery
+            self.doubleClicked.emit()
         else:
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        """Handle mouse wheel for zooming towards cursor."""
         if not self._source_pixmap or self._source_pixmap.isNull():
             return
 
         angle = event.angleDelta().y()
         zoom_step = 1.1 if angle > 0 else 1/1.1
         
-        # Clamp zoom factor
         new_factor = self._zoom_factor * zoom_step
         if not (0.1 <= new_factor <= 20.0):
             return
 
-        # 1. Capture old mouse positions
         container_pos = self._image_container.mapFrom(self, event.position().toPoint())
         old_x, old_y = container_pos.x(), container_pos.y()
         old_w = max(1, self._image_container.width())
@@ -1058,15 +1008,12 @@ class SingleViewWidget(QtWidgets.QWidget):
         viewport = self.scroll_area.viewport()
         viewport_pos = viewport.mapFrom(self, event.position().toPoint())
 
-        # 2. Apply zoom
         self._zoom_factor = new_factor
         self._refresh_pixmap()
         self._image_container.adjustSize()
         
-        # Need to force event loop to process layout changes so scrollbars update max values
         QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents)
         
-        # 3. Calculate new scrollbar values to keep mouse pointing at the same spot
         new_w = self._image_container.width()
         new_h = self._image_container.height()
         
@@ -1082,7 +1029,6 @@ class SingleViewWidget(QtWidgets.QWidget):
         h_bar.setValue(int(new_x - viewport_pos.x()))
         v_bar.setValue(int(new_y - viewport_pos.y()))
 
-        # Update overlay geometry and alignment
         self.face_overlay.setGeometry(self._image_container.rect())
         self.face_overlay._img_rect = self._get_image_display_rect()
         self.face_overlay.raise_()
@@ -1092,7 +1038,6 @@ class SingleViewWidget(QtWidgets.QWidget):
         super().resizeEvent(event)
         if self.current_img_path:
             self._refresh_pixmap()
-            # Reposition overlay to match container
             self.face_overlay.setGeometry(self._image_container.rect())
             img_rect = self._get_image_display_rect()
             self.face_overlay._img_rect = img_rect

@@ -7,19 +7,26 @@ class EventCardWidget(QtWidgets.QWidget):
     def __init__(self, event_name, event_date):
         super().__init__()
         self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setContentsMargins(8, 8, 8, 8)
-        self.layout.setSpacing(4)
+        self.layout.setContentsMargins(6, 6, 6, 6)
+        self.layout.setSpacing(3)
         
         self.event_name = QtWidgets.QLabel(event_name)
         self.event_name.setWordWrap(True)
         # Set tooltip so user can see full name on hover
         self.event_name.setToolTip(event_name)
-        self.event_name.setStyleSheet("font-weight: bold; font-size: 13px; color: #f0f0f0;")
+        self.event_name.setStyleSheet("font-weight: bold; font-size: 12px; color: #f0f0f0;")
         self.event_name.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
         self.layout.addWidget(self.event_name)
         
-        self.event_date = QtWidgets.QLabel(event_date.strftime("%Y-%m-%d %H:%M:%S"))
-        self.event_date.setStyleSheet("color: #a0a0a0; font-size: 11px;")
+        if event_date and hasattr(event_date, "strftime"):
+            date_str = event_date.strftime("%d.%m.%Y %H:%M")
+        elif event_date:
+            date_str = str(event_date)
+        else:
+            date_str = "Tarih belirtilmedi"
+            
+        self.event_date = QtWidgets.QLabel(date_str)
+        self.event_date.setStyleSheet("color: #a0a0a0; font-size: 10px;")
         self.layout.addWidget(self.event_date)
         
         # Optional: Add visual feedback for hover
@@ -27,11 +34,11 @@ class EventCardWidget(QtWidgets.QWidget):
             EventCardWidget {
                 border: 1px solid #3f3f46;
                 border-radius: 5px;
-                padding: 5px;
-                background-color: #2d2d30;
+                padding: 4px;
+                background-color: #2a2a2d;
             }
             EventCardWidget:hover {
-                background-color: #3e3e42;
+                background-color: #38383c;
                 border: 1px solid #555558;
             }
             EventCardWidget:focus {
@@ -46,7 +53,7 @@ class EventCardWidget(QtWidgets.QWidget):
     def sizeHint(self):
         w = self.width()
         if w <= 0 or w == 640:
-            w = 184
+            w = 175
         if self.layout.hasHeightForWidth():
             h = self.layout.heightForWidth(w)
             return QtCore.QSize(w, h)
@@ -64,12 +71,12 @@ class EventCardWidget(QtWidgets.QWidget):
     
     def setSelected(self, selected: bool):
         base = """
-            EventCardWidget { border:1px solid #3f3f46; border-radius:5px; padding:5px;
-                              background-color:#2d2d30; }
-            EventCardWidget:hover { background-color:#3e3e42; border:1px solid #555558; }
+            EventCardWidget { border:1px solid #3f3f46; border-radius:5px; padding:4px;
+                              background-color:#2a2a2d; }
+            EventCardWidget:hover { background-color:#38383c; border:1px solid #555558; }
         """
         active = """
-            EventCardWidget { border:2px solid #0078d4; border-radius:5px; padding:5px;
+            EventCardWidget { border:2px solid #0078d4; border-radius:5px; padding:4px;
                               background-color:#1e3a5f; }
             EventCardWidget:hover { background-color:#2a4a6f; border:2px solid #0078d4; }
         """
@@ -80,5 +87,3 @@ class EventCardWidget(QtWidgets.QWidget):
         if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
             self.clicked.emit()
         super().keyPressEvent(event)
-
-        

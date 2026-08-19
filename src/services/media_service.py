@@ -71,7 +71,7 @@ class MediaService(BaseService):
             if not event or not event.vault_folder_path:
                 return []
             
-            abs_folder_path = os.path.abspath(event.vault_folder_path)
+            abs_folder_path = path_util.from_db_path(event.vault_folder_path)
             if not os.path.exists(abs_folder_path):
                 return []
             
@@ -90,7 +90,7 @@ class MediaService(BaseService):
                     db_record = db_map.get(os.path.normcase(abs_path))
                     
                     # Create lazy item (metadata from DB if available)
-                    from gallery_item_model import GalleryItem
+                    from src.ui.models.gallery_item_model import GalleryItem
                     item = GalleryItem(
                         filename, 
                         img_path, 
@@ -106,7 +106,7 @@ class MediaService(BaseService):
     def get_all_gallery_items(self):
         """Get GalleryItems for all media across all events, ordered by date_taken."""
         try:
-            from gallery_item_model import GalleryItem
+            from src.ui.models.gallery_item_model import GalleryItem
             records = self.media_repository.get_all_ordered_by_date()
             items = []
             for r in records:
@@ -180,7 +180,7 @@ class MediaService(BaseService):
     def get_gallery_items_for_search(self, query: str) -> list:
         """Search IPTC metadata across all events and return GalleryItems."""
         try:
-            from gallery_item_model import GalleryItem
+            from src.ui.models.gallery_item_model import GalleryItem
             records = self.media_repository.search_across_events(query)
             items = []
             for rec in records:
@@ -238,7 +238,7 @@ class MediaService(BaseService):
     def get_gallery_items_for_person(self, person_id):
         """Get GalleryItems for all media linked to a person."""
         try:
-            from gallery_item_model import GalleryItem
+            from src.ui.models.gallery_item_model import GalleryItem
             import os
             records = self.media_repository.get_all_for_person(person_id)
             items = []

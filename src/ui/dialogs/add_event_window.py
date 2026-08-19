@@ -128,7 +128,7 @@ class AddEvent(QtWidgets.QWidget):
         self.setLayout(self.main_layout)
 
     def _open_batch_import(self):
-        from batch_import_dialog import BatchImportDialog
+        from src.ui.dialogs.batch_import_dialog import BatchImportDialog
         dialog = BatchImportDialog(self.parent().app_service, parent=self.parent())
         dialog.importCompleted.connect(self.parent().refresh_events)
         dialog.exec()

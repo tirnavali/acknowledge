@@ -13,6 +13,7 @@ import os
 import shutil
 import datetime
 from PIL import Image, ImageOps
+from src.utils import path_util
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class EventService(BaseService):
             self.logger.error(f"Error getting event by name '{name}' and year {year}: {e}")
             raise
 
-    def get_by_name_and_date(self, name: str, event_date) -> Event | None:
+    def get_by_name_and_date(self, name: str, event_date=None):
         """Get event by name and event date."""
         try:
             return self.event_repository.get_by_name_and_date(name, event_date)
@@ -128,21 +129,23 @@ class EventService(BaseService):
         progress_callback=None,
     ) -> Event:
         """
-        Create an event and copy media files from source_folder into the vault.
+        Create an event and copy all media files (recursively from source_folder and its subfolders) into the vault.
 
         Steps:
         1. Check if event with this name AND date/year already exists. If yes, re-use its vault path.
         2. Otherwise, create a unique vault subfolder named after the event and year.
-        3. Copy unique files from source_folder into it.
-        4. Generate thumbnails (Photo, PDF, Word, Video) and extract text/metadata.
-        5. Persist/update the event record and bulk media records.
+        3. Recursively copy unique media files from source_folder into the vault.
+        4. Generate thumbnails (Photo, PDF, Word, Video) and extract text/metadata/EXIF.
+        5. Persist/update the event record and bulk media records in the database.
         """
         existing_event = self.get_by_name_and_date(name, event_date)
         if existing_event:
             event = existing_event
-            vault_folder = event.vault_folder_path
+            vault_folder = path_util.from_db_path(event.vault_folder_path)
         else:
             vault_folder = self.compute_vault_folder_path(vault_base_path, name, event_date)
+            # Ensure absolute path for filesystem operations
+            vault_folder = path_util.from_db_path(vault_folder)
             os.makedirs(vault_folder, exist_ok=True)
             event = Event.create(
                 name=name,
@@ -153,28 +156,49 @@ class EventService(BaseService):
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
         supported_exts = image_exts | DOCUMENT_EXTS | PDF_EXTS | VIDEO_EXTS
 
-        media_files = [
-            f for f in sorted(os.listdir(source_folder))
-            if os.path.splitext(f)[1].lower() in supported_exts and not f.startswith(".")
-        ]
-        total = len(media_files)
+        # Recursively collect all media files from source_folder and its subfolders
+        collected_files = []
+        for root, dirs, files in os.walk(source_folder):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+            for f in sorted(files):
+                if f.startswith("."):
+                    continue
+                ext = os.path.splitext(f)[1].lower()
+                if ext in supported_exts:
+                    full_p = os.path.join(root, f)
+                    collected_files.append((full_p, f, ext))
 
-        doc_metadata: dict[str, dict] = {}
-        pdf_metadata: dict[str, dict] = {}
-        video_metadata: dict[str, dict] = {}
+        total = len(collected_files)
+        media_records_to_save = []
+        thumb_dir = os.path.join(vault_folder, ".thumbnails")
+        os.makedirs(thumb_dir, exist_ok=True)
 
-        for i, filename in enumerate(media_files, 1):
-            src = os.path.join(source_folder, filename)
-            dst = os.path.join(vault_folder, filename)
-            ext = os.path.splitext(filename)[1].lower()
+        used_filenames = set(os.listdir(vault_folder))
 
-            # Unique files only: If already exists in vault, skip copy and DB import for it
+        for i, (src, orig_filename, ext) in enumerate(collected_files, 1):
+            # Target filename with collision avoidance
+            target_filename = orig_filename
+            dst = os.path.join(vault_folder, target_filename)
+
+            # If a different file with the same name already exists, make filename unique
+            if os.path.exists(dst) and os.path.abspath(src) != os.path.abspath(dst):
+                # If sizes or mtimes differ, create unique name
+                if os.path.getsize(src) != os.path.getsize(dst):
+                    base, f_ext = os.path.splitext(orig_filename)
+                    counter = 1
+                    while target_filename in used_filenames or os.path.exists(os.path.join(vault_folder, target_filename)):
+                        target_filename = f"{base}_{counter}{f_ext}"
+                        counter += 1
+                    dst = os.path.join(vault_folder, target_filename)
+
+            used_filenames.add(target_filename)
+
+            # Copy file to vault if not already there
             if not os.path.exists(dst):
                 shutil.copy2(src, dst)
 
-            thumb_dir = os.path.join(vault_folder, ".thumbnails")
-            os.makedirs(thumb_dir, exist_ok=True)
-            thumb_path = os.path.join(thumb_dir, filename + ".thumb.jpg")
+            thumb_path = os.path.join(thumb_dir, target_filename + ".thumb.jpg")
+            title = os.path.splitext(target_filename)[0]
 
             if ext in image_exts:
                 if not os.path.exists(thumb_path):
@@ -186,87 +210,79 @@ class EventService(BaseService):
                             img.thumbnail((300, 300))
                             img.save(thumb_path, "JPEG", quality=85)
                     except Exception as e:
-                        self.logger.warning(f"Could not pre-generate thumbnail for {filename}: {e}")
+                        self.logger.warning(f"Could not pre-generate thumbnail for {target_filename}: {e}")
+
+                exif_date = None
+                try:
+                    with Image.open(dst) as img:
+                        exif = img._getexif()
+                        if exif:
+                            dt_str = exif.get(36867) or exif.get(306)
+                            if dt_str:
+                                exif_date = str(dt_str)[:19]
+                except Exception:
+                    pass
+
+                media_records_to_save.append({
+                    "file_path": dst,
+                    "media_type": "photo",
+                    "title": title,
+                    "iptc_date_created": exif_date,
+                })
 
             elif ext in PDF_EXTS:
                 if not os.path.exists(thumb_path):
                     generate_pdf_thumbnail(dst, thumb_path)
                 pdf_text = extract_pdf_text(dst)
                 pdf_meta = extract_pdf_metadata(dst)
-                pdf_metadata[filename] = {
+                media_records_to_save.append({
+                    "file_path": dst,
+                    "media_type": "pdf",
+                    "title": title,
                     "text_content": pdf_text,
                     "technical_metadata": pdf_meta or None,
-                    "title": os.path.splitext(filename)[0],
-                }
+                })
 
             elif ext in DOCUMENT_EXTS:
                 if not os.path.exists(thumb_path):
                     generate_document_thumbnail(dst, thumb_path)
-                text = extract_docx_text(dst)
-                meta = extract_doc_metadata(dst)
-                doc_metadata[filename] = {
-                    "text_content": text,
-                    "technical_metadata": meta or None,
-                    "title": os.path.splitext(filename)[0],
-                }
+                doc_text = extract_docx_text(dst)
+                doc_meta = extract_doc_metadata(dst)
+                media_records_to_save.append({
+                    "file_path": dst,
+                    "media_type": "document",
+                    "title": title,
+                    "text_content": doc_text,
+                    "technical_metadata": doc_meta or None,
+                })
 
             elif ext in VIDEO_EXTS:
                 if not os.path.exists(thumb_path):
                     generate_video_thumbnail(dst, thumb_path)
-                meta = extract_video_metadata(dst)
-                video_metadata[filename] = {
-                    "technical_metadata": meta or None,
-                    "title": os.path.splitext(filename)[0],
-                    "iptc_date_created": meta.get("creation_time"),
-                }
+                v_meta = extract_video_metadata(dst)
+                media_records_to_save.append({
+                    "file_path": dst,
+                    "media_type": "video",
+                    "title": title,
+                    "technical_metadata": v_meta or None,
+                    "iptc_date_created": v_meta.get("creation_time") if v_meta else None,
+                })
 
             if progress_callback is not None:
                 progress_callback(i, total)
 
         if not existing_event:
-            event.mark_as_imported(vault_folder)
+            event.mark_as_imported(path_util.to_db_path(vault_folder))
             self.event_repository.save(event)
 
-        if self.media_repository:
-            # Batch or individual media records save
-            for filename, doc_meta in doc_metadata.items():
-                vault_file_path = os.path.join(vault_folder, filename)
-                try:
-                    self.media_repository.save_document_media(
-                        event_id=event.id,
-                        file_path=vault_file_path,
-                        title=doc_meta["title"],
-                        text_content=doc_meta["text_content"],
-                        technical_metadata=doc_meta["technical_metadata"],
-                    )
-                except Exception as e:
-                    self.logger.warning(f"Could not persist document record for {filename}: {e}")
-
-            for filename, p_meta in pdf_metadata.items():
-                vault_file_path = os.path.join(vault_folder, filename)
-                try:
-                    self.media_repository.save_pdf_media(
-                        event_id=event.id,
-                        file_path=vault_file_path,
-                        title=p_meta["title"],
-                        text_content=p_meta["text_content"],
-                        technical_metadata=p_meta["technical_metadata"],
-                    )
-                except Exception as e:
-                    self.logger.warning(f"Could not persist PDF record for {filename}: {e}")
-
-            for filename, v_meta in video_metadata.items():
-                vault_file_path = os.path.join(vault_folder, filename)
-                try:
-                    self.media_repository.save_video_media(
-                        event_id=event.id,
-                        file_path=vault_file_path,
-                        title=v_meta["title"],
-                        technical_metadata=v_meta["technical_metadata"],
-                        iptc_date_created=v_meta["iptc_date_created"],
-                    )
-                except Exception as e:
-                    self.logger.warning(f"Could not persist video record for {filename}: {e}")
+        if self.media_repository and media_records_to_save:
+            try:
+                self.media_repository.bulk_save_media(
+                    event_id=event.id,
+                    media_records=media_records_to_save
+                )
+            except Exception as e:
+                self.logger.error(f"Could not bulk persist media records for {name}: {e}")
 
         self.logger.info(f"Created event '{name}', imported {total} files to {vault_folder}")
         return event

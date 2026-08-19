@@ -1,0 +1,3104 @@
+import sys, os
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+from dotenv import load_dotenv
+
+# Load environment variables early, before initializing anything else (especially Sentry)
+load_dotenv()
+
+import sentry_sdk
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        # Add data like request headers and IP for users
+        send_default_pii=True,
+        # Enable sending logs to Sentry
+        enable_logs=True,
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for tracing.
+        traces_sample_rate=1.0,
+        # Set profile_session_sample_rate to 1.0 to profile 100%
+        # of profile sessions.
+        profile_session_sample_rate=1.0,
+    )
+
+    def custom_excepthook(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        sentry_sdk.capture_exception((exc_type, exc_value, exc_traceback))
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = custom_excepthook
+
+import random
+import logging
+import time
+import datetime
+from collections import defaultdict
+from pathlib import Path
+from PySide6 import QtCore, QtWidgets, QtGui
+from PySide6.QtGui import QAction
+import shiboken6 as shiboken
+
+TURKISH_MONTHS = {
+    1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan",
+    5: "Mayıs", 6: "Haziran", 7: "Temmuz", 8: "Ağustos",
+    9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık"
+}
+
+from src.ui.components.event_card_widget import EventCardWidget
+from src.ui.models.gallery_item_model import GalleryItemModel, GalleryItem
+from sqlalchemy import text
+from src.database import get_db, Base, engine
+import src.models
+from src.ui.dialogs import add_event_window
+from src.repositories.event_repository import EventRepository
+from src.repositories.media_repository import MediaRepository
+from src.repositories.person_repository import PersonRepository
+from src.repositories.face_repository import FaceRepository
+from src.services.face_service import FaceAnalysisService
+from src.ui.views.single_view_widget import SingleViewWidget
+from src.services.application_service import ApplicationService
+from src.ui.views.caption_tab_widget import CaptionTabWidget
+from src.ui.components.caption_stats_widget import CaptionStatsWidget
+from src.ui.views.persons_tab_widget import PersonsTabWidget
+from src.ui.components.toggle_switch import ToggleSwitch
+from src.ui.views.faq_widget import FAQWidget
+from src.ui.views.feedback_tab_widget import FeedbackTabWidget
+from src.ui.dialogs.event_persons_dialog import EventPersonsDialog
+import os
+
+from src.utils.log_util import setup_logging
+setup_logging(Path(__file__).parent.parent.parent / "logs")
+logger = logging.getLogger(__name__)
+
+
+class BatchFaceWorker(QtCore.QThread):
+    """Runs face detection + auto-matching on a list of image files in the background."""
+
+    progress        = QtCore.Signal(int, int)   # (current, total)
+    finished        = QtCore.Signal()
+    error           = QtCore.Signal(str)
+    image_processed = QtCore.Signal(str)        # emits file_path when one image is done
+
+    def __init__(self, file_paths, event_id, face_service, media_service, person_service, parent=None, force=False):
+        super().__init__(parent)
+        self._file_paths  = file_paths
+        self._event_id    = event_id
+        self._face_svc    = face_service
+        self._media_svc   = media_service
+        self._person_svc  = person_service
+        self._force       = force
+
+    def run(self):
+        import time as _time
+        from src.utils.video_util import VIDEO_EXTS, extract_key_frames
+        total = len(self._file_paths)
+        _t0 = _time.monotonic()
+        logger.info(
+            f"BatchFaceWorker: starting on {total} files",
+            extra={"event": "FACE_BATCH_START", "event_id": str(self._event_id)},
+        )
+        for i, file_path in enumerate(self._file_paths, 1):
+            try:
+                ext = os.path.splitext(file_path)[1].lower()
+                is_video = ext in VIDEO_EXTS
+                
+                from src.utils.document_util import DOCUMENT_EXTS
+                if ext in DOCUMENT_EXTS:
+                    raise ValueError(f"Yüz tanıma doküman dosyaları için desteklenmemektedir: {ext}")
+                
+                image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+                if not is_video and ext not in image_exts:
+                    raise ValueError(f"Yüz tanıma bu dosya türü için desteklenmemektedir: {ext}")
+
+                media_type = "video" if is_video else "photo"
+
+                media_id = self._media_svc.ensure_media_exists(
+                    self._event_id, file_path, media_type
+                )
+                media_row = self._media_svc.get_by_file_path(file_path)
+                if not self._force and media_row and media_row.get("face_detected_at"):
+                    self.progress.emit(i, total)
+                    continue
+
+                if self._force:
+                    self._face_svc.delete_faces_for_media(media_id)
+
+                if is_video:
+                    frames_with_ts = extract_key_frames(file_path, interval_seconds=1.0)
+                    results = []
+                    for frame, tms in frames_with_ts:
+                        frame_results = self._face_svc.detect_faces_from_array(frame)
+                        if frame_results:
+                            for fr in frame_results:
+                                fr.timestamp_ms = tms
+                            results.extend(frame_results)
+                else:
+                    results = self._face_svc.detect_faces(file_path)
+
+                saved_ids = self._face_svc.save_faces(media_id, results) if results else []
+
+                for face_result, face_id in zip(results or [], saved_ids):
+                    if face_result.embedding is not None:
+                        pid, _ = self._face_svc.find_similar_person(face_result.embedding)
+                        if pid:
+                            self._face_svc.assign_person(face_id, pid)
+                            self._person_svc.link_to_media(pid, media_id)
+
+                if not is_video:
+                    # --- Automatic Metadata Extraction (images only) ---
+                    from src.utils import metadata_util
+                    meta = metadata_util.extract_metadata(file_path)
+                    if any(v.strip() for v in meta.values()):
+                        self._media_svc.save_iptc_data(media_id, meta)
+
+                self._media_svc.mark_face_detected(media_id)
+            except Exception as e:
+                logger.warning(f"BatchFaceWorker: error on {file_path}: {e}")
+            self.image_processed.emit(file_path)
+            self.progress.emit(i, total)
+        elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+        logger.info(
+            f"BatchFaceWorker: finished {total} files in {elapsed_ms}ms",
+            extra={"event": "FACE_BATCH_COMPLETE", "event_id": str(self._event_id), "duration_ms": elapsed_ms},
+        )
+        self.finished.emit()
+
+
+class BackgroundCaptionWorker(QtCore.QThread):
+    """Runs CaptionService on a list of image files in the background, skipping already-captioned ones."""
+
+    progress        = QtCore.Signal(int, int)   # (current, total)
+    finished        = QtCore.Signal()
+    image_captioned = QtCore.Signal(str)        # file_path when one image is done
+    result_ready    = QtCore.Signal(object)     # CaptionResult after each image
+
+    def __init__(self, file_paths, event_id, caption_service, media_service, person_service=None, parent=None, event_name=""):
+        super().__init__(parent)
+        self._file_paths  = file_paths
+        self._event_id    = event_id
+        self._event_name  = event_name
+        self._caption_svc = caption_service
+        self._media_svc   = media_service
+        self._person_svc  = person_service
+
+    def run(self):
+        import time as _time
+        total = len(self._file_paths)
+        _t0 = _time.monotonic()
+        logger.info(
+            f"BackgroundCaptionWorker: starting on {total} files",
+            extra={"event": "CAPTION_BATCH_START", "event_id": str(self._event_id)},
+        )
+        for i, file_path in enumerate(self._file_paths, 1):
+            try:
+                media_id = self._media_svc.ensure_media_exists(self._event_id, file_path, "photo")
+                person_names = None
+                if self._person_svc:
+                    person_names = self._person_svc.get_persons_for_media(media_id)
+                result = self._caption_svc.analyse(file_path, person_names=person_names)
+                if result.has_data and not result.error:
+                    self._media_svc.save_captions(media_id, result)
+            except Exception as e:
+                logger.warning(f"BackgroundCaptionWorker: error on {file_path}: {e}")
+                from src.domain.entities.caption_result import CaptionResult
+                result = CaptionResult(img_path=file_path, error=str(e))
+            result.event_name = self._event_name
+            self.result_ready.emit(result)
+            self.image_captioned.emit(file_path)
+            self.progress.emit(i, total)
+        elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+        logger.info(
+            f"BackgroundCaptionWorker: finished {total} files in {elapsed_ms}ms",
+            extra={"event": "CAPTION_BATCH_COMPLETE", "event_id": str(self._event_id), "duration_ms": elapsed_ms},
+        )
+        self.finished.emit()
+
+
+class SearchWorker(QtCore.QThread):
+    """Runs the FTS DB query in the background to avoid freezing the UI."""
+    finished = QtCore.Signal(object, str)   # (list[dict], query_text)
+    error    = QtCore.Signal(str)
+
+    def __init__(self, media_service, query, parent=None):
+        super().__init__(parent)
+        self._media_service = media_service
+        self._query = query
+
+    def run(self):
+        try:
+            records = self._media_service.search_across_events_raw(self._query)
+            self.finished.emit(records, self._query)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class UpdateCheckWorker(QtCore.QThread):
+    """Fetches origin and checks for new commits in the background."""
+    update_available = QtCore.Signal(int, str)   # (commit_count, latest_sha)
+    no_update        = QtCore.Signal()
+
+    def run(self):
+        from src.utils.update_util import check_for_updates
+        available, count, sha = check_for_updates()
+        if available:
+            self.update_available.emit(count, sha)
+        else:
+            self.no_update.emit()
+
+
+class UpdateApplyWorker(QtCore.QThread):
+    """Runs git pull (and pip install if needed) in the background."""
+    finished = QtCore.Signal(bool, str)   # (success, error_message)
+
+    def run(self):
+        from src.utils.update_util import apply_update
+        success, error = apply_update()
+        self.finished.emit(success, error)
+
+
+class EnsureMasterBranchWorker(QtCore.QThread):
+    """Switches to master branch on startup if on a different branch."""
+    branch_ok      = QtCore.Signal(str)        # prev branch (already master)
+    branch_switched = QtCore.Signal(str)       # prev branch name (switched OK)
+    switch_failed  = QtCore.Signal(str, str)   # (prev branch, error)
+
+    def run(self):
+        from src.utils.update_util import ensure_master_branch
+        try:
+            ok, prev, err = ensure_master_branch()
+            if ok and prev == "master":
+                self.branch_ok.emit(prev)
+            elif ok:
+                self.branch_switched.emit(prev)
+            else:
+                self.switch_failed.emit(prev, err)
+        except Exception as e:
+            self.switch_failed.emit("", str(e))
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Tirnavali Acknowledge")
+        self.current_event_id = None
+        self.current_event_name = None
+        self.current_media_id = None
+        self._current_ai_caption_orig = ""
+        self._current_ai_tags_orig = ""
+        self.app_service = ApplicationService()
+        self._face_detection_queue: list = []   # list of (file_paths, event)
+        self._batch_face_worker = None
+        self._caption_queue: list = []          # list of (file_paths, event)
+        self._caption_worker = None
+        self._media_status_bar = QtWidgets.QLabel("📂 Etkinlik Seçilmedi")
+        self._media_status_bar.setStyleSheet("""
+            background-color: #2d2d30;
+            color: #8ecfff;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: bold;
+            border-top: 1px solid #3f3f46;
+        """)
+        self.statusBar()
+        self._search_worker = None              # background FTS worker
+        self._update_check_worker = None
+        self._update_apply_worker = None
+        self._ensure_master_worker = None
+        self._update_bar = self._make_update_bar()
+        self._branch_bar = self._make_branch_bar()
+        self._search_mode = False               # True while cross-event search is active
+        self._selected_event_card = None        # currently highlighted EventCardWidget
+        self.init_db()
+        self.init_vault()
+        self.UI()
+        self.show()
+        # Fit window AFTER show() so inner widgets have finished their layout pass.
+        # singleShot(0) defers to the next event-loop iteration.
+        QtCore.QTimer.singleShot(0, lambda: self._fit_to_screen(preferred_w=1400, preferred_h=900))
+        QtCore.QTimer.singleShot(0, self._start_global_captioning_on_startup)
+        QtCore.QTimer.singleShot(500, self._ensure_master_branch_async)
+        QtCore.QTimer.singleShot(3000, self._check_for_updates_async)
+
+    # ------------------------------------------------------------------
+    # Auto-update
+    # ------------------------------------------------------------------
+
+    def _make_update_bar(self) -> QtWidgets.QFrame:
+        bar = QtWidgets.QFrame()
+        bar.setStyleSheet("""
+            QFrame { background-color: #1a6ea8; }
+            QLabel { color: white; font-size: 12px; font-weight: bold; background: transparent; }
+            QPushButton {
+                background-color: white; color: #1a6ea8; border: none;
+                padding: 3px 12px; border-radius: 3px; font-weight: bold; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #e8f4fd; }
+            QPushButton#dismiss { background: transparent; color: white; font-size: 14px; padding: 0 6px; }
+        """)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(12, 4, 8, 4)
+
+        self._update_label = QtWidgets.QLabel("Yeni güncelleme mevcut")
+        layout.addWidget(self._update_label)
+        layout.addStretch()
+
+        self._update_btn = QtWidgets.QPushButton("Güncelle ve Yeniden Başlat")
+        self._update_btn.clicked.connect(self._apply_update)
+        layout.addWidget(self._update_btn)
+
+        dismiss = QtWidgets.QPushButton("✕")
+        dismiss.setObjectName("dismiss")
+        dismiss.clicked.connect(bar.hide)
+        layout.addWidget(dismiss)
+
+        bar.hide()
+        return bar
+
+    def _make_branch_bar(self) -> QtWidgets.QFrame:
+        bar = QtWidgets.QFrame()
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(12, 4, 8, 4)
+
+        self._branch_label = QtWidgets.QLabel("")
+        layout.addWidget(self._branch_label)
+        layout.addStretch()
+
+        dismiss = QtWidgets.QPushButton("✕")
+        dismiss.setObjectName("dismiss")
+        dismiss.clicked.connect(bar.hide)
+        layout.addWidget(dismiss)
+
+        bar.hide()
+        return bar
+
+    def _show_branch_bar(self, text: str, *, warning: bool = False):
+        color = "#a87b00" if warning else "#1a6ea8"
+        self._branch_bar.setStyleSheet(f"""
+            QFrame {{ background-color: {color}; }}
+            QLabel {{ color: white; font-size: 12px; font-weight: bold; background: transparent; }}
+            QPushButton#dismiss {{ background: transparent; color: white; font-size: 14px; padding: 0 6px; }}
+        """)
+        self._branch_label.setText(text)
+        self._branch_bar.show()
+
+    def _ensure_master_branch_async(self):
+        if self._ensure_master_worker and self._ensure_master_worker.isRunning():
+            return
+        self._ensure_master_worker = EnsureMasterBranchWorker(self)
+        self._ensure_master_worker.branch_ok.connect(self._on_branch_ok)
+        self._ensure_master_worker.branch_switched.connect(self._on_branch_switched)
+        self._ensure_master_worker.switch_failed.connect(self._on_branch_switch_failed)
+        self._ensure_master_worker.start()
+
+    def _on_branch_ok(self, _prev: str):
+        pass
+
+    def _on_branch_switched(self, prev: str):
+        self._show_branch_bar(f"ℹ  '{prev}' branch'inden master'a geçildi")
+        QtCore.QTimer.singleShot(5000, self._branch_bar.hide)
+
+    def _on_branch_switch_failed(self, prev: str, err: str):
+        branch_info = f" (şu an: {prev})" if prev else ""
+        self._show_branch_bar(
+            f"⚠  Master'a geçilemedi{branch_info}. Güncellemeler bu makineye gelmeyebilir.  {err[:200]}",
+            warning=True,
+        )
+
+    def _check_for_updates_async(self):
+        if self._update_check_worker and self._update_check_worker.isRunning():
+            return
+        self._update_check_worker = UpdateCheckWorker(self)
+        self._update_check_worker.update_available.connect(self._on_update_available)
+        self._update_check_worker.start()
+
+    def _on_update_available(self, count: int, sha: str):
+        noun = "güncelleme" if count == 1 else "yeni commit"
+        self._update_label.setText(f"🔄  {count} {noun} mevcut ({sha[:7]})")
+        self._update_bar.show()
+
+    def _apply_update(self):
+        self._update_btn.setEnabled(False)
+        self._update_label.setText("Güncelleniyor…")
+        self._update_apply_worker = UpdateApplyWorker(self)
+        self._update_apply_worker.finished.connect(self._on_update_finished)
+        self._update_apply_worker.start()
+
+    def _on_update_finished(self, success: bool, error: str):
+        if success:
+            from src.utils.update_util import restart_app
+            restart_app()
+        else:
+            self._update_btn.setEnabled(True)
+            self._update_label.setText("Yeni güncelleme mevcut")
+            QtWidgets.QMessageBox.warning(self, "Güncelleme Hatası", f"Güncelleme başarısız:\n{error}")
+
+    # ------------------------------------------------------------------
+    # Adaptive window sizing
+    # ------------------------------------------------------------------
+
+    def _fit_to_screen(self, preferred_w: int = 1400, preferred_h: int = 900) -> None:
+        """Resize and center the window so it always fits the current display.
+
+        Call this AFTER show() (e.g. via QTimer.singleShot) so the full
+        layout pass has completed and inner widgets cannot re-expand the window.
+
+        Logic:
+        - availableGeometry() excludes the macOS Dock and Windows taskbar.
+        - Resize to min(preferred, 92 % of screen) to leave comfortable margins.
+        - Center the result. No maximum size is set so macOS full-screen works freely.
+        """
+        # Use the screen that contains the window (handles multi-monitor correctly).
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        avail  = screen.availableGeometry()   # logical pixels, excludes Dock/taskbar
+
+        max_w = int(avail.width()  * 0.92)
+        max_h = int(avail.height() * 0.92)
+
+        win_w = min(preferred_w, max_w)
+        win_h = min(preferred_h, max_h)
+
+        # Center on the available area, then resize atomically.
+        x = avail.x() + (avail.width()  - win_w) // 2
+        y = avail.y() + (avail.height() - win_h) // 2
+        self.setGeometry(x, y, win_w, win_h)
+
+    def init_vault(self):
+        print("⏳ Vault klasörleri kontrol ediliyor...")
+        load_dotenv()
+        self.media_vault_path = os.getenv("MEDIA_VAULT_PATH", "image_vault")
+        if not os.path.exists(self.media_vault_path):
+            os.makedirs(self.media_vault_path)
+        print("✅ Vault klasörleri hazır.")
+
+    def init_db(self):
+        print("⏳ Veritabanı tabloları güncelleniyor...")
+        
+        # Validate database configuration
+        if engine is None:
+            QtWidgets.QMessageBox.critical(
+                None,
+                "Veritabanı Yapılandırması Gerekli",
+                "Veritabanı yapılandırması bulunamadı!\n\n"
+                "Lütfen .env dosyasını oluşturun ve Docker Desktop'ı başlatın.\n\n"
+                "Detaylı talimatlar için terminal çıktısına bakın."
+            )
+            sys.exit(1)
+        
+        try:
+            with get_db() as db:
+                db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                db.commit()
+
+            Base.metadata.create_all(bind=engine)
+        
+            # Initialize database schema and migrations via repository
+            try:
+                self.app_service.get_media_service().media_repository.apply_schema_migrations()
+            except Exception as e:
+                logger.error(f"Schema migration failed: {e}")
+
+            print("✅ Veritabanı tabloları hazır.")
+            logger.info("Application started, database ready", extra={"event": "APP_START"})
+        except Exception as e:
+            logging.error(f"❌ Veritabanı bağlantı hatası: {str(e)}")
+            QtWidgets.QMessageBox.critical(
+                None,
+                "Veritabanı Bağlantı Hatası",
+                f"Veritabanına bağlanılamadı!\n\n"
+                f"Hata: {str(e)}\n\n"
+                f"Docker Desktop çalışıyor mu?\n"
+                f"Terminal'de 'docker-compose up -d' komutunu deneyin."
+            )
+            sys.exit(1)
+    
+    def UI(self):
+        self.init_menubar()
+        self.init_toolbar()
+        self.tabWidget()
+        self._connect_persons_tab()
+        self.event_widgets()
+        # self.media_details_form_widget()
+        self.layouts()
+        self._init_settings_tab()
+        self.apply_style()
+
+    def init_menubar(self):
+        menubar = self.menuBar()
+        
+        file_menu = menubar.addMenu("Dosya")
+        
+        open_action = QAction("Aç", self)
+        file_menu.addAction(open_action)
+        
+        save_action = QAction("Kaydet", self)
+        file_menu.addAction(save_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("Çıkış", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        view_menu = menubar.addMenu("Görünüm")
+        
+        grid_view_action = QAction("Izgara Görünümü", self)
+        grid_view_action.triggered.connect(self.switch_to_grid_view)
+        view_menu.addAction(grid_view_action)
+        
+        single_view_action = QAction("Tekli Görünüm", self)
+        single_view_action.triggered.connect(self.switch_to_single_view)
+        view_menu.addAction(single_view_action)
+
+    def switch_to_grid_view(self):
+        self.gallery_stack.setCurrentIndex(0)
+
+    def switch_to_single_view(self):
+        index = self.event_gallery_list_widget.currentIndex()
+        if index.isValid():
+            item = self._get_item_from_index(index)
+            if item and getattr(item, 'media_type', 'photo') == 'document':
+                import sys
+                abs_path = os.path.abspath(item.img_path)
+                if sys.platform == 'win32':
+                    os.startfile(abs_path)
+                else:
+                    from PySide6.QtGui import QDesktopServices
+                    from PySide6.QtCore import QUrl
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(abs_path))
+                return
+        self.gallery_stack.setCurrentIndex(1)
+        self.single_view_widget.setFocus()
+        if index.isValid():
+            self.on_gallery_item_clicked(index)
+
+    def _get_item_from_index(self, index):
+        if not index.isValid():
+            return None
+        if isinstance(index.model(), QtCore.QSortFilterProxyModel):
+            source_index = index.model().mapToSource(index)
+            return self.gallery_item_model.itemFromIndex(source_index)
+        return self.gallery_item_model.itemFromIndex(index)
+
+    def navigate_next(self):
+        index = self.event_gallery_list_widget.currentIndex()
+        if not index.isValid():
+            return
+        model = index.model()
+        row = index.row()
+        if row < model.rowCount() - 1:
+            next_index = model.index(row + 1, 0)
+            self.event_gallery_list_widget.setCurrentIndex(next_index)
+            self.on_gallery_item_clicked(next_index)
+
+    def navigate_previous(self):
+        index = self.event_gallery_list_widget.currentIndex()
+        if not index.isValid():
+            return
+        model = index.model()
+        row = index.row()
+        if row > 0:
+            prev_index = model.index(row - 1, 0)
+            self.event_gallery_list_widget.setCurrentIndex(prev_index)
+            self.on_gallery_item_clicked(prev_index)
+
+    def init_toolbar(self):
+        self.toolbar_widget = self.addToolBar("Toolbar")
+        
+        self.add_event = QAction("➕ Yeni Etkinlik", self)
+        self.add_event.triggered.connect(self.add_event_window)
+        self.toolbar_widget.addAction(self.add_event)
+
+        self.batch_import_action = QAction("📁 Toplu İçe Aktar", self)
+        self.batch_import_action.triggered.connect(self.batch_import_window)
+        self.toolbar_widget.addAction(self.batch_import_action)
+
+        exit_toolbar_action = QAction("Çıkış", self)
+        exit_toolbar_action.triggered.connect(self.close)
+        self.toolbar_widget.addAction(exit_toolbar_action)
+        self.toolbar_widget.show()
+
+    def add_event_window(self):
+        self.add_event_win = add_event_window.AddEvent(parent=self)
+
+    def batch_import_window(self):
+        from src.ui.dialogs.batch_import_dialog import BatchImportDialog
+        dialog = BatchImportDialog(self.app_service, parent=self)
+        dialog.importCompleted.connect(self.refresh_events)
+        dialog.exec()
+
+
+    def tabWidget(self):
+        self.tab_widget = QtWidgets.QTabWidget()
+        
+        # Central container to hold tab widget + new media status bar
+        self._central_container = QtWidgets.QWidget()
+        self._central_layout = QtWidgets.QVBoxLayout(self._central_container)
+        self._central_layout.setContentsMargins(0,0,0,0)
+        self._central_layout.setSpacing(0)
+        self._central_layout.addWidget(self._update_bar)
+        self._central_layout.addWidget(self._branch_bar)
+        self._central_layout.addWidget(self.tab_widget)
+        self._central_layout.addWidget(self._media_status_bar)
+        
+        self.setCentralWidget(self._central_container)
+        self.events_tab = QtWidgets.QWidget()
+        self.tab_widget.addTab(self.events_tab, "Etkinlikler")
+
+        self.persons_tab = PersonsTabWidget(
+            person_service=self.app_service.get_person_service(),
+            media_service=self.app_service.get_media_service(),
+            face_service=self.app_service.get_face_service(),
+            parent=self,
+        )
+        self.tab_widget.addTab(self.persons_tab, "Kişiler")
+
+        self.settings_tab = QtWidgets.QWidget()
+        self.tab_widget.addTab(self.settings_tab, "Ayarlar")
+
+        self.caption_tab = CaptionTabWidget(
+            caption_service=self.app_service.get_caption_service(),
+            media_service=self.app_service.get_media_service(),
+            person_service=self.app_service.get_person_service(),
+            parent=self,
+        )
+        self.tab_widget.addTab(self.caption_tab, "Altyazı")
+        self._caption_stats = CaptionStatsWidget(parent=self)
+        self.caption_tab.stats_updated.connect(self._caption_stats.add_result)
+        self._caption_stats.open_photo_requested.connect(self._open_photo_from_caption_stats)
+        self.tab_widget.addTab(self._caption_stats, "Altyazı Ekranı")
+
+        self.faq_tab = FAQWidget(parent=self)
+        self.tab_widget.addTab(self.faq_tab, "Yardım")
+
+        self.feedback_tab = FeedbackTabWidget(parent=self)
+        self.tab_widget.addTab(self.feedback_tab, "Geri Bildirim")
+
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+        self.tab_widget.show()
+
+    def fetch_events(self):
+        return self.app_service.get_event_service().get_all()
+    
+    def load_events(self, events=None):
+        """Load events from database or provided list and populate the tree widget grouped by Year -> Month -> Event."""
+        if events is None:
+            events = self.fetch_events()
+        
+        # Update media status bar with total for these events
+        total_media = 0
+        for ev in events:
+            items = self.app_service.get_media_service().get_all_for_event(ev.id)
+            total_media += len(items)
+        
+        self._media_status_bar.setText(f"📁 {len(events)} Etkinlik — Toplam {total_media} Medya")
+        
+        self.event_tree_widget.clear()
+        if not events:
+            return
+
+        # Group by year -> month -> list of events
+        grouped = defaultdict(lambda: defaultdict(list))
+        for ev in events:
+            if ev.event_date:
+                y = ev.event_date.year
+                m = ev.event_date.month
+            else:
+                y = "Tarihsiz"
+                m = 0
+            grouped[y][m].append(ev)
+
+        def year_sort_key(y):
+            if isinstance(y, int):
+                return (1, y)
+            return (0, 0)
+
+        sorted_years = sorted(grouped.keys(), key=year_sort_key, reverse=True)
+
+        for year in sorted_years:
+            year_months = grouped[year]
+            total_events_in_year = sum(len(ev_list) for ev_list in year_months.values())
+            
+            # Level 1: Year Item
+            year_item = QtWidgets.QTreeWidgetItem(self.event_tree_widget)
+            year_title = f"📅 {year} ({total_events_in_year})" if isinstance(year, int) else f"📅 Tarihsiz ({total_events_in_year})"
+            year_item.setText(0, year_title)
+            year_item.setData(0, QtCore.Qt.UserRole, {"type": "year", "year": year})
+            year_item.setFlags(year_item.flags() & ~QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+            
+            y_font = year_item.font(0)
+            y_font.setBold(True)
+            y_font.setPointSize(11)
+            year_item.setFont(0, y_font)
+            year_item.setForeground(0, QtGui.QBrush(QtGui.QColor("#8ecfff")))
+            
+            sorted_months = sorted(year_months.keys(), reverse=True)
+            for month in sorted_months:
+                ev_list = year_months[month]
+                ev_list.sort(
+                    key=lambda e: (e.event_date or e.created_at or datetime.datetime.min),
+                    reverse=True
+                )
+                
+                # Level 2: Month Item
+                month_item = QtWidgets.QTreeWidgetItem(year_item)
+                month_name = TURKISH_MONTHS.get(month, "Tarihsiz") if month != 0 else "Tarihsiz"
+                month_title = f"🗓️ {month_name} ({len(ev_list)})"
+                month_item.setText(0, month_title)
+                month_item.setData(0, QtCore.Qt.UserRole, {"type": "month", "year": year, "month": month})
+                month_item.setFlags(month_item.flags() & ~QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                
+                m_font = month_item.font(0)
+                m_font.setBold(True)
+                m_font.setPointSize(10)
+                month_item.setFont(0, m_font)
+                month_item.setForeground(0, QtGui.QBrush(QtGui.QColor("#e0e0e0")))
+                
+                # Level 3: Event Item
+                for event in ev_list:
+                    event_item = QtWidgets.QTreeWidgetItem(month_item)
+                    event_item.setData(0, QtCore.Qt.UserRole, {"type": "event", "event": event, "event_id": str(event.id)})
+                    
+                    card = EventCardWidget(event.name, event.event_date)
+                    card.event = event
+                    card.setFixedWidth(175)
+                    card.clicked.connect(lambda e=event, c=card: self.on_event_card_clicked(e, c))
+                    
+                    size = card.sizeHint()
+                    event_item.setSizeHint(0, QtCore.QSize(size.width(), size.height() + 4))
+                    self.event_tree_widget.setItemWidget(event_item, 0, card)
+                
+                month_item.setExpanded(True)
+            year_item.setExpanded(True)
+    
+    def load_gallery_items(self, event_id):
+        """Load gallery items for an event using the service layer."""
+        return self.app_service.get_media_service().get_gallery_items(event_id)
+
+
+    def refresh_events(self):
+        """Clear and reload the event tree"""
+        self._selected_event_card = None
+        self.event_tree_widget.clear()
+        self.load_events()
+
+    def on_event_search_entered(self):
+        """Handle search by name for events, grouping results by Year -> Month."""
+        query = self.event_search.text().strip()
+        self._selected_event_card = None
+        
+        if not query:
+            self.load_events()
+            return
+            
+        try:
+            _search_t0 = time.monotonic()
+            results = self.app_service.get_event_service().search_by_name(query)
+            _search_ms = int((time.monotonic() - _search_t0) * 1000)
+            if results:
+                self.load_events(results)
+                self.statusBar().showMessage(f"🔍 '{query}' için {len(results)} sonuç bulundu.", 3000)
+                total_media = 0
+                for ev in results:
+                    items = self.app_service.get_media_service().get_all_for_event(ev.id)
+                    total_media += len(items)
+                self._media_status_bar.setText(f"🔍 Arama Sonucu: {len(results)} Etkinlik — Toplam {total_media} Medya")
+            else:
+                self.event_tree_widget.clear()
+                self._media_status_bar.setText(f"🔍 Arama Sonucu: 0 Etkinlik — Toplam 0 Medya")
+                self.statusBar().showMessage(f"❌ '{query}' için sonuç bulunamadı.", 3000)
+            logger.info(
+                f"Event search: '{query}' → {len(results)} results in {_search_ms}ms",
+                extra={"event": "EVENT_SEARCH", "duration_ms": _search_ms},
+            )
+        except Exception as e:
+            logger.error(f"Event search failed: {e}")
+            self._media_status_bar.setText("❌ Arama Hatası")
+            self.statusBar().showMessage(f"Arama hatası: {e}", 3000)
+
+
+    # ------------------------------------------------------------------
+    # Background batch face detection
+    # ------------------------------------------------------------------
+
+    def _start_batch_face_detection(self, event):
+        from src.utils.video_util import VIDEO_EXTS
+        vault_path = event.vault_folder_path
+        media_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"} | VIDEO_EXTS
+        file_paths = [
+            os.path.join(vault_path, f)
+            for f in os.listdir(vault_path)
+            if os.path.splitext(f)[1].lower() in media_exts
+        ]
+        if not file_paths:
+            return
+        self._start_batch_face_detection_for_files(file_paths, event)
+
+    def _on_batch_face_progress(self, current, total):
+        self.statusBar().showMessage(f"🔍 Yüz tanıma: {current}/{total}")
+
+    def _on_batch_face_finished(self):
+        if self._face_detection_queue:
+            self._process_next_face_detection()
+        else:
+            self.statusBar().showMessage("✅ Yüz tanıma tamamlandı.", 5000)
+
+    def _on_batch_image_processed(self, file_path: str):
+        """If single view is showing this file, refresh its face overlay from DB."""
+        if self.single_view_widget.current_img_path == file_path:
+            self.single_view_widget.refresh_faces_from_db()
+
+    def _is_batch_pending_for_event(self, event_id) -> bool:
+        """Return True if event_id is currently being processed or is queued."""
+        if self._batch_face_worker and self._batch_face_worker.isRunning():
+            if self._batch_face_worker._event_id == event_id:
+                return True
+        return any(item[1].id == event_id for item in self._face_detection_queue)
+
+    def _resume_batch_face_detection(self, event, force=False):
+        """Start batch detection for any images not yet processed in this event.
+
+        Called each time an event is opened so interrupted runs are automatically
+        resumed after an app restart or worker crash.
+        """
+        from src.utils import path_util
+        vault_path = path_util.from_db_path(event.vault_folder_path)
+        logger.debug(f"_resume_batch_face_detection: event={event.id} vault_path={vault_path!r}")
+        if not vault_path or not os.path.exists(vault_path):
+            logger.debug(f"_resume_batch_face_detection: returning — vault_path missing or not on disk")
+            return
+
+        # Skip if this event is already queued or being processed
+        active_event_ids = {item[1].id for item in self._face_detection_queue}
+        if self._batch_face_worker and self._batch_face_worker.isRunning():
+            active_event_ids.add(getattr(self._batch_face_worker, '_event_id', None))
+        if event.id in active_event_ids:
+            logger.debug(f"_resume_batch_face_detection: returning — event already active")
+            if force:
+                self.statusBar().showMessage(f"⚠️ '{event.name}' zaten işleniyor veya kuyrukta.", 4000)
+            return
+
+        from src.utils.video_util import VIDEO_EXTS
+        media_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"} | VIDEO_EXTS
+        disk_files = {
+            os.path.join(vault_path, f)
+            for f in os.listdir(vault_path)
+            if os.path.splitext(f)[1].lower() in media_exts
+        }
+        logger.debug(f"_resume_batch_face_detection: disk_files={len(disk_files)}")
+        if not disk_files:
+            logger.debug(f"_resume_batch_face_detection: returning — no image files on disk")
+            return
+
+        # Find files that haven't been through face detection yet
+        db_records = self.app_service.get_media_service().get_all_for_event(event.id)
+        processed = {
+            os.path.normpath(r['file_path'])
+            for r in db_records
+            if r.get('face_detected_at')
+        }
+        unprocessed = list(disk_files) if force else [f for f in disk_files if os.path.normpath(f) not in processed]
+        logger.debug(f"_resume_batch_face_detection: processed={len(processed)} unprocessed={len(unprocessed)}")
+        if not unprocessed:
+            logger.debug(f"_resume_batch_face_detection: returning — all images already processed")
+            if force:
+                self.statusBar().showMessage(f"✅ '{event.name}' için işlenecek yeni medya bulunamadı.", 4000)
+            return  # everything already done
+
+        self._start_batch_face_detection_for_files(unprocessed, event, force=force)
+
+    def _start_batch_face_detection_for_files(self, file_paths, event, force=False):
+        """Enqueue a batch job; start immediately only if no worker is running."""
+        self._face_detection_queue.append((list(file_paths), event, force))
+        total_queued = sum(len(item[0]) for item in self._face_detection_queue)
+        if self._batch_face_worker is None or not self._batch_face_worker.isRunning():
+            self._process_next_face_detection()
+        else:
+            self.statusBar().showMessage(
+                f"🔍 Yüz tanıma kuyruğu: {len(self._face_detection_queue)} etkinlik bekliyor"
+            )
+
+    def _process_next_face_detection(self):
+        """Pop the next job from the queue and start it."""
+        if not self._face_detection_queue:
+            return
+            
+        item = self._face_detection_queue.pop(0)
+        if len(item) == 3:
+            file_paths, event, force = item
+        else:
+            file_paths, event = item
+            force = False
+            
+        svc = self.app_service
+        self._batch_face_worker = BatchFaceWorker(
+            file_paths,
+            event.id,
+            svc.get_face_service(),
+            svc.get_media_service(),
+            svc.get_person_service(),
+            parent=self,
+            force=force
+        )
+        self._batch_face_worker.progress.connect(self._on_batch_face_progress)
+        self._batch_face_worker.finished.connect(self._on_batch_face_finished)
+        self._batch_face_worker.image_processed.connect(self._on_batch_image_processed)
+        self._batch_face_worker.start()
+        queue_info = f" (+{len(self._face_detection_queue)} kuyrukta)" if self._face_detection_queue else ""
+        self.statusBar().showMessage(f"🔍 Yüz tanıma: 0/{len(file_paths)}{queue_info}")
+
+    # ------------------------------------------------------------------
+    # Background captioning queue
+    # ------------------------------------------------------------------
+
+    def _resume_batch_captioning(self, event, force=False):
+        """Queue uncaptioned images in this event for background AI captioning."""
+        from src.utils import config_util
+        if not force and not config_util.get_setting("auto_captioning_enabled", False):
+            return
+
+        from src.utils import path_util
+        vault_path = path_util.from_db_path(event.vault_folder_path)
+        if not vault_path or not os.path.exists(vault_path):
+            return
+
+        # Skip if this event is already queued or being processed
+        active_ids = {item[1].id for item in self._caption_queue}
+        if self._caption_worker and self._caption_worker.isRunning():
+            active_ids.add(getattr(self._caption_worker, '_event_id', None))
+        if event.id in active_ids:
+            return
+
+        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+        disk_files = [
+            os.path.abspath(os.path.join(vault_path, f))
+            for f in os.listdir(vault_path)
+            if os.path.splitext(f)[1].lower() in image_exts
+        ]
+        if not disk_files:
+            return
+
+        from src.utils.path_util import from_db_path
+        db_records = self.app_service.get_media_service().get_all_for_event(event.id)
+        captioned = {
+            os.path.normcase(from_db_path(r['file_path']))
+            for r in db_records
+            if r.get('captioned_at') or (r.get('caption_tr') and r.get('tags_tr'))
+        }
+        uncaptioned = [f for f in disk_files if os.path.normcase(f) not in captioned]
+        if not uncaptioned:
+            return
+
+        self._start_batch_captioning_for_files(uncaptioned, event)
+
+    def _start_global_captioning_on_startup(self):
+        """Run auto-captioning once on startup across all events for uncaptioned photo media."""
+        events = self.fetch_events()
+        for event in events:
+            self._resume_batch_captioning(event)
+
+    def _start_batch_captioning_for_files(self, file_paths, event):
+        self._caption_queue.append((list(file_paths), event))
+        if self._caption_worker is None or not self._caption_worker.isRunning():
+            self._process_next_captioning()
+
+    def _process_next_captioning(self):
+        if not self._caption_queue:
+            return
+        file_paths, event = self._caption_queue.pop(0)
+        svc = self.app_service
+        self._caption_worker = BackgroundCaptionWorker(
+            file_paths,
+            event.id,
+            svc.get_caption_service(),
+            svc.get_media_service(),
+            person_service=svc.get_person_service(),
+            parent=self,
+            event_name=getattr(event, 'name', ''),
+        )
+        self._caption_worker._event_id = event.id
+        self._caption_worker.progress.connect(self._on_caption_progress)
+        self._caption_worker.finished.connect(self._on_caption_finished)
+        self._caption_worker.image_captioned.connect(self._on_caption_image_done)
+        self._caption_worker.result_ready.connect(self._caption_stats.add_result)
+        self._caption_worker.start()
+        queue_info = f" (+{len(self._caption_queue)} kuyrukta)" if self._caption_queue else ""
+        self.statusBar().showMessage(f"🤖 Altyazı: 0/{len(file_paths)}{queue_info}")
+
+    def _on_caption_progress(self, current, total):
+        self.statusBar().showMessage(f"🤖 Altyazı: {current}/{total}")
+
+    def _on_caption_finished(self):
+        if self._caption_queue:
+            self._process_next_captioning()
+        else:
+            self.statusBar().showMessage("✅ Altyazı tamamlandı.", 5000)
+
+    def _on_caption_image_done(self, file_path: str):
+        """Called when a background caption job finishes one image.
+
+        1. Updates the single-view AI caption panel if this image is open.
+        2. Updates the in-memory GalleryItem so the caption appears in the
+           gallery grid immediately — no need to reopen the event.
+        """
+        try:
+            media_row = self.app_service.get_media_service().get_by_file_path(file_path)
+            caption_tr = (media_row.get('caption_tr') or '') if media_row else ''
+            tags_tr    = (media_row.get('tags_tr')    or '') if media_row else ''
+
+            # --- 1. Update single view panel if this file is currently open ---
+            if self.single_view_widget.current_img_path == file_path:
+                self._current_ai_caption_orig = (media_row.get('ai_caption_tr_orig') or media_row.get('caption_tr') or '') if media_row else ''
+                self._current_ai_tags_orig = (media_row.get('ai_tags_tr_orig') or media_row.get('tags_tr') or '') if media_row else ''
+                self._ai_caption_en.setPlainText(caption_tr)
+                self._ai_caption_tr.setPlainText('')
+                self._ai_tags_en.setText(tags_tr)
+                self._update_ai_status_ui()
+
+            # --- 2. Update the GalleryItem in the model so the gallery grid
+            #        reflects the new caption without reopening the event. ---
+            if hasattr(self, 'gallery_item_model') and self.gallery_item_model:
+                norm_path = os.path.normcase(os.path.normpath(file_path))
+                for row in range(self.gallery_item_model.rowCount()):
+                    item = self.gallery_item_model.item(row)
+                    if not item:
+                        continue
+                    if os.path.normcase(os.path.normpath(item.img_path)) == norm_path:
+                        # Patch the in-memory iptc_data so search/filter sees it too
+                        if caption_tr:
+                            item.iptc_data['AI Açıklama (TR)'] = caption_tr
+                        if tags_tr:
+                            item.iptc_data['AI Etiketler (TR)'] = tags_tr
+                        # Notify the view to repaint this cell
+                        idx = self.gallery_item_model.indexFromItem(item)
+                        if idx.isValid():
+                            self.gallery_item_model.dataChanged.emit(
+                                idx, idx,
+                                [QtCore.Qt.DisplayRole, QtCore.Qt.ToolTipRole]
+                            )
+                        break
+        except Exception as e:
+            logger.debug(f"_on_caption_image_done: {e}")
+
+
+    def _open_photo_from_caption_stats(self, img_path: str, event_name: str):
+        """Open a photo from the caption stats widget in single view."""
+        try:
+            # Switch to the Etkinlikler tab (index 0)
+            self.tab_widget.setCurrentIndex(0)
+
+            # Find and load the event that owns this file
+            target_event = None
+            if event_name:
+                events = self.fetch_events()
+                target_event = next((e for e in events if e.name == event_name), None)
+
+            if target_event:
+                # Click the event card to load the gallery
+                self.on_event_card_clicked(target_event)
+
+            # Set image in single view
+            media_row = self.app_service.get_media_service().get_by_file_path(img_path)
+            media_id = media_row['id'] if media_row else None
+            face_detected_at = media_row.get('face_detected_at') if media_row else None
+            event_id = target_event.id if target_event else self.current_event_id
+
+            self.single_view_widget.set_context(
+                event_id, media_id,
+                face_detected_at=face_detected_at,
+                is_batch_pending=False,
+            )
+            self.single_view_widget.set_image(img_path)
+            self.gallery_stack.setCurrentIndex(1)  # switch to single view
+            self.single_view_widget.setFocus()
+        except Exception as e:
+            logger.warning(f"_open_photo_from_caption_stats failed: {e}")
+
+    def on_event_card_clicked(self, event, card=None):
+        """Handle event card click"""
+        # Deselect previous card, highlight new one
+        if self._selected_event_card and shiboken.isValid(self._selected_event_card):
+            self._selected_event_card.setSelected(False)
+        if card:
+            card.setSelected(True)
+            self._selected_event_card = card
+
+        self.switch_to_grid_view()
+        self.current_event_id = event.id
+        self.current_event_name = event.name
+
+        if self._search_mode:
+            # In search mode: just narrow the already-loaded cross-event results by this event
+            self.gallery_search_proxy.setEventFilter(event.id)
+            self._resume_batch_face_detection(event)
+            return
+
+        # Normal mode: load this event's items from disk + DB
+        self.gallery_stack.setCurrentIndex(2)  # loading widget
+        self.media_details_scroll.setEnabled(False)
+        self.media_details_scroll.setStyleSheet(
+            "background-color: #252526; border: 1px solid #3f3f46; border-radius: 4px; opacity: 0.5;"
+        )
+        QtWidgets.QApplication.processEvents()
+
+        _gallery_t0 = time.monotonic()
+        items = self.app_service.get_media_service().get_gallery_items(event.id)
+        self.gallery_item_model = GalleryItemModel(items)
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.gallery_search_proxy.setEventFilter(None)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            self.gallery_search_proxy.setFilterText(self.event_gallery_search.text())
+            self._update_gallery_status_bar()
+        else:
+            self.event_gallery_list_widget.setModel(self.gallery_item_model)
+            self._update_gallery_status_bar()
+
+        self.gallery_item_model.start_loading()
+        _gallery_ms = int((time.monotonic() - _gallery_t0) * 1000)
+        logger.info(
+            f"Gallery loaded: {len(items)} items in {_gallery_ms}ms for event '{event.name}'",
+            extra={"event": "GALLERY_LOAD", "event_id": str(event.id), "duration_ms": _gallery_ms},
+        )
+        from src.utils import config_util
+        if config_util.get_setting("auto_captioning_enabled", False):
+            self._resume_batch_face_detection(event)
+
+        self.gallery_stack.setCurrentIndex(0)  # grid view
+        self.media_details_scroll.setEnabled(True)
+        self.media_details_scroll.setStyleSheet(
+            "background-color: #252526; border: 1px solid #3f3f46; border-radius: 4px;"
+        )
+
+    def _clear_event_card_selection(self):
+        """Deselect all event cards and clear the current event."""
+        self.event_tree_widget.clearSelection()
+        for i in range(self.event_tree_widget.topLevelItemCount()):
+            year_item = self.event_tree_widget.topLevelItem(i)
+            for j in range(year_item.childCount()):
+                month_item = year_item.child(j)
+                for k in range(month_item.childCount()):
+                    event_item = month_item.child(k)
+                    w = self.event_tree_widget.itemWidget(event_item, 0)
+                    if w and shiboken.isValid(w):
+                        w.setSelected(False)
+        self._selected_event_card = None
+        self.current_event_id = None
+
+    def eventFilter(self, obj, event):
+        if obj is self.event_gallery_search and event.type() == QtCore.QEvent.FocusIn:
+            if not hasattr(self, 'event_gallery_search_all_cb') or self.event_gallery_search_all_cb.isChecked():
+                self._clear_event_card_selection()
+        
+        # Override default Space bar selection in the list widget to open the image instead
+        if obj is self.event_gallery_list_widget and event.type() == QtCore.QEvent.KeyPress:
+            if event.key() == QtCore.Qt.Key_Space:
+                index = self.event_gallery_list_widget.currentIndex()
+                if index.isValid():
+                    self.switch_to_single_view()
+                return True # Consume event so list widget doesn't select/deselect
+                
+        return super().eventFilter(obj, event)
+
+    def show_event_context_menu(self, pos):
+        """Show context menu for event card or year/month header"""
+        item = self.event_tree_widget.itemAt(pos)
+        if not item:
+            return
+        
+        card = self.event_tree_widget.itemWidget(item, 0)
+        data = item.data(0, QtCore.Qt.UserRole)
+        
+        # If clicked on Year or Month header
+        if not card or not hasattr(card, 'event'):
+            if data and data.get("type") in ("year", "month"):
+                menu = QtWidgets.QMenu(self)
+                expand_action = menu.addAction("📂 Tümünü Genişlet")
+                collapse_action = menu.addAction("📁 Tümünü Daralt")
+                action = menu.exec(self.event_tree_widget.mapToGlobal(pos))
+                if action == expand_action:
+                    self.event_tree_widget.expandAll()
+                elif action == collapse_action:
+                    self.event_tree_widget.collapseAll()
+            return
+            
+        event = card.event
+        
+        import sys as _sys
+        _is_mac = _sys.platform == "darwin"
+        _is_win = _sys.platform == "win32"
+        _finder_label = "📁 Finder'da Aç" if _is_mac else "📁 Dosya Gezgini'nde Aç"
+
+        menu = QtWidgets.QMenu(self)
+        details_action = menu.addAction("🔍 Detaylar")
+        process_action = menu.addAction("🔍 Yüz Tanıma Başlat")
+        caption_action = menu.addAction("✨ AI Altyazı Başlat")
+        persons_action = menu.addAction("👥 Kişileri Görüntüle")
+        menu.addSeparator()
+        open_folder_action = menu.addAction(_finder_label)
+        menu.addSeparator()
+        delete_action = menu.addAction("🗑️ Sil")
+
+        action = menu.exec(self.event_tree_widget.mapToGlobal(pos))
+
+        if action == details_action:
+            self.on_event_details(event)
+        elif action == process_action:
+            self._resume_batch_face_detection(event, force=True)
+            self.statusBar().showMessage(f"🚀 '{event.name}' için yüz tanıma başlatıldı...", 4000)
+        elif action == caption_action:
+            self._resume_batch_captioning(event, force=True)
+            self.statusBar().showMessage(f"✨ '{event.name}' için altyazı işlemi başlatıldı...", 4000)
+        elif action == persons_action:
+            self._show_event_persons(event)
+        elif action == open_folder_action:
+            self._open_event_folder(event)
+        elif action == delete_action:
+            self.on_event_delete(event)
+
+    def _show_event_persons(self, event):
+        persons = self.app_service.get_person_service().get_persons_for_event(event.id)
+        
+        # Get currently active person filter if we are inside this event
+        active_persons = set()
+        if hasattr(self, 'gallery_search_proxy') and self.current_event_id == event.id:
+            active_persons = set(self.gallery_search_proxy._person_filter)
+
+        dlg = EventPersonsDialog(persons, event.name, active_persons=active_persons, parent=self)
+        dlg.persons_selected.connect(lambda names: self._filter_gallery_by_persons(event, names))
+        dlg.exec()
+
+    def _filter_gallery_by_person(self, person_name: str):
+        # Kept for compatibility / single person callback fallback
+        self.event_gallery_search.setText(person_name)
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setFilterText(person_name)
+
+    def _filter_gallery_by_persons(self, event, person_names: list[str]):
+        # Load the event first if it's not the current one
+        if self.current_event_id != event.id:
+            self.on_event_card_clicked(event)
+
+        if hasattr(self, 'gallery_search_proxy'):
+            # Clear text search box to avoid confusion/conflict
+            self.event_gallery_search.clear()
+            self.gallery_search_proxy.setFilterText("")
+
+            # Apply person filter
+            self.gallery_search_proxy.setPersonFilter(set(person_names))
+
+            # Show the blue filter bar
+            names_str = ", ".join(person_names)
+            count = self.gallery_search_proxy.rowCount()
+            self._person_filter_label.setText(f"Kişi filtresi: {names_str}  —  {count} fotoğraf")
+            self._person_filter_bar.show()
+
+            # Ensure grid view is active
+            self.tab_widget.setCurrentWidget(self.events_tab)
+            self.gallery_stack.setCurrentIndex(0)
+
+            # Sync with the left sidebar checkbox panel if visible
+            if hasattr(self, '_persons_list') and self._persons_filter_panel.isVisible():
+                self._persons_list.blockSignals(True)
+                for i in range(self._persons_list.count()):
+                    item = self._persons_list.item(i)
+                    if item.text() in person_names:
+                        item.setCheckState(QtCore.Qt.Checked)
+                    else:
+                        item.setCheckState(QtCore.Qt.Unchecked)
+                self._persons_list.blockSignals(False)
+
+    def _open_event_folder(self, event):
+        """Open the event's vault folder in the native file manager (Finder / Explorer)."""
+        import sys as _sys
+        import subprocess as _sp
+
+        folder = getattr(event, 'vault_folder_path', None)
+        if not folder or not os.path.isdir(folder):
+            QtWidgets.QMessageBox.warning(
+                self, "Klasör Bulunamadı",
+                f"Etkinlik vault klasörü bulunamadı:\n{folder}"
+            )
+            return
+
+        try:
+            if _sys.platform == "darwin":
+                _sp.Popen(["open", folder])
+            elif _sys.platform == "win32":
+                _sp.Popen(["explorer", os.path.normpath(folder)])
+            else:  # Linux fallback
+                _sp.Popen(["xdg-open", folder])
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Hata",
+                f"Klasör açılamadı: {e}"
+            )
+
+    def on_event_details(self, event):
+        """Show event details in a popup"""
+        msg = f"Etkinlik Adı: {event.name}\n"
+        msg += f"Tarih: {event.event_date.strftime('%Y-%m-%d %H:%M:%S') if event.event_date else 'Yok'}\n"
+        msg += f"Vault Yolu: {event.vault_folder_path}\n"
+        msg += f"İçe Aktarma Yolu: {event.imported_folder_path}\n"
+        QtWidgets.QMessageBox.information(self, "Etkinlik Detayları", msg)
+
+    def on_event_delete(self, event):
+        """Confirm and delete event"""
+        reply = QtWidgets.QMessageBox.question(
+            self, "Silme Onayı",
+            f"'{event.name}' etkinliğini ve tüm medya kayıtlarını silmek istediğinize emin misiniz?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+        
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                # Delete from service
+                self.app_service.get_event_service().delete(event.id)
+                # If this was currently open, reset view
+                if self.current_event_id == event.id:
+                    self.current_event_id = None
+                    self.gallery_item_model = GalleryItemModel([])
+                    self.event_gallery_list_widget.setModel(self.gallery_item_model)
+                
+                # Reload list
+                self.refresh_events()
+                QtWidgets.QMessageBox.information(self, "Başarılı", "Etkinlik silindi.")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Hata", f"Silme işlemi başarısız: {e}")
+    
+    def keyPressEvent(self, event):
+        """Global key handler for navigation"""
+        # If in Single View, handle navigation and view toggle
+        if self.gallery_stack.currentIndex() == 1:
+            if event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+                # Check if focused widget is a text input
+                focused = QtWidgets.QApplication.focusWidget()
+                if not isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QTextEdit)):
+                    if event.key() in (QtCore.Qt.Key_Right, QtCore.Qt.Key_Down):
+                        self.navigate_next()
+                    else:
+                        self.navigate_previous()
+                    event.accept()
+                    return
+            elif event.key() == QtCore.Qt.Key_Space:
+                # Space in single view goes back to gallery
+                self.switch_to_grid_view()
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
+
+    def on_gallery_item_clicked(self, index):
+        """Handle gallery item click - populate form with DB-first, fallback to file IPTC"""
+        item = self._get_item_from_index(index)
+        if item:
+            # Resolve media_id from DB if available
+            media_row = self.app_service.get_media_service().get_by_file_path(item.img_path)
+            media_id = media_row['id'] if media_row else None
+            self.current_media_id = media_id
+
+            # Provide context to single view BEFORE set_image (so DB-first works)
+            face_detected_at = media_row.get('face_detected_at') if media_row else None
+            is_batch_pending = (
+                not face_detected_at
+                and self._is_batch_pending_for_event(self.current_event_id)
+            )
+            _face_path = "db_hit" if face_detected_at else ("batch_pending" if is_batch_pending else "live_detection")
+            logger.info(
+                f"Image selected: {os.path.basename(item.img_path)} face_path={_face_path}",
+                extra={"event": "IMAGE_SELECT", "media_id": str(media_id) if media_id else None},
+            )
+            if getattr(item, 'media_type', 'photo') != 'document':
+                self.single_view_widget.set_context(
+                    self.current_event_id, media_id,
+                    face_detected_at=face_detected_at,
+                    is_batch_pending=is_batch_pending,
+                )
+                self.single_view_widget.set_image(item.img_path)
+            
+            # Clear all fields first
+            for w in [self.media_headline_input, self.media_object_name_input,
+                      self.media_location_input, self.media_credit_input,
+                      self.media_source_input, self.media_copyright_input,
+                      self.media_writer_input, self.media_byline_input,
+                      self.media_byline_title_input, self.media_category_input,
+                      self.media_supplemental_categories_input, self.media_people_input]:
+                w.clear()
+            for w in [self.media_title_input, self.media_description_input, self.media_tags_input]:
+                w.clear()
+            
+            # Title from EXIF
+            if 'Title' in item.exif_data:
+                self.media_title_input.setPlainText(str(item.exif_data['Title']))
+            elif 'Subject' in item.exif_data:
+                self.media_title_input.setPlainText(str(item.exif_data['Subject']))
+
+            # --- DB-first loading: prefer DB over file IPTC ---
+            db_iptc = None
+            if self.current_event_id:
+                db_iptc = self.app_service.get_media_service().get_iptc_data(item.img_path)
+                if db_iptc:
+                    self.current_media_id = db_iptc['id']
+
+            if db_iptc:
+                # Populate from database
+                self.media_title_input.setPlainText(db_iptc.get('title') or '')
+                self.media_headline_input.setText(db_iptc.get('iptc_headline') or '')
+                self.media_object_name_input.setText(db_iptc.get('iptc_object_name') or '')
+                self.media_description_input.setPlainText(db_iptc.get('iptc_caption') or '')
+                self.media_tags_input.setPlainText(db_iptc.get('iptc_keywords') or '')
+                self.media_credit_input.setText(db_iptc.get('iptc_credit') or '')
+                self.media_source_input.setText(db_iptc.get('iptc_source') or '')
+                self.media_copyright_input.setText(db_iptc.get('iptc_copyright') or '')
+                self.media_writer_input.setText(db_iptc.get('iptc_writer') or '')
+                self.media_byline_input.setText(db_iptc.get('iptc_byline') or '')
+                self.media_byline_title_input.setText(db_iptc.get('iptc_byline_title') or '')
+                self.media_category_input.setText(db_iptc.get('iptc_category') or '')
+                self.media_supplemental_categories_input.setText(db_iptc.get('iptc_supplemental_categories') or '')
+                
+                # Location
+                loc = ', '.join(filter(None, [
+                    db_iptc.get('iptc_city'), db_iptc.get('iptc_state'), db_iptc.get('iptc_country')
+                ]))
+                self.media_location_input.setText(loc)
+                
+                # Date
+                date_str = db_iptc.get('iptc_date_created') or ''
+                if len(date_str) == 8:
+                    qdate = QtCore.QDate.fromString(date_str, "yyyyMMdd")
+                    self.media_date_input.setDate(qdate)
+                else:
+                    self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
+                
+                # Persons from DB
+                if self.current_media_id:
+                    persons = self.app_service.get_person_service().get_persons_for_media(self.current_media_id)
+                    self.media_people_input.setText(', '.join(persons))
+            else:
+                # Fallback: populate from file IPTC
+                self.media_date_input.setDateTime(QtCore.QDateTime.currentDateTime())
+                if 'Headline' in item.iptc_data: self.media_headline_input.setText(item.iptc_data['Headline'])
+                if 'Object Name' in item.iptc_data: self.media_object_name_input.setText(item.iptc_data['Object Name'])
+                if 'Caption' in item.iptc_data: self.media_description_input.setPlainText(item.iptc_data['Caption'])
+                if 'Keywords' in item.iptc_data: self.media_tags_input.setPlainText(item.iptc_data['Keywords'])
+                if 'Credit' in item.iptc_data: self.media_credit_input.setText(item.iptc_data['Credit'])
+                if 'Source' in item.iptc_data: self.media_source_input.setText(item.iptc_data['Source'])
+                if 'Copyright' in item.iptc_data: self.media_copyright_input.setText(item.iptc_data['Copyright'])
+                if 'Writer' in item.iptc_data: self.media_writer_input.setText(item.iptc_data['Writer'])
+                if 'By-line' in item.iptc_data: self.media_byline_input.setText(item.iptc_data['By-line'])
+                if 'By-line Title' in item.iptc_data: self.media_byline_title_input.setText(item.iptc_data['By-line Title'])
+                if 'Category' in item.iptc_data: self.media_category_input.setText(item.iptc_data['Category'])
+                if 'Supplemental Categories' in item.iptc_data: self.media_supplemental_categories_input.setText(item.iptc_data['Supplemental Categories'])
+                if 'People' in item.iptc_data: self.media_people_input.setText(item.iptc_data['People'])
+                loc_parts = [item.iptc_data.get(k, '') for k in ('City', 'State', 'Country') if k in item.iptc_data]
+                if loc_parts: self.media_location_input.setText(', '.join(loc_parts))
+                if 'Date Created' in item.iptc_data:
+                    date_str = item.iptc_data['Date Created']
+                    if len(date_str) == 8:
+                        qdate = QtCore.QDate.fromString(date_str, "yyyyMMdd")
+                        self.media_date_input.setDate(qdate)
+
+            # Star rating (always from media_row which has the column; fallback to item)
+            rating = 0
+            if media_row:
+                rating = int(media_row.get('star_rating') or 0)
+            elif hasattr(item, 'star_rating'):
+                rating = item.star_rating
+            self._set_star_display(rating)
+
+            # Store original values from DB (with fallback to current if original is not populated yet)
+            if media_row:
+                self._current_ai_caption_orig = media_row.get('ai_caption_tr_orig') or media_row.get('caption_tr') or ''
+                self._current_ai_tags_orig = media_row.get('ai_tags_tr_orig') or media_row.get('tags_tr') or ''
+            else:
+                self._current_ai_caption_orig = ''
+                self._current_ai_tags_orig = ''
+
+            # AI caption fields (always from media_row; clear if not yet captioned)
+            self._ai_caption_en.setPlainText((media_row.get('caption_tr') or '') if media_row else '')
+            self._ai_caption_tr.setPlainText('')
+            self._ai_tags_en.setText((media_row.get('tags_tr') or '') if media_row else '')
+            self._update_ai_status_ui()
+
+
+    def save_media_iptc(self, silent=False):
+        """Save IPTC data to both the image file and the database."""
+        index = self.event_gallery_list_widget.currentIndex()
+        if not index.isValid():
+            QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen önce bir fotoğraf seçin.")
+            return
+        
+        item = self._get_item_from_index(index)
+        if not item or not self.current_event_id:
+            QtWidgets.QMessageBox.warning(self, "Uyarı", "Lütfen bir etkinlik ve fotoğraf seçin.")
+            return
+        
+        try:
+            # Collect IPTC data from form
+            location = self.media_location_input.text()
+            loc_parts = [p.strip() for p in location.split(',')]
+            city  = loc_parts[0] if len(loc_parts) >= 1 else ''
+            state = loc_parts[1] if len(loc_parts) >= 2 else ''
+            country = loc_parts[2] if len(loc_parts) >= 3 else ''
+
+            iptc_data = {
+                "Title": self.media_title_input.toPlainText(),
+                "Headline": self.media_headline_input.text(),
+                "Caption": self.media_description_input.toPlainText(),
+                "Keywords": self.media_tags_input.toPlainText(),
+                "Object Name": self.media_object_name_input.text(),
+                "City": city, "State": state, "Country": country,
+                "Credit": self.media_credit_input.text(),
+                "Source": self.media_source_input.text(),
+                "Copyright": self.media_copyright_input.text(),
+                "Writer": self.media_writer_input.text(),
+                "By-line": self.media_byline_input.text(),
+                "By-line Title": self.media_byline_title_input.text(),
+                "Date Created": "",
+                "Category": self.media_category_input.text(),
+                "Supplemental Categories": self.media_supplemental_categories_input.text(),
+            }
+            
+            # 1. Write IPTC metadata to the image file
+            self._write_iptc_to_file(item.img_path, iptc_data)
+            
+            # 2. Save to database (ensure media record exists)
+            media_id = self.app_service.get_media_service().ensure_media_exists(
+                self.current_event_id, item.img_path, 'photo'
+            )
+            self.current_media_id = media_id
+            self.app_service.get_media_service().save_iptc_data(media_id, iptc_data)
+            
+            # Save user-edited AI caption & tags
+            ai_caption = self._ai_caption_en.toPlainText()
+            ai_tags = self._ai_tags_en.text()
+            self.app_service.get_media_service().update_ai_caption_and_tags(media_id, ai_caption, ai_tags)
+            
+            # 3. Handle persons
+            self.app_service.get_person_service().unlink_all_from_media(media_id)
+            people_text = self.media_people_input.text()
+            if people_text:
+                for name in people_text.split(','):
+                    name = name.strip()
+                    if name:
+                        person_id = self.app_service.get_person_service().find_or_create(name)
+                        if person_id:
+                            self.app_service.get_person_service().link_to_media(person_id, media_id)
+            
+            if not silent:
+                QtWidgets.QMessageBox.information(self, "Başarılı", "✅ IPTC verileri dosyaya ve veritabanına kaydedildi.")
+            self.refresh_gallery_badges()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Hata", f"❌ Kaydetme hatası: {str(e)}")
+
+    def refresh_gallery_badges(self):
+        """Refresh the in_db badge on all gallery items for the current event."""
+        if not self.current_event_id:
+            return
+        db_paths = self.app_service.get_media_service().get_file_paths_for_event(self.current_event_id)
+        for row in range(self.gallery_item_model.rowCount()):
+            item = self.gallery_item_model.item(row)
+            if item:
+                in_db = os.path.normpath(item.img_path) in db_paths
+                if item.in_db != in_db:
+                    item.in_db = in_db
+                new_icon = QtGui.QIcon(GalleryItemModel.generate_pixmap(item))
+                item.setIcon(new_icon)
+
+
+    def _write_iptc_to_file(self, img_path: str, iptc_data: dict):
+        """Write IPTC metadata directly into the image file using iptcinfo3.
+
+        Only JPEG files support IPTC APP13 segments. For other formats
+        (PNG, TIFF, WebP, BMP) iptcinfo3 blindScans and always fails,
+        producing WARNING spam and slow I/O — skip them entirely.
+        """
+        ext = os.path.splitext(img_path)[1].lower()
+        if ext not in ('.jpg', '.jpeg'):
+            logger.debug(f"_write_iptc_to_file: skipping non-JPEG {os.path.basename(img_path)}")
+            return
+
+        from iptcinfo3 import IPTCInfo
+
+        def clean(val):
+            return val.replace('\x00', '').strip() if val else ''
+
+        def to_list(val):
+            """Convert a non-empty string to a single-item list, empty string to []."""
+            v = clean(val)
+            return [v.encode('utf-8')] if v else []
+
+        try:
+            info = IPTCInfo(img_path, force=True)
+        except Exception:
+            info = IPTCInfo(img_path, force=True)
+
+        
+        # String fields (single value)
+        string_fields = {
+            'headline':                          clean(iptc_data.get('Headline', '')),
+            'caption/abstract':                  clean(iptc_data.get('Caption', '')),
+            'object name':                       clean(iptc_data.get('Object Name', '')),
+            'city':                              clean(iptc_data.get('City', '')),
+            'province/state':                    clean(iptc_data.get('State', '')),
+            'country/primary location name':     clean(iptc_data.get('Country', '')),
+            'credit':                            clean(iptc_data.get('Credit', '')),
+            'source':                            clean(iptc_data.get('Source', '')),
+            'copyright notice':                  clean(iptc_data.get('Copyright', '')),
+            'writer/editor':                     clean(iptc_data.get('Writer', '')),
+            'by-line title':                     clean(iptc_data.get('By-line Title', '')),
+        }
+        for field, value in string_fields.items():
+            info[field] = value
+        
+        # List fields (iptcinfo3 requires iterable for these)
+        info['by-line'] = to_list(iptc_data.get('By-line', ''))
+        info['category'] = to_list(iptc_data.get('Category', ''))
+        info['supplemental category'] = to_list(iptc_data.get('Supplemental Categories', ''))
+        
+        # Keywords as list
+        keywords_raw = clean(iptc_data.get('Keywords', ''))
+        if keywords_raw:
+            info['keywords'] = [k.strip().encode('utf-8') for k in keywords_raw.split(',') if k.strip()]
+        else:
+            info['keywords'] = []
+        
+        # Save directly back to the file
+        try:
+            info.save()
+        except OSError as e:
+            if getattr(e, 'winerror', None) == 32:
+                # If we still hit a lock, wait a tiny bit and try one more time
+                import time
+                time.sleep(0.1)
+                info.save()
+            else:
+                raise
+
+
+    def event_widgets(self):
+        self.event_search = QtWidgets.QLineEdit()
+        self.event_search.setPlaceholderText("Ara...")
+        self.event_search.setFixedHeight(30)
+        self.event_search.setMinimumWidth(160)
+        self.event_search.setMaximumWidth(260)
+
+        self.event_tree_widget = QtWidgets.QTreeWidget()
+        self.event_tree_widget.setHeaderHidden(True)
+        self.event_tree_widget.setMinimumWidth(160)
+        self.event_tree_widget.setMaximumWidth(260)
+        self.event_tree_widget.setIndentation(14)
+        self.event_tree_widget.setAnimated(True)
+        self.event_tree_widget.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        
+        # Context menu setup
+        self.event_tree_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.event_tree_widget.customContextMenuRequested.connect(self.show_event_context_menu)
+        
+        # Backward compatibility alias
+        self.event_card_list_widget = self.event_tree_widget
+        
+        # Search functionality
+        self.event_search.returnPressed.connect(self.on_event_search_entered)
+        self.event_search.textChanged.connect(self.on_event_search_entered)
+        
+        # Load events into the tree
+        self.load_events()
+        
+        # Gallery search section — two-row layout
+        # Row 1: search input + action buttons
+        # Row 2: filter toggles + date + star rating filter
+        self.gallery_search_layout = QtWidgets.QVBoxLayout()
+        self.gallery_search_layout.setSpacing(4)
+        self.gallery_search_layout.setContentsMargins(0, 0, 0, 0)
+
+        # --- Row 1: search bar ---
+        _search_row = QtWidgets.QHBoxLayout()
+        _search_row.setSpacing(6)
+
+        self.event_gallery_search = QtWidgets.QLineEdit()
+        self.event_gallery_search.setPlaceholderText("🔍  Metadata veya Dosya Adı Ara...")
+        self.event_gallery_search.setFixedHeight(36)
+        self.event_gallery_search.setStyleSheet(
+            "QLineEdit { font-size: 13px; padding: 4px 10px; border-radius: 6px; "
+            "background: #2a2a2e; border: 1px solid #555; color: #fff; }"
+            "QLineEdit:focus { border: 1px solid #0078D7; background: #1e1e2e; }"
+        )
+        self.event_gallery_search.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+
+        self.event_gallery_search_btn = QtWidgets.QPushButton("Ara")
+        self.event_gallery_search_btn.setFixedHeight(36)
+        self.event_gallery_search_btn.setFixedWidth(60)
+
+        self.event_gallery_clear_btn = QtWidgets.QPushButton("Temizle")
+        self.event_gallery_clear_btn.setFixedHeight(36)
+        self.event_gallery_clear_btn.setToolTip("Aramayı ve tüm filtreleri temizle")
+        self.event_gallery_clear_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.event_gallery_clear_btn.clicked.connect(self._on_clear_search)
+
+        _search_row.addWidget(self.event_gallery_search)
+        _search_row.addWidget(self.event_gallery_search_btn)
+        _search_row.addWidget(self.event_gallery_clear_btn)
+
+        # --- Row 2: filter controls ---
+        _filter_row = QtWidgets.QHBoxLayout()
+        _filter_row.setSpacing(8)
+
+        self.event_gallery_search_all_cb = ToggleSwitch("Tüm Etkinliklerde Ara")
+        self.event_gallery_search_all_cb.setToolTip(
+            "İşaretliyse arama tüm etkinliklerde yapılır; "
+            "aksi hâlde yalnızca seçili etkinlikte aranır"
+        )
+
+        self.event_gallery_date_cb = ToggleSwitch("Tarih Filtresi:")
+        self.event_gallery_date = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
+        self.event_gallery_date.setCalendarPopup(True)
+        self.event_gallery_date.setFixedHeight(28)
+        self.event_gallery_date.setEnabled(False)
+        self.event_gallery_date_cb.toggled.connect(self.event_gallery_date.setEnabled)
+
+        # Media Type Filter Dropdown
+        self._media_type_filter_combo = QtWidgets.QComboBox()
+        self._media_type_filter_combo.setFixedHeight(28)
+        self._media_type_filter_combo.addItems([
+            "Tüm Medyalar",
+            "Fotoğraflar",
+            "Videolar",
+            "Dokümanlar"
+        ])
+        self._media_type_filter_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 11px;
+                background: #2a2a2e;
+                color: #fff;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 2px 6px;
+            }
+            QComboBox:focus {
+                border: 1px solid #0078D7;
+            }
+        """)
+
+        # Star filter: ❡1❡²2❡²3❡²4❡²5  (click = min-star filter; click active = clear)
+        self._star_filter_btns: list[QtWidgets.QPushButton] = []
+        _star_filter_style = (
+            "QPushButton { background: transparent; border: none; font-size: 16px; "
+            "color: #888; padding: 0 2px; }"
+            "QPushButton:hover { color: #FFD700; }"
+            "QPushButton[active='true'] { color: #FFD700; }"
+        )
+        for i in range(1, 6):
+            btn = QtWidgets.QPushButton("★")
+            btn.setFixedSize(24, 28)
+            btn.setStyleSheet(_star_filter_style)
+            btn.setProperty("star", i)
+            btn.setProperty("active", "false")
+            btn.setCursor(QtCore.Qt.PointingHandCursor)
+            btn.setToolTip(f"{i} yıldız ve üzeri")
+            btn.clicked.connect(lambda checked=False, n=i: self._on_star_filter_clicked(n))
+            self._star_filter_btns.append(btn)
+
+        _filter_row.addWidget(self.event_gallery_search_all_cb)
+        _filter_row.addWidget(self.event_gallery_date_cb)
+        _filter_row.addWidget(self.event_gallery_date)
+        _filter_row.addSpacing(6)
+        _type_lbl = QtWidgets.QLabel("Tür:")
+        _type_lbl.setStyleSheet("color: #aaa; font-size: 11px;")
+        _filter_row.addWidget(_type_lbl)
+        _filter_row.addWidget(self._media_type_filter_combo)
+        _filter_row.addSpacing(4)
+        for btn in self._star_filter_btns:
+            _filter_row.addWidget(btn)
+        _filter_row.addStretch()
+
+        self.gallery_search_layout.addLayout(_search_row)
+        self.gallery_search_layout.addLayout(_filter_row)
+
+        # Gallery Stack section (Grid + Single)
+        self.gallery_stack = QtWidgets.QStackedWidget()
+        
+        # Grid View
+        self.event_gallery_list_widget = QtWidgets.QListView()
+        self.event_gallery_list_widget.setViewMode(QtWidgets.QListView.IconMode)
+        self.event_gallery_list_widget.setGridSize(QtCore.QSize(180, 200))
+        self.event_gallery_list_widget.setSpacing(10)
+        self.event_gallery_list_widget.setUniformItemSizes(True)
+        self.event_gallery_list_widget.setIconSize(QtCore.QSize(150, 150))
+        
+        # Context menu
+        self.event_gallery_list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.event_gallery_list_widget.customContextMenuRequested.connect(self.show_gallery_context_menu)
+        
+        # Single View — inject face recognition dependencies
+        self.single_view_widget = SingleViewWidget(
+            face_service=self.app_service.get_face_service(),
+            person_service=self.app_service.get_person_service(),
+            media_service=self.app_service.get_media_service(),
+        )
+        self.single_view_widget.doubleClicked.connect(self.switch_to_grid_view)
+        self.single_view_widget.nextRequested.connect(self.navigate_next)
+        self.single_view_widget.prevRequested.connect(self.navigate_previous)
+        self.single_view_widget.facesChanged.connect(self._on_faces_changed)
+        
+        self.gallery_stack.addWidget(self.event_gallery_list_widget)
+        self.gallery_stack.addWidget(self.single_view_widget)
+
+        # Loading widget (index=2)
+        self._loading_widget = QtWidgets.QWidget()
+        _loading_layout = QtWidgets.QVBoxLayout(self._loading_widget)
+        _loading_layout.setAlignment(QtCore.Qt.AlignCenter)
+        _loading_label = QtWidgets.QLabel("⏳ Yükleniyor...")
+        _loading_label.setAlignment(QtCore.Qt.AlignCenter)
+        _loading_label.setStyleSheet("font-size: 22px; color: #555; font-weight: bold;")
+        _loading_layout.addWidget(_loading_label)
+        self.gallery_stack.addWidget(self._loading_widget)
+
+        self.gallery_item_model = GalleryItemModel([])
+        from src.ui.models.gallery_item_model import GallerySearchProxyModel
+        self.gallery_search_proxy = GallerySearchProxyModel()
+        self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+        self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+        
+        # Connect search
+        self.event_gallery_search.returnPressed.connect(self.on_gallery_search)
+        self.event_gallery_search_btn.clicked.connect(self.on_gallery_search)
+        self._media_type_filter_combo.currentIndexChanged.connect(self._on_media_type_filter_changed)
+        self.event_gallery_search.installEventFilter(self)
+        
+        # Install event filter to capture Space bar properly before QListView consumes it
+        self.event_gallery_list_widget.installEventFilter(self)
+        
+        # Connect click event to print EXIF data
+        self.event_gallery_list_widget.clicked.connect(self.on_gallery_item_clicked)
+        self.event_gallery_list_widget.doubleClicked.connect(self.switch_to_single_view)
+
+    def show_gallery_context_menu(self, pos):
+        """Show context menu for gallery item"""
+        index = self.event_gallery_list_widget.indexAt(pos)
+        if not index.isValid():
+            return
+            
+        item = self._get_item_from_index(index)
+        if not item:
+            return
+            
+        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+        ext = os.path.splitext(item.img_path)[1].lower()
+        is_photo = ext in image_exts
+        from src.utils.video_util import VIDEO_EXTS
+        is_video = ext in VIDEO_EXTS
+
+        menu = QtWidgets.QMenu(self)
+        reveal_action = menu.addAction("📁 Dosya Konumunu Aç")
+        
+        go_to_event_action = None
+        if is_photo and item.event_id and (not self.current_event_id or str(item.event_id) != str(self.current_event_id)):
+            event = self.app_service.get_event_service().get_event_by_id(item.event_id)
+            if event:
+                go_to_event_action = menu.addAction(f"📅 Etkinliğe Git ({event.name})")
+                menu.addSeparator()
+
+        caption_action = menu.addAction("✨ Yeniden Altyazıla")
+        caption_action.setEnabled(is_photo and bool(self.current_event_id))
+        face_action = menu.addAction("🔍 Yüzleri Yeniden Tara")
+        face_action.setEnabled((is_photo or is_video) and bool(self.current_event_id))
+        menu.addSeparator()
+        delete_action = menu.addAction("🗑️ Medyayı Sil")
+
+        action = menu.exec(self.event_gallery_list_widget.mapToGlobal(pos))
+
+        if action == reveal_action:
+            from src.utils import path_util
+            path_util.reveal_in_explorer(item.img_path)
+        elif go_to_event_action and action == go_to_event_action:
+            self._go_to_event(item.event_id)
+        elif action == caption_action:
+            event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
+            if event:
+                self._start_batch_captioning_for_files([item.img_path], event)
+        elif action == face_action:
+            event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
+            if event:
+                self._start_batch_face_detection_for_files([item.img_path], event, force=True)
+        elif action == delete_action:
+            self._delete_current_media(item)
+
+    def _go_to_event(self, event_id):
+        """Navigate to the event with the given ID, exiting search mode."""
+        if not event_id:
+            return
+            
+        event = self.app_service.get_event_service().get_event_by_id(event_id)
+        if not event:
+            return
+
+        # Reset all search parameters and exit search mode
+        self.event_gallery_search.clear()
+        self.event_gallery_date_cb.setChecked(False)
+        if hasattr(self, '_media_type_filter_combo'):
+            self._media_type_filter_combo.blockSignals(True)
+            self._media_type_filter_combo.setCurrentIndex(0)
+            self._media_type_filter_combo.blockSignals(False)
+        
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setStarFilter(0)
+            self.gallery_search_proxy.setMediaTypeFilter("all")
+            self.gallery_search_proxy.setFilterText("", None)
+            self.gallery_search_proxy.setEventFilter(None)
+        
+        self._clear_persons_filter()
+        if hasattr(self, '_persons_filter_panel'):
+            self._persons_filter_panel.hide()
+            
+        _inactive = "QPushButton { background: transparent; border: none; font-size: 18px; color: #bbb; padding: 0 1px; } QPushButton:hover { color: #FFD700; }"
+        for btn in self._star_filter_btns:
+            btn.setStyleSheet(_inactive)
+
+        self._search_mode = False
+
+        # Clear event search line edit if it was active
+        if self.event_search.text().strip():
+            self.event_search.blockSignals(True)
+            self.event_search.clear()
+            self.event_search.blockSignals(False)
+            self.load_events()
+
+        # Find and select the event card in the tree widget
+        found_card = None
+        found_item = None
+        for i in range(self.event_tree_widget.topLevelItemCount()):
+            year_item = self.event_tree_widget.topLevelItem(i)
+            for j in range(year_item.childCount()):
+                month_item = year_item.child(j)
+                for k in range(month_item.childCount()):
+                    item = month_item.child(k)
+                    card = self.event_tree_widget.itemWidget(item, 0)
+                    if card and hasattr(card, 'event') and str(card.event.id) == str(event_id):
+                        found_card = card
+                        found_item = item
+                        year_item.setExpanded(True)
+                        month_item.setExpanded(True)
+                        break
+                if found_card:
+                    break
+            if found_card:
+                break
+
+        if found_card and found_item:
+            self.event_tree_widget.setCurrentItem(found_item)
+            self.event_tree_widget.scrollToItem(found_item)
+            self.on_event_card_clicked(event, found_card)
+        else:
+            # Fallback if card is not in the tree widget (should not happen)
+            self.on_event_card_clicked(event)
+
+    def _delete_current_media(self, item):
+        """Confirm then delete a media item from DB and disk."""
+        fname = os.path.basename(item.img_path)
+        reply = QtWidgets.QMessageBox.question(
+            self, "Medyayı Sil",
+            f'"{fname}" kalıcı olarak silinsin mi?\nDosya diskten de kaldırılır.',
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            media_row = self.app_service.get_media_service().get_by_file_path(item.img_path)
+            if media_row:
+                self.app_service.get_media_service().delete(
+                    media_row['id'], media_row.get('file_path')
+                )
+            # Remove from gallery model without full reload
+            proxy = self.event_gallery_list_widget.model()
+            index = self.event_gallery_list_widget.currentIndex()
+            source_index = proxy.mapToSource(index)
+            self.gallery_item_model.removeRow(source_index.row())
+            if self.current_media_id and media_row and \
+                    str(self.current_media_id) == str(media_row.get('id', '')):
+                self.current_media_id = None
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Hata", f"Silme başarısız:\n{e}")
+
+    def _on_faces_changed(self):
+        """Update the UI people input and auto-save IPTC when face labels change."""
+        index = self.event_gallery_list_widget.currentIndex()
+        if not index.isValid():
+            return
+        item = self._get_item_from_index(index)
+        if not item or not self.current_event_id:
+            return
+
+        try:
+            self.current_media_id = self.app_service.get_media_service().ensure_media_exists(
+                self.current_event_id, item.img_path, 'photo'
+            )
+            persons = self.app_service.get_person_service().get_persons_for_media(self.current_media_id)
+            self.media_people_input.setText(', '.join(persons))
+            # Auto-save changes without showing a confirmation popup
+            self.save_media_iptc(silent=True)
+        except Exception as e:
+            import logging
+            logging.warning(f"Error updating faces: {e}")
+
+    # ------------------------------------------------------------------
+    # AI caption/tags status and revert helpers
+    # ------------------------------------------------------------------
+
+    def _update_ai_status_ui(self):
+        """Update the badges and revert button visibility based on whether the current
+        text matches the original AI text.
+        """
+        # Read current UI text
+        curr_caption = self._ai_caption_en.toPlainText().strip()
+        curr_tags = self._ai_tags_en.text().strip()
+        
+        orig_caption = self._current_ai_caption_orig.strip()
+        orig_tags = self._current_ai_tags_orig.strip()
+        
+        # 1. AI Caption status
+        if not orig_caption:
+            # No AI caption yet
+            self._ai_caption_badge.setText("")
+            self._ai_caption_badge.setStyleSheet("")
+            self._ai_caption_revert_btn.hide()
+        elif curr_caption == orig_caption:
+            # Match original
+            self._ai_caption_badge.setText("🤖 AI Orijinal")
+            self._ai_caption_badge.setStyleSheet("font-size: 10px; font-weight: bold; color: #4caf50; background: rgba(76, 175, 80, 0.15); border-radius: 3px; padding: 2px 5px;")
+            self._ai_caption_revert_btn.hide()
+        else:
+            # Edited
+            self._ai_caption_badge.setText("✍️ Düzenlendi")
+            self._ai_caption_badge.setStyleSheet("font-size: 10px; font-weight: bold; color: #ff9f43; background: rgba(255, 159, 67, 0.15); border-radius: 3px; padding: 2px 5px;")
+            self._ai_caption_revert_btn.show()
+            
+        # 2. AI Tags status
+        if not orig_tags:
+            # No AI tags yet
+            self._ai_tags_badge.setText("")
+            self._ai_tags_badge.setStyleSheet("")
+            self._ai_tags_revert_btn.hide()
+        elif curr_tags == orig_tags:
+            # Match original
+            self._ai_tags_badge.setText("🤖 AI Orijinal")
+            self._ai_tags_badge.setStyleSheet("font-size: 10px; font-weight: bold; color: #4caf50; background: rgba(76, 175, 80, 0.15); border-radius: 3px; padding: 2px 5px;")
+            self._ai_tags_revert_btn.hide()
+        else:
+            # Edited
+            self._ai_tags_badge.setText("✍️ Düzenlendi")
+            self._ai_tags_badge.setStyleSheet("font-size: 10px; font-weight: bold; color: #ff9f43; background: rgba(255, 159, 67, 0.15); border-radius: 3px; padding: 2px 5px;")
+            self._ai_tags_revert_btn.show()
+
+    def _on_ai_caption_revert_clicked(self):
+        """Restore the original AI caption to the UI field."""
+        self._ai_caption_en.setPlainText(self._current_ai_caption_orig)
+
+    def _on_ai_tags_revert_clicked(self):
+        """Restore the original AI tags to the UI field."""
+        self._ai_tags_en.setText(self._current_ai_tags_orig)
+
+    # ------------------------------------------------------------------
+    # Star rating helpers
+    # ------------------------------------------------------------------
+
+    def _set_star_display(self, rating: int):
+        """Update the 5 star buttons in the right panel to reflect current rating."""
+        for i, btn in enumerate(self._star_btns, 1):
+            btn.setStyleSheet(
+                "QPushButton { background: transparent; border: none; font-size: 22px; "
+                + ("color: #FFD700;" if i <= rating else "color: #ccc;")
+                + " padding: 0; } QPushButton:hover { color: #FFD700; }"
+            )
+
+    def _on_star_btn_clicked(self, n: int):
+        """Assign star rating n to current media. Clicking the same star clears it."""
+        if not self.current_media_id:
+            return
+        current = int(
+            (self.app_service.get_media_service().get_by_id(self.current_media_id) or {}).get('star_rating') or 0
+        )
+        new_rating = 0 if current == n else n
+        try:
+            self.app_service.get_media_service().save_star_rating(self.current_media_id, new_rating)
+        except Exception as e:
+            self.statusBar().showMessage(f"Puan kaydedilemedi: {e}", 4000)
+            return
+        logger.info(
+            f"Star rating: {current}→{new_rating}",
+            extra={"event": "STAR_RATING", "media_id": str(self.current_media_id)},
+        )
+        self._set_star_display(new_rating)
+        # Update the GalleryItem in memory so the thumbnail badge refreshes
+        index = self.event_gallery_list_widget.currentIndex()
+        item = self._get_item_from_index(index) if index.isValid() else None
+        if item:
+            item.star_rating = new_rating
+            from src.ui.models.gallery_item_model import GalleryItemModel
+            pixmap = GalleryItemModel.generate_pixmap(item)
+            item.setIcon(QtGui.QIcon(pixmap))
+        # Reapply star filter if active
+        if hasattr(self, 'gallery_search_proxy') and self.gallery_search_proxy._filter_min_stars:
+            self.gallery_search_proxy.invalidateFilter()
+
+    def _on_star_filter_clicked(self, n: int):
+        """Filter gallery to show only items with >= n stars. Click active star = clear."""
+        if not hasattr(self, 'gallery_search_proxy'):
+            return
+        current = self.gallery_search_proxy._filter_min_stars
+        new_min = 0 if current == n else n
+        self.gallery_search_proxy.setStarFilter(new_min)
+        # Update button appearance
+        _active = "QPushButton { background: transparent; border: none; font-size: 18px; color: #FFD700; padding: 0 1px; }"
+        _inactive = "QPushButton { background: transparent; border: none; font-size: 18px; color: #bbb; padding: 0 1px; } QPushButton:hover { color: #FFD700; }"
+        for i, btn in enumerate(self._star_filter_btns, 1):
+            btn.setStyleSheet(_active if i <= new_min else _inactive)
+        self._update_gallery_status_bar()
+
+    def _on_media_type_filter_changed(self):
+        """Filter gallery by selected media type."""
+        if not hasattr(self, 'gallery_search_proxy'):
+            return
+        idx = self._media_type_filter_combo.currentIndex()
+        mapping = {0: "all", 1: "photo", 2: "video", 3: "document"}
+        media_type = mapping.get(idx, "all")
+        self.gallery_search_proxy.setMediaTypeFilter(media_type)
+        self._update_gallery_status_bar()
+
+    def _update_gallery_status_bar(self):
+        """Update the gallery status bar text based on current filters and search mode."""
+        if not hasattr(self, 'gallery_search_proxy') or not hasattr(self, 'gallery_item_model'):
+            return
+            
+        count = self.gallery_search_proxy.rowCount()
+        total = self.gallery_item_model.rowCount()
+        
+        text = self.event_gallery_search.text().strip()
+        
+        active_filters = []
+        
+        # Star filter
+        min_stars = self.gallery_search_proxy._filter_min_stars
+        if min_stars > 0:
+            active_filters.append(f"★{min_stars}+")
+            
+        # Date filter
+        if self.event_gallery_date_cb.isChecked():
+            date_str = self.event_gallery_date.date().toString("dd.MM.yyyy")
+            active_filters.append(date_str)
+            
+        # Media type filter
+        media_type = getattr(self.gallery_search_proxy, '_filter_media_type', 'all')
+        if media_type != "all":
+            type_mapping = {"photo": "Fotoğraf", "video": "Video", "document": "Doküman"}
+            active_filters.append(type_mapping.get(media_type, media_type.capitalize()))
+            
+        filter_suffix = f" ({', '.join(active_filters)})" if active_filters else ""
+        
+        if text:
+            self._media_status_bar.setText(f"🔍 '{text}' — {count} / {total} Medya Bulundu{filter_suffix}")
+        elif self._search_mode:
+            self._media_status_bar.setText(f"🔍 Arama Sonucu — {count} / {total} Medya{filter_suffix}")
+        elif hasattr(self, 'current_event_name') and self.current_event_name:
+            self._media_status_bar.setText(f"📂 {self.current_event_name} — {count} / {total} Medya{filter_suffix}")
+        else:
+            self._media_status_bar.setText(f"📂 Medya Listesi — {count} / {total} Medya{filter_suffix}")
+
+    def _on_clear_search(self):
+        """Clear search text, reset all filters, reload gallery and update status bar."""
+        self.event_gallery_search.clear()
+        self.event_gallery_date_cb.setChecked(False)
+        if hasattr(self, '_media_type_filter_combo'):
+            self._media_type_filter_combo.blockSignals(True)
+            self._media_type_filter_combo.setCurrentIndex(0)
+            self._media_type_filter_combo.blockSignals(False)
+        
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setStarFilter(0)
+            self.gallery_search_proxy.setMediaTypeFilter("all")
+            self.gallery_search_proxy.setFilterText("", None)
+            self.gallery_search_proxy.setEventFilter(None)
+        self._clear_persons_filter()
+        if hasattr(self, '_persons_filter_panel'):
+            self._persons_filter_panel.hide()
+        _inactive = "QPushButton { background: transparent; border: none; font-size: 18px; color: #bbb; padding: 0 1px; } QPushButton:hover { color: #FFD700; }"
+        for btn in self._star_filter_btns:
+            btn.setStyleSheet(_inactive)
+        self._search_mode = False
+
+        search_all = hasattr(self, 'event_gallery_search_all_cb') and self.event_gallery_search_all_cb.isChecked()
+        if search_all:
+            self._select_newest_event()
+        elif self.current_event_id:
+            items = self.app_service.get_media_service().get_gallery_items(self.current_event_id)
+            self.gallery_item_model = GalleryItemModel(items)
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            self.gallery_item_model.start_loading()
+            self._update_gallery_status_bar()
+        else:
+            self._update_gallery_status_bar()
+
+    def _select_newest_event(self):
+        """Select the newest event card (first event under first month of first year) and load its gallery."""
+        if self.event_tree_widget.topLevelItemCount() == 0:
+            self._media_status_bar.setText("✅ Arama temizlendi")
+            return
+        
+        for i in range(self.event_tree_widget.topLevelItemCount()):
+            year_item = self.event_tree_widget.topLevelItem(i)
+            for j in range(year_item.childCount()):
+                month_item = year_item.child(j)
+                for k in range(month_item.childCount()):
+                    item = month_item.child(k)
+                    card = self.event_tree_widget.itemWidget(item, 0)
+                    if card and hasattr(card, 'event'):
+                        year_item.setExpanded(True)
+                        month_item.setExpanded(True)
+                        self.event_tree_widget.setCurrentItem(item)
+                        self.event_tree_widget.scrollToItem(item)
+                        self.on_event_card_clicked(card.event, card)
+                        return
+
+    def _load_all_gallery_items(self):
+        """Load all media across all events ordered by date and display in gallery."""
+        if not hasattr(self, 'gallery_search_proxy'):
+            return
+        items = self.app_service.get_media_service().get_all_gallery_items()
+        self.gallery_item_model = GalleryItemModel(items)
+        self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+        self.gallery_search_proxy.setFilterText("", None)
+        self.gallery_search_proxy.setEventFilter(None)
+        self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+        self.gallery_item_model.start_loading()
+        self.gallery_stack.setCurrentIndex(0)
+        self._media_status_bar.setText(f"📂 Tüm Etkinlikler — {len(items)} Medya")
+
+    def on_gallery_search(self):
+        """Search gallery; scoped to selected event or all events based on checkbox."""
+        if not hasattr(self, 'gallery_search_proxy'):
+            return
+        text = self.event_gallery_search.text().strip()
+        date_filter = None
+        if self.event_gallery_date_cb.isChecked():
+            date_filter = self.event_gallery_date.date().toString("yyyyMMdd")
+
+        search_all = hasattr(self, 'event_gallery_search_all_cb') and self.event_gallery_search_all_cb.isChecked()
+
+        if not search_all:
+            # Single-event mode: apply proxy filter on existing model, no FTS, no event deselect
+            self._search_mode = False
+            _filter_t0 = time.monotonic()
+            self.gallery_search_proxy.setPersonFilter(set())
+            self.gallery_search_proxy.setFilterText(text, date_filter)
+            if text:
+                count = self.gallery_search_proxy.rowCount()
+                _filter_ms = int((time.monotonic() - _filter_t0) * 1000)
+                self._update_gallery_status_bar()
+                logger.info(
+                    f"Gallery filter: '{text}' → {count} results in {_filter_ms}ms",
+                    extra={"event": "GALLERY_FILTER", "duration_ms": _filter_ms, "event_id": str(self.current_event_id) if self.current_event_id else None},
+                )
+                self._update_persons_panel()
+            else:
+                self._persons_filter_panel.hide()
+                self._update_gallery_status_bar()
+            return
+
+        # All-events mode: FTS across all events
+        if text:
+            self._clear_event_card_selection()
+            # Show loading screen and kick off background FTS query
+            self._search_mode = True
+            self._pending_search_date_filter = date_filter
+            self._pending_search_text = text
+            self._pending_search_t0 = time.monotonic()
+            self.gallery_stack.setCurrentIndex(2)  # loading widget
+
+            # Cancel any previous search still running
+            if self._search_worker and self._search_worker.isRunning():
+                self._search_worker.finished.disconnect()
+                self._search_worker.error.disconnect()
+                self._search_worker.quit()
+
+            self._search_worker = SearchWorker(
+                self.app_service.get_media_service(), text, parent=self
+            )
+            self._search_worker.finished.connect(self._on_search_finished)
+            self._search_worker.error.connect(self._on_search_error)
+            self._search_worker.start()
+        else:
+            # Empty search in all-events mode: restore all media ordered by date
+            self._search_mode = False
+            if self.current_event_id:
+                # Re-select the previously active event instead of dumping all media
+                self._select_newest_event()
+            else:
+                self._load_all_gallery_items()
+
+    def _on_search_finished(self, records, query_text):
+        """Called on the main thread when the background FTS query completes."""
+        # Ignore stale results if the user already typed something else
+        if query_text != self._pending_search_text:
+            return
+        from src.ui.models.gallery_item_model import GalleryItem
+        items = [
+            GalleryItem(
+                r.get('title') or os.path.basename(r.get('file_path', '')),
+                r['file_path'], in_db=True, db_metadata=r
+            )
+            for r in records
+            if r.get('file_path') and os.path.exists(r['file_path'])
+        ]
+        date_filter = self._pending_search_date_filter
+        self.gallery_item_model = GalleryItemModel(items)
+        self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+        self.gallery_search_proxy.setEventFilter(None)
+        self.gallery_search_proxy.setFilterText(query_text, date_filter)
+        self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+        self.gallery_item_model.start_loading()
+        self.gallery_stack.setCurrentIndex(0)
+        self._update_gallery_status_bar()
+        _fts_ms = int((time.monotonic() - getattr(self, '_pending_search_t0', time.monotonic())) * 1000)
+        logger.info(
+            f"FTS search: '{query_text}' → {count} results in {_fts_ms}ms",
+            extra={"event": "GALLERY_SEARCH_DONE", "duration_ms": _fts_ms},
+        )
+        self._update_persons_panel()
+
+    def _on_search_error(self, message):
+        self.gallery_stack.setCurrentIndex(0)
+        self.statusBar().showMessage(f"❌ Arama hatası: {message}", 6000)
+
+    def media_details_form_widget(self):
+        """Create form fields for media details"""
+        fixed_width = 300
+        # Create input fields and store references
+        self.media_title_input = QtWidgets.QTextEdit()
+        self.media_title_input.setMaximumHeight(50)
+        self.media_title_input.setMaximumWidth(fixed_width)
+        self.media_title_input.setPlaceholderText("Başlık")
+
+        self.media_headline_input = QtWidgets.QLineEdit()
+        self.media_headline_input.setMaximumWidth(fixed_width)
+        self.media_headline_input.setPlaceholderText("Manşet")
+
+        self.media_object_name_input = QtWidgets.QLineEdit()
+        self.media_object_name_input.setMaximumWidth(fixed_width)
+        self.media_object_name_input.setPlaceholderText("Nesne Adı")
+
+        self.media_date_input = QtWidgets.QDateTimeEdit()
+        self.media_date_input.setMaximumWidth(fixed_width)
+        self.media_date_input.setCalendarPopup(True)
+        self.media_date_input.setDisplayFormat("dd.MM.yyyy HH:mm")
+        
+        self.media_location_input = QtWidgets.QLineEdit()
+        self.media_location_input.setMaximumWidth(fixed_width)
+        self.media_location_input.setPlaceholderText("Konum")
+
+        self.media_description_input = QtWidgets.QTextEdit()
+        self.media_description_input.setMaximumHeight(100)
+        self.media_description_input.setMaximumWidth(fixed_width)
+        self.media_description_input.setPlaceholderText("Açıklama")
+
+        self.media_tags_input = QtWidgets.QTextEdit()
+        self.media_tags_input.setMaximumWidth(fixed_width)
+        self.media_tags_input.setPlaceholderText("Etiketler")
+        self.media_tags_input.setMaximumHeight(100)
+
+        # New IPTC Fields
+        self.media_credit_input = QtWidgets.QLineEdit()
+        self.media_credit_input.setMaximumWidth(fixed_width)
+        self.media_credit_input.setPlaceholderText("Kredi")
+
+        self.media_source_input = QtWidgets.QLineEdit()
+        self.media_source_input.setMaximumWidth(fixed_width)
+        self.media_source_input.setPlaceholderText("Kaynak")
+
+        self.media_copyright_input = QtWidgets.QLineEdit()
+        self.media_copyright_input.setMaximumWidth(fixed_width)
+        self.media_copyright_input.setPlaceholderText("Telif Hakkı")
+
+        self.media_writer_input = QtWidgets.QLineEdit()
+        self.media_writer_input.setMaximumWidth(fixed_width)
+        self.media_writer_input.setPlaceholderText("Yazar/Editör")
+
+        self.media_byline_input = QtWidgets.QLineEdit()
+        self.media_byline_input.setMaximumWidth(fixed_width)
+        self.media_byline_input.setPlaceholderText("İmza Satırı")
+
+        self.media_byline_title_input = QtWidgets.QLineEdit()
+        self.media_byline_title_input.setMaximumWidth(fixed_width)
+        self.media_byline_title_input.setPlaceholderText("İmza Unvanı")
+
+        self.media_category_input = QtWidgets.QLineEdit()
+        self.media_category_input.setMaximumWidth(fixed_width)
+        self.media_category_input.setPlaceholderText("Kategori")
+
+        self.media_supplemental_categories_input = QtWidgets.QLineEdit()
+        self.media_supplemental_categories_input.setMaximumWidth(fixed_width)
+        self.media_supplemental_categories_input.setPlaceholderText("Ek Kategoriler")
+
+        self.media_people_input = QtWidgets.QLineEdit()
+        self.media_people_input.setMaximumWidth(fixed_width)
+        self.media_people_input.setPlaceholderText("Kişiler (Virgülle ayırın)")
+
+        # Star rating widget (5 clickable stars)
+        self._star_rating_widget = QtWidgets.QWidget()
+        _sr_layout = QtWidgets.QHBoxLayout(self._star_rating_widget)
+        _sr_layout.setContentsMargins(0, 0, 0, 0)
+        _sr_layout.setSpacing(2)
+        self._star_btns: list[QtWidgets.QPushButton] = []
+        _star_style = (
+            "QPushButton { background: transparent; border: none; font-size: 22px; color: #ccc; padding: 0; }"
+            "QPushButton:hover { color: #FFD700; }"
+        )
+        for i in range(1, 6):
+            sb = QtWidgets.QPushButton("★")
+            sb.setFixedSize(30, 30)
+            sb.setStyleSheet(_star_style)
+            sb.setCursor(QtCore.Qt.PointingHandCursor)
+            sb.setToolTip(f"{i} yıldız")
+            sb.clicked.connect(lambda checked=False, n=i: self._on_star_btn_clicked(n))
+            self._star_btns.append(sb)
+            _sr_layout.addWidget(sb)
+        _sr_layout.addStretch()
+
+        # Create labels and add rows
+        from src.utils.i18n import t as _t
+        self.media_details_form.addRow(QtWidgets.QLabel("⭐ Puan:"), self._star_rating_widget)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_title")), self.media_title_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_headline")), self.media_headline_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_object_name")), self.media_object_name_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_date")), self.media_date_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_location")), self.media_location_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_description")), self.media_description_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_tags")), self.media_tags_input)
+        self.media_details_form.addRow(QtWidgets.QLabel("👥 Kişiler:"), self.media_people_input)
+
+        # AI-generated caption fields (editable, with status/revert UI)
+        _ai_style = """
+            QTextEdit {
+                background: #1a1a2e;
+                color: #ccc;
+                border: 1px solid #333;
+                border-radius: 3px;
+                font-size: 11px;
+            }
+            QTextEdit:focus {
+                border: 1px solid #ff9f43;
+            }
+        """
+        _ai_tags_style = """
+            QLineEdit {
+                background: #1a1a2e;
+                color: #ccc;
+                border: 1px solid #333;
+                border-radius: 3px;
+                font-size: 11px;
+                padding: 2px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #ff9f43;
+            }
+        """
+
+        self._ai_caption_en = QtWidgets.QTextEdit()
+        self._ai_caption_en.setReadOnly(False)
+        self._ai_caption_en.setMaximumHeight(70)
+        self._ai_caption_en.setMaximumWidth(fixed_width)
+        self._ai_caption_en.setPlaceholderText("(AI açıklaması bekleniyor…)")
+        self._ai_caption_en.setStyleSheet(_ai_style)
+
+        self._ai_caption_tr = QtWidgets.QTextEdit()
+        self._ai_caption_tr.setReadOnly(True)
+        self._ai_caption_tr.setMaximumHeight(70)
+        self._ai_caption_tr.setMaximumWidth(fixed_width)
+        self._ai_caption_tr.setPlaceholderText("(AI Türkçe açıklama bekleniyor…)")
+        self._ai_caption_tr.setStyleSheet(_ai_style)
+        self._ai_caption_tr.hide()
+
+        self._ai_tags_en = QtWidgets.QLineEdit()
+        self._ai_tags_en.setReadOnly(False)
+        self._ai_tags_en.setMaximumWidth(fixed_width)
+        self._ai_tags_en.setPlaceholderText("(AI etiketler…)")
+        self._ai_tags_en.setStyleSheet(_ai_tags_style)
+
+        # AI Caption Field Side layout with status badge and revert button
+        self._ai_caption_layout_widget = QtWidgets.QWidget()
+        self._ai_caption_layout_widget.setMaximumWidth(fixed_width)
+        _ai_cap_vbox = QtWidgets.QVBoxLayout(self._ai_caption_layout_widget)
+        _ai_cap_vbox.setContentsMargins(0, 0, 0, 0)
+        _ai_cap_vbox.setSpacing(2)
+
+        _cap_status_hbar = QtWidgets.QHBoxLayout()
+        self._ai_caption_badge = QtWidgets.QLabel("")
+        self._ai_caption_badge.setStyleSheet("font-size: 10px; font-weight: bold; border-radius: 3px; padding: 2px;")
+        
+        self._ai_caption_revert_btn = QtWidgets.QPushButton("↩️ Orijinale Dön")
+        self._ai_caption_revert_btn.setToolTip("Orijinal AI açıklamasına geri dön")
+        self._ai_caption_revert_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 10px;
+                color: #ff9f43;
+                background: transparent;
+                border: 1px solid #ff9f43;
+                border-radius: 3px;
+                padding: 1px 5px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 159, 67, 0.1);
+            }
+        """)
+        self._ai_caption_revert_btn.hide()
+        _cap_status_hbar.addWidget(self._ai_caption_badge)
+        _cap_status_hbar.addStretch()
+        _cap_status_hbar.addWidget(self._ai_caption_revert_btn)
+
+        _ai_cap_vbox.addLayout(_cap_status_hbar)
+        _ai_cap_vbox.addWidget(self._ai_caption_en)
+
+        # AI Tags Field Side layout with status badge and revert button
+        self._ai_tags_layout_widget = QtWidgets.QWidget()
+        self._ai_tags_layout_widget.setMaximumWidth(fixed_width)
+        _ai_tags_vbox = QtWidgets.QVBoxLayout(self._ai_tags_layout_widget)
+        _ai_tags_vbox.setContentsMargins(0, 0, 0, 0)
+        _ai_tags_vbox.setSpacing(2)
+
+        _tags_status_hbar = QtWidgets.QHBoxLayout()
+        self._ai_tags_badge = QtWidgets.QLabel("")
+        self._ai_tags_badge.setStyleSheet("font-size: 10px; font-weight: bold; border-radius: 3px; padding: 2px;")
+        
+        self._ai_tags_revert_btn = QtWidgets.QPushButton("↩️ Orijinale Dön")
+        self._ai_tags_revert_btn.setToolTip("Orijinal AI etiketlerine geri dön")
+        self._ai_tags_revert_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 10px;
+                color: #ff9f43;
+                background: transparent;
+                border: 1px solid #ff9f43;
+                border-radius: 3px;
+                padding: 1px 5px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 159, 67, 0.1);
+            }
+        """)
+        self._ai_tags_revert_btn.hide()
+        _tags_status_hbar.addWidget(self._ai_tags_badge)
+        _tags_status_hbar.addStretch()
+        _tags_status_hbar.addWidget(self._ai_tags_revert_btn)
+
+        _ai_tags_vbox.addLayout(_tags_status_hbar)
+        _ai_tags_vbox.addWidget(self._ai_tags_en)
+
+        self.media_details_form.addRow(QtWidgets.QLabel("🤖 AI Açıklama:"), self._ai_caption_layout_widget)
+        self.media_details_form.addRow(QtWidgets.QLabel("🏷 AI Etiket:"), self._ai_tags_layout_widget)
+
+        # Connect text change listeners for real-time status badge updating
+        self._ai_caption_en.textChanged.connect(self._update_ai_status_ui)
+        self._ai_tags_en.textChanged.connect(self._update_ai_status_ui)
+
+        # Connect revert buttons
+        self._ai_caption_revert_btn.clicked.connect(self._on_ai_caption_revert_clicked)
+        self._ai_tags_revert_btn.clicked.connect(self._on_ai_tags_revert_clicked)
+
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_credit")), self.media_credit_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_source")), self.media_source_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_copyright")), self.media_copyright_input)
+
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_writer")), self.media_writer_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_byline")), self.media_byline_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_byline_title")), self.media_byline_title_input)
+
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_category")), self.media_category_input)
+        self.media_details_form.addRow(QtWidgets.QLabel(_t("lbl_sup_categories")), self.media_supplemental_categories_input)
+
+        # Styling
+        self.media_details_form.setLabelAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.media_details_form.setFormAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+        self.media_details_form.setHorizontalSpacing(10)
+        self.media_details_form.setVerticalSpacing(8)
+
+        
+    def _apply_language(self):
+        """Update all translatable form labels and placeholders to the current language."""
+        from src.utils.i18n import t as _t
+        pairs = [
+            (self.media_title_input,                   "lbl_title"),
+            (self.media_headline_input,                "lbl_headline"),
+            (self.media_object_name_input,             "lbl_object_name"),
+            (self.media_date_input,                    "lbl_date"),
+            (self.media_location_input,                "lbl_location"),
+            (self.media_description_input,             "lbl_description"),
+            (self.media_tags_input,                    "lbl_tags"),
+            (self.media_credit_input,                  "lbl_credit"),
+            (self.media_source_input,                  "lbl_source"),
+            (self.media_copyright_input,               "lbl_copyright"),
+            (self.media_writer_input,                  "lbl_writer"),
+            (self.media_byline_input,                  "lbl_byline"),
+            (self.media_byline_title_input,            "lbl_byline_title"),
+            (self.media_category_input,                "lbl_category"),
+            (self.media_supplemental_categories_input, "lbl_sup_categories"),
+        ]
+        for widget, key in pairs:
+            lbl = self.media_details_form.labelForField(widget)
+            if lbl:
+                lbl.setText(_t(key))
+        self.media_title_input.setPlaceholderText(_t("ph_title"))
+        self.media_headline_input.setPlaceholderText(_t("ph_headline"))
+        self.media_object_name_input.setPlaceholderText(_t("ph_object_name"))
+        self.media_location_input.setPlaceholderText(_t("ph_location"))
+        self.media_description_input.setPlaceholderText(_t("ph_description"))
+        self.media_tags_input.setPlaceholderText(_t("ph_tags"))
+        self.media_credit_input.setPlaceholderText(_t("ph_credit"))
+        self.media_source_input.setPlaceholderText(_t("ph_source"))
+        self.media_copyright_input.setPlaceholderText(_t("ph_copyright"))
+        self.media_writer_input.setPlaceholderText(_t("ph_writer"))
+        self.media_byline_input.setPlaceholderText(_t("ph_byline"))
+        self.media_byline_title_input.setPlaceholderText(_t("ph_byline_title"))
+        self.media_category_input.setPlaceholderText(_t("ph_category"))
+        self.media_supplemental_categories_input.setPlaceholderText(_t("ph_sup_categories"))
+
+    def _on_language_changed(self, checked: bool):
+        if not checked:
+            return
+        from src.utils import config_util
+        lang = "tr" if self._lang_tr_btn.isChecked() else "en"
+        config_util.set_setting("language", lang)
+        self._apply_language()
+
+    def _connect_persons_tab(self):
+        self.persons_tab.person_gallery_requested.connect(self._on_person_gallery_requested)
+        self.persons_tab.note_navigation_requested.connect(self._on_note_navigation_requested)
+        self.persons_tab.status_message.connect(self._media_status_bar.setText)
+
+    def _on_tab_changed(self, index: int):
+        tab_name = self.tab_widget.tabText(index) if hasattr(self, 'tab_widget') else str(index)
+        logger.info(f"Tab switched to '{tab_name}'", extra={"event": "TAB_SWITCH"})
+        if self.tab_widget.widget(index) is self.persons_tab:
+            self.persons_tab.load_persons()
+
+    def _on_person_gallery_requested(self, person_name: str, items: list):
+        self.current_event_id = None
+        self.current_media_id = None
+        self.gallery_item_model = GalleryItemModel(items)
+        if hasattr(self, "gallery_search_proxy"):
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            self.gallery_search_proxy.setFilterText("")
+        else:
+            self.event_gallery_list_widget.setModel(self.gallery_item_model)
+        self.gallery_item_model.start_loading()
+
+        self._person_filter_label.setText(f"Kişi filtresi: {person_name}  —  {len(items)} fotoğraf")
+        self._person_filter_bar.show()
+
+        self.tab_widget.setCurrentWidget(self.events_tab)
+        self.gallery_stack.setCurrentIndex(0)
+
+    def _on_note_navigation_requested(self, rec: dict):
+        from src.utils import path_util
+        abs_path = path_util.from_db_path(rec.get("file_path", ""))
+        if not abs_path or not os.path.exists(abs_path):
+            QtWidgets.QMessageBox.warning(self, "Hata", "Dosya bulunamadı.")
+            return
+
+        from src.ui.models.gallery_item_model import GalleryItem
+        item = GalleryItem(
+            os.path.basename(abs_path),
+            abs_path,
+            in_db=True,
+            db_metadata=rec,
+        )
+        self.gallery_item_model = GalleryItemModel([item])
+        if hasattr(self, "gallery_search_proxy"):
+            self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+            self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            self.gallery_search_proxy.setFilterText("")
+        else:
+            self.event_gallery_list_widget.setModel(self.gallery_item_model)
+        self.gallery_item_model.start_loading()
+
+        self._person_filter_label.setText(f"Not araması: {rec.get('person_name', '')}  —  {os.path.basename(abs_path)}")
+        self._person_filter_bar.show()
+
+        self.tab_widget.setCurrentWidget(self.events_tab)
+        self.gallery_stack.setCurrentIndex(1)
+        self.single_view_widget.set_context(
+            event_id=None,
+            media_id=rec.get("media_id"),
+        )
+        self.single_view_widget.set_image(abs_path)
+
+    def _update_persons_panel(self):
+        """Rebuild the persons checkbox list from currently visible proxy rows."""
+        proxy = self.gallery_search_proxy
+        model = proxy.sourceModel()
+        if not model:
+            self._persons_filter_panel.hide()
+            return
+
+        persons = set()
+        for row in range(proxy.rowCount()):
+            src_index = proxy.mapToSource(proxy.index(row, 0))
+            item = model.itemFromIndex(src_index)
+            if item:
+                for name in item.iptc_data.get('People', '').split('\n'):
+                    name = name.strip()
+                    if name:
+                        persons.add(name)
+
+        self._persons_list.blockSignals(True)
+        self._persons_list.clear()
+        for name in sorted(persons):
+            lw_item = QtWidgets.QListWidgetItem(name)
+            lw_item.setFlags(lw_item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            lw_item.setCheckState(QtCore.Qt.Unchecked)
+            self._persons_list.addItem(lw_item)
+        self._persons_list.blockSignals(False)
+
+        if persons:
+            self._persons_filter_panel.show()
+        else:
+            self._persons_filter_panel.hide()
+
+    def _on_persons_filter_changed(self):
+        checked = set()
+        for i in range(self._persons_list.count()):
+            item = self._persons_list.item(i)
+            if item.checkState() == QtCore.Qt.Checked:
+                checked.add(item.text())
+        self.gallery_search_proxy.setPersonFilter(checked)
+
+    def _clear_persons_filter(self):
+        self._persons_list.blockSignals(True)
+        for i in range(self._persons_list.count()):
+            self._persons_list.item(i).setCheckState(QtCore.Qt.Unchecked)
+        self._persons_list.blockSignals(False)
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setPersonFilter(set())
+        self._person_filter_bar.hide()
+
+    def _clear_person_filter(self):
+        self._person_filter_bar.hide()
+        if hasattr(self, 'gallery_search_proxy'):
+            self.gallery_search_proxy.setPersonFilter(set())
+            
+        if self.current_event_id:
+            # Inside an event, keep items and just reload/refresh view
+            if hasattr(self, 'gallery_search_proxy'):
+                self.gallery_search_proxy.invalidateFilter()
+                count = self.gallery_search_proxy.rowCount()
+                event = self.app_service.get_event_service().get_event_by_id(self.current_event_id)
+                event_name = event.name if event else ""
+                self._media_status_bar.setText(f"📂 Etkinlik: {event_name} — Toplam {count} Medya")
+        else:
+            # Global search or persons gallery mode, clear it completely
+            self.current_event_id = None
+            self.gallery_item_model = GalleryItemModel([])
+            if hasattr(self, "gallery_search_proxy"):
+                self.gallery_search_proxy.setSourceModel(self.gallery_item_model)
+                self.event_gallery_list_widget.setModel(self.gallery_search_proxy)
+            else:
+                self.event_gallery_list_widget.setModel(self.gallery_item_model)
+
+    def _init_settings_tab(self):
+        layout = QtWidgets.QVBoxLayout(self.settings_tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setAlignment(QtCore.Qt.AlignTop)
+
+        from src.utils import config_util
+
+        # Auto Captioning Toggle
+        self.auto_caption_cb = ToggleSwitch("Otomatik İşleme Aktif (Altyazı + Yüz Tanıma)")
+        self.auto_caption_cb.setChecked(config_util.get_setting("auto_captioning_enabled", False))
+        self.auto_caption_cb.toggled.connect(self._on_auto_caption_toggled)
+
+        info_label = QtWidgets.QLabel("Not: Bu ayar hem otomatik altyazı üretimini (Qwen2.5-VL) hem de etkinlik açılışında otomatik yüz tanımayı kontrol eder. Düşük donanımlı cihazlarda kapalı tutulması tavsiye edilir.")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #aaa; font-style: italic; font-size: 12px; margin-bottom: 20px;")
+
+        layout.addWidget(self.auto_caption_cb)
+        layout.addWidget(info_label)
+
+        # Language selector
+        lang_group = QtWidgets.QGroupBox("Arayüz Dili / Interface Language")
+        lang_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; border: 1px solid #3f3f46; margin-top: 10px; padding-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; }"
+        )
+        lang_layout = QtWidgets.QHBoxLayout(lang_group)
+        self._lang_tr_btn = QtWidgets.QRadioButton("Türkçe")
+        self._lang_en_btn = QtWidgets.QRadioButton("English")
+        current_lang = config_util.get_setting("language", "tr")
+        (self._lang_tr_btn if current_lang == "tr" else self._lang_en_btn).setChecked(True)
+        self._lang_tr_btn.toggled.connect(self._on_language_changed)
+        lang_layout.addWidget(self._lang_tr_btn)
+        lang_layout.addWidget(self._lang_en_btn)
+        lang_layout.addStretch()
+        layout.addWidget(lang_group)
+
+        # Caption Backend selector
+        backend_group = QtWidgets.QGroupBox("Altyazı Modeli / Caption Backend")
+        backend_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; border: 1px solid #3f3f46; margin-top: 10px; padding-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; }"
+        )
+        backend_layout = QtWidgets.QVBoxLayout(backend_group)
+        backend_row = QtWidgets.QHBoxLayout()
+        backend_row.addWidget(QtWidgets.QLabel("Model:"))
+        self._caption_backend_combo = QtWidgets.QComboBox()
+        # (display_text, settings_value)
+        self._caption_backend_combo.addItem("Qwen2.5-VL (Yerel, transformers)", "qwen")
+        self._caption_backend_combo.addItem("Gemma4 (Ollama)", "gemma")
+        current_backend = config_util.get_setting("caption_backend", "qwen")
+        idx = self._caption_backend_combo.findData(current_backend)
+        if idx >= 0:
+            self._caption_backend_combo.setCurrentIndex(idx)
+        self._caption_backend_combo.currentIndexChanged.connect(self._on_caption_backend_changed)
+        backend_row.addWidget(self._caption_backend_combo, 1)
+        backend_layout.addLayout(backend_row)
+        backend_info = QtWidgets.QLabel(
+            "Not: Değişiklik için uygulamayı yeniden başlatın. "
+            "İki model aynı anda VRAM'a yüklenmez. "
+            "Gemma4 → Ollama servisi çalışmalı (ollama serve, gemma4 yüklü)."
+        )
+        backend_info.setWordWrap(True)
+        backend_info.setStyleSheet("color: #aaa; font-style: italic; font-size: 11px;")
+        backend_layout.addWidget(backend_info)
+        layout.addWidget(backend_group)
+
+        layout.addStretch()
+
+    def _on_auto_caption_toggled(self, checked):
+        from src.utils import config_util
+        config_util.set_setting("auto_captioning_enabled", checked)
+        if checked:
+            self.statusBar().showMessage("✅ Otomatik altyazı aktifleştirildi.", 3000)
+        else:
+            self.statusBar().showMessage("❌ Otomatik altyazı devre dışı bırakıldı.", 3000)
+
+    def _on_caption_backend_changed(self, _idx):
+        """Persist new caption backend; takes effect on next app restart."""
+        from src.utils import config_util
+        value = self._caption_backend_combo.currentData()
+        config_util.set_setting("caption_backend", value)
+        label = self._caption_backend_combo.currentText()
+        self.statusBar().showMessage(
+            f"✅ Altyazı modeli '{label}' olarak ayarlandı. Yeniden başlatın.", 5000
+        )
+
+    def layouts(self):
+        # Use a QSplitter for the three-column layout so each panel resizes
+        # proportionally and never overflows the screen on any display size.
+        self.events_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        self.events_splitter.setChildrenCollapsible(False)
+        self.events_column = QtWidgets.QVBoxLayout()
+        self.events_gallery = QtWidgets.QVBoxLayout()
+
+        # Wrap events_column in a container widget for the splitter
+        self._events_col_widget = QtWidgets.QWidget()
+        self._events_col_widget.setMinimumWidth(180)
+        self._events_col_widget.setMaximumWidth(260)
+        self._events_col_widget.setLayout(self.events_column)
+
+        # Wrap events_gallery in a container widget for the splitter
+        self._gallery_col_widget = QtWidgets.QWidget()
+        self._gallery_col_widget.setMinimumWidth(320)
+        self._gallery_col_widget.setLayout(self.events_gallery)
+
+        # Right side: Details Scroll Area
+        self.media_details_scroll = QtWidgets.QScrollArea()
+        self.media_details_scroll.setWidgetResizable(True)
+        self.media_details_scroll.setMinimumWidth(350)
+        self.media_details_scroll.setMaximumWidth(520)
+        self.media_details_scroll.setStyleSheet("background-color: #252526; border: 1px solid #3f3f46; border-radius: 4px;")
+
+        self.media_details_container = QtWidgets.QWidget()
+        self.media_details_form = QtWidgets.QFormLayout()
+        self.media_details_container.setLayout(self.media_details_form)
+        self.media_details_scroll.setWidget(self.media_details_container)
+
+        # Single Save button at the top of the details panel
+        self.save_media_btn = QtWidgets.QPushButton("💾 Kaydet")
+        self.save_media_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0078D7; color: white; padding: 10px;
+                border: none; border-radius: 4px; font-weight: bold; font-size: 14px;
+            }
+            QPushButton:hover { background-color: #005A9E; }
+        """)
+        self.save_media_btn.clicked.connect(self.save_media_iptc)
+        self.media_details_form.addRow(self.save_media_btn)
+
+        # Add all three panels to the splitter
+        self.events_splitter.addWidget(self._events_col_widget)
+        self.events_splitter.addWidget(self._gallery_col_widget)
+        self.events_splitter.addWidget(self.media_details_scroll)
+        # Proportions: event list (narrow) | gallery (wide) | details (medium)
+        self.events_splitter.setStretchFactor(0, 1)
+        self.events_splitter.setStretchFactor(1, 5)
+        self.events_splitter.setStretchFactor(2, 2)
+
+        # Keep events_layout as a thin wrapper so the rest of the code compiles
+        self.events_layout = QtWidgets.QHBoxLayout()
+        self.events_layout.setContentsMargins(0, 0, 0, 0)
+        self.events_layout.addWidget(self.events_splitter)
+        
+        # event column
+        self.events_column.addWidget(self.event_search)
+
+        # Persons filter panel — shows persons found in search results (hidden by default)
+        self._persons_filter_panel = QtWidgets.QWidget()
+        self._persons_filter_panel.setStyleSheet("background: #252526;")
+        _pf_layout = QtWidgets.QVBoxLayout(self._persons_filter_panel)
+        _pf_layout.setContentsMargins(4, 4, 4, 4)
+        _pf_layout.setSpacing(4)
+
+        _pf_header = QtWidgets.QHBoxLayout()
+        _pf_title = QtWidgets.QLabel("👥 Kişiler")
+        _pf_title.setStyleSheet("color: #50C8FF; font-size: 11px; font-weight: bold;")
+        _pf_header.addWidget(_pf_title)
+        _pf_header.addStretch()
+        _pf_clear = QtWidgets.QPushButton("✕")
+        _pf_clear.setFixedSize(18, 18)
+        _pf_clear.setStyleSheet(
+            "QPushButton{background:transparent;color:#888;border:none;font-size:11px;}"
+            "QPushButton:hover{color:#fff;}"
+        )
+        _pf_clear.clicked.connect(self._clear_persons_filter)
+        _pf_header.addWidget(_pf_clear)
+        _pf_layout.addLayout(_pf_header)
+
+        self._persons_list = QtWidgets.QListWidget()
+        self._persons_list.setMaximumHeight(200)
+        self._persons_list.setStyleSheet("""
+            QListWidget { background: #1e1e1e; border: 1px solid #3f3f46;
+                          border-radius: 3px; color: #f0f0f0; font-size: 12px; }
+            QListWidget::item { padding: 3px 6px; }
+            QListWidget::item:hover { background: #2d2d30; }
+            QListWidget::item:selected { background: #0078D7; }
+        """)
+        self._persons_list.itemChanged.connect(self._on_persons_filter_changed)
+        _pf_layout.addWidget(self._persons_list)
+        self._persons_filter_panel.hide()
+        self.events_column.addWidget(self._persons_filter_panel)
+
+        self.events_column.addWidget(self.event_tree_widget)
+        # Person filter banner (hidden by default)
+        self._person_filter_bar = QtWidgets.QWidget()
+        self._person_filter_bar.setStyleSheet(
+            "background: #1a3a5c; border: 1px solid #2d6ca2; border-radius: 4px;"
+        )
+        _pfbar_layout = QtWidgets.QHBoxLayout(self._person_filter_bar)
+        _pfbar_layout.setContentsMargins(10, 4, 6, 4)
+        self._person_filter_label = QtWidgets.QLabel()
+        self._person_filter_label.setStyleSheet("color: #8ecfff; font-weight: bold; font-size: 12px;")
+        _pfbar_layout.addWidget(self._person_filter_label)
+        _pfbar_layout.addStretch()
+        _clear_filter_btn = QtWidgets.QPushButton("✕ Filtreyi Temizle")
+        _clear_filter_btn.setStyleSheet("""
+            QPushButton { background: transparent; color: #8ecfff;
+                          border: 1px solid #2d6ca2; border-radius: 3px;
+                          padding: 2px 8px; font-size: 11px; }
+            QPushButton:hover { background: #2d6ca2; color: white; }
+        """)
+        _clear_filter_btn.clicked.connect(self._clear_person_filter)
+        _pfbar_layout.addWidget(_clear_filter_btn)
+        self._person_filter_bar.hide()
+
+        # event gallery
+        self.events_gallery.addLayout(self.gallery_search_layout)
+        self.events_gallery.addWidget(self._person_filter_bar)
+        self.events_gallery.addWidget(self.gallery_stack)  
+        # media details
+        self.media_details_form_widget()     
+        
+        self.events_tab.setLayout(self.events_layout)
+
+        pass
+
+    def apply_style(self):
+        self.setStyleSheet("""
+            QMainWindow { background-color: #1e1e1e; color: #ffffff; }
+            QTabWidget::pane { border: 1px solid #3f3f46; background-color: #1e1e1e; }
+            QTabBar::tab { background: #252526; color: #ffffff; padding: 10px 20px; border: 1px solid #3f3f46; border-bottom: none; margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
+            QTabBar::tab:selected { background: #1e1e1e; color: #ffffff; font-weight: bold; border-bottom: 2px solid #0078D7; }
+            QListView, QListWidget, QTreeWidget { background-color: #252526; border: 1px solid #3f3f46; color: #ffffff; border-radius: 4px; outline: none; }
+            QTreeWidget::item { padding: 3px 2px; border-radius: 4px; }
+            QTreeWidget::item:hover { background-color: #2d2d30; }
+            QTreeWidget::item:selected { background-color: #0078D7; }
+            QLineEdit, QTextEdit, QDateEdit, QDateTimeEdit { background-color: #333333; border: 1px solid #555555; color: #ffffff; padding: 4px; border-radius: 4px; }
+            QLineEdit:focus, QTextEdit:focus, QDateEdit:focus { border: 1px solid #0078D7; }
+            QLabel { color: #ffffff; }
+            QMenuBar { background-color: #1e1e1e; color: #ffffff; }
+            QMenuBar::item:selected { background-color: #333333; }
+            QMenu { background-color: #252526; color: #ffffff; border: 1px solid #3f3f46; }
+            QMenu::item { padding: 4px 24px 4px 20px; }
+            QMenu::item:selected { background-color: #0078D7; color: white;}
+            QScrollArea { background-color: #252526; border: none; }
+            QWidget { background-color: #1e1e1e; color: #ffffff; }
+            QPushButton { background-color: #333333; color: white; padding: 6px 15px; border: 1px solid #555555; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #3f3f46; border: 1px solid #0078D7; }
+            QPushButton:pressed { background-color: #0078D7; border: 1px solid #0078D7; }
+
+            /* Splitter handle — visible groove with centered drag dot */
+            QSplitter::handle {
+                background-color: #2d2d30;
+                border-left: 1px solid #3f3f46;
+                border-right: 1px solid #3f3f46;
+                width: 6px;
+                margin: 0px;
+            }
+            QSplitter::handle:hover {
+                background-color: #0078D7;
+            }
+            QSplitter::handle:pressed {
+                background-color: #005A9E;
+            }
+        """)
+
+        # Style the splitter handle image (3-dot drag indicator) via the widget itself
+        if hasattr(self, 'events_splitter'):
+            self.events_splitter.setHandleWidth(6)
+            for i in range(1, self.events_splitter.count()):
+                handle = self.events_splitter.handle(i)
+                handle.setCursor(QtCore.Qt.SplitHCursor)
+                handle.setToolTip("Sürükleyerek boyutlandırın")
+
+    def closeEvent(self, event):
+        """Cleanup running threads before closing."""
+        print("⏳ Uygulama kapatılıyor, arka plan işlemleri durduruluyor...")
+        for worker in [self._batch_face_worker, self._caption_worker, self._search_worker]:
+            if worker and worker.isRunning():
+                worker.quit()
+                worker.wait(2000) # Wait up to 2 seconds for clean exit
+        event.accept()
+        QtWidgets.QApplication.quit()
+
+
+
+def main():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    window = MainWindow()
+    window.app_service.initialize_application()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()

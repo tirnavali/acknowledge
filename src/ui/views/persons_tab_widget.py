@@ -371,7 +371,7 @@ class PersonsTabWidget(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Uyarı", "Yüz tanıma servisi mevcut değil.")
             return
 
-        from add_person_dialog import AddPersonDialog
+        from src.ui.dialogs.add_person_dialog import AddPersonDialog
         dlg = AddPersonDialog(self._face_service, self._person_service, parent=self)
         if dlg.exec() != QtWidgets.QDialog.Accepted:
             return

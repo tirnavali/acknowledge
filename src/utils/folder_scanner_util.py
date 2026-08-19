@@ -25,6 +25,14 @@ WINDOWS_RESERVED_NAMES = {
     "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 }
 
+AUXILIARY_MEDIA_SUBFOLDER_NAMES = {
+    "fotolar", "fotoğraflar", "fotograflar", "photos", "resimler", "images",
+    "raw", "jpg", "jpeg", "png", "video", "videolar", "videos", "belgeler",
+    "documents", "docs", "pdf", "100canon", "100nikon", "100sony", "dcim",
+    "secilenler", "seçilenler", "secilmis", "seçilmiş", "highres", "lowres",
+    "baski", "baskı", "web", "social", "sosyal"
+}
+
 
 class NamingTemplate(str, Enum):
     YEAR_PREFIX = "year_prefix"          # "2024 Divan Toplantısı"
@@ -49,9 +57,7 @@ def sanitize_folder_name(name: str) -> str:
     - Avoids Windows reserved names (CON, PRN, AUX, NUL, etc.).
     """
     clean = normalize_unicode(name)
-    # Replace illegal characters with underscore
     clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', clean)
-    # Replace consecutive spaces or underscores
     clean = re.sub(r'[\s_]+', '_', clean).strip('. _')
     if not clean or clean.upper() in WINDOWS_RESERVED_NAMES:
         clean = f"folder_{clean}" if clean else "event_folder"
@@ -102,7 +108,6 @@ def parse_date_and_name_from_folder(folder_name: str) -> Tuple[Optional[datetime
     if match_year:
         y = int(match_year.group(1))
         parsed_date = datetime.datetime(y, 1, 1, 12, 0)
-        # Keep clean title without raw year if needed
         clean_title = name.replace(match_year.group(0), "").strip(" .-_/[]()")
         clean_title = re.sub(r'\s+', ' ', clean_title).strip()
         return parsed_date, clean_title or name
@@ -110,45 +115,48 @@ def parse_date_and_name_from_folder(folder_name: str) -> Tuple[Optional[datetime
     return None, clean_title
 
 
-def detect_earliest_file_date(folder_path: str) -> Optional[datetime.datetime]:
-    """Scans media files in a folder for the earliest EXIF/filesystem date."""
-    if not os.path.exists(folder_path):
-        return None
+def detect_earliest_file_date(media_files_or_folder) -> Optional[datetime.datetime]:
+    """Scans media files for the earliest EXIF/filesystem date."""
+    if isinstance(media_files_or_folder, str):
+        if not os.path.exists(media_files_or_folder):
+            return None
+        file_list = []
+        for root, _, files in os.walk(media_files_or_folder):
+            for f in files:
+                if not f.startswith("."):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in ALL_SUPPORTED_EXTS:
+                        file_list.append(os.path.join(root, f))
+    else:
+        file_list = list(media_files_or_folder)
 
     earliest_time = None
-    try:
-        for filename in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, filename)
-            if not os.path.isfile(file_path):
-                continue
-            ext = os.path.splitext(filename)[1].lower()
-            if ext not in ALL_SUPPORTED_EXTS:
-                continue
+    for file_path in file_list:
+        ext = os.path.splitext(file_path)[1].lower()
 
-            # Check EXIF for images
-            if ext in IMAGE_EXTS:
-                try:
-                    with Image.open(file_path) as img:
-                        exif = img._getexif()
-                        if exif:
-                            dt_str = exif.get(36867) or exif.get(306) # DateTimeOriginal or DateTime
-                            if dt_str:
-                                dt = datetime.datetime.strptime(dt_str[:19], "%Y:%m:%d %H:%M:%S")
-                                ts = dt.timestamp()
-                                if earliest_time is None or ts < earliest_time:
-                                    earliest_time = ts
-                except Exception:
-                    pass
-
-            # Fallback to filesystem mtime
+        # Check EXIF for images
+        if ext in IMAGE_EXTS:
             try:
-                ts = os.path.getmtime(file_path)
-                if earliest_time is None or ts < earliest_time:
-                    earliest_time = ts
+                with Image.open(file_path) as img:
+                    exif = img._getexif()
+                    if exif:
+                        dt_str = exif.get(36867) or exif.get(306) # DateTimeOriginal or DateTime
+                        if dt_str:
+                            dt = datetime.datetime.strptime(str(dt_str)[:19], "%Y:%m:%d %H:%M:%S")
+                            ts = dt.timestamp()
+                            if earliest_time is None or ts < earliest_time:
+                                earliest_time = ts
+                                continue
             except Exception:
                 pass
-    except Exception:
-        pass
+
+        # Fallback to filesystem mtime
+        try:
+            ts = os.path.getmtime(file_path)
+            if earliest_time is None or ts < earliest_time:
+                earliest_time = ts
+        except Exception:
+            pass
 
     if earliest_time:
         return datetime.datetime.fromtimestamp(earliest_time)
@@ -176,13 +184,11 @@ def format_event_name(
     date_str = event_date.strftime("%d.%m.%Y")
 
     if template == NamingTemplate.YEAR_PREFIX:
-        # Check if year is already leading
         if clean.startswith(year_str):
             return clean
         return f"{year_str} {clean}".strip()
 
     elif template == NamingTemplate.YEAR_SUFFIX:
-        # Check if year is already trailing in parentheses
         if clean.endswith(f"({year_str})"):
             return clean
         return f"{clean} ({year_str})".strip()
@@ -224,47 +230,27 @@ class ScannedEventFolder:
         return self.total_media_count > 0
 
 
-def scan_subfolders(
-    root_folder: str,
-    template: NamingTemplate = NamingTemplate.YEAR_PREFIX,
-) -> List[ScannedEventFolder]:
-    """
-    Scans direct subdirectories under root_folder and compiles ScannedEventFolder list.
-    """
-    if not os.path.exists(root_folder) or not os.path.isdir(root_folder):
-        return []
+def _is_auxiliary_subfolder(name: str) -> bool:
+    return name.lower().strip() in AUXILIARY_MEDIA_SUBFOLDER_NAMES
 
-    results: List[ScannedEventFolder] = []
-    root_path = os.path.normpath(root_folder)
+
+def _collect_all_media_files(folder_path: str) -> Tuple[int, int, int, int, List[str]]:
+    """Recursively walks a folder and categorizes all media files."""
+    photo_count = 0
+    pdf_count = 0
+    doc_count = 0
+    video_count = 0
+    media_files = []
 
     try:
-        entries = sorted(os.listdir(root_path))
-    except Exception:
-        return []
-
-    for entry in entries:
-        sub_path = os.path.join(root_path, entry)
-        if not os.path.isdir(sub_path):
-            continue
-        if entry.startswith(".") or entry == "__pycache__":
-            continue
-
-        orig_name = normalize_unicode(entry)
-        parsed_date, clean_title = parse_date_and_name_from_folder(orig_name)
-
-        # Count media files inside
-        photo_count = 0
-        pdf_count = 0
-        doc_count = 0
-        video_count = 0
-        media_files = []
-
-        try:
-            for fname in sorted(os.listdir(sub_path)):
-                fpath = os.path.join(sub_path, fname)
-                if not os.path.isfile(fpath) or fname.startswith("."):
+        for root, dirs, files in os.walk(folder_path):
+            # Ignore hidden and thumbnail directories
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+            for f in sorted(files):
+                if f.startswith("."):
                     continue
-                ext = os.path.splitext(fname)[1].lower()
+                fpath = os.path.join(root, f)
+                ext = os.path.splitext(f)[1].lower()
                 if ext in IMAGE_EXTS:
                     photo_count += 1
                     media_files.append(fpath)
@@ -277,30 +263,145 @@ def scan_subfolders(
                 elif ext in VIDEO_EXTS:
                     video_count += 1
                     media_files.append(fpath)
-        except Exception:
-            pass
+    except Exception:
+        pass
 
-        # If date not in folder name, fallback to earliest media file date
+    return photo_count, pdf_count, doc_count, video_count, media_files
+
+
+def find_candidate_event_folders(root_folder: str, max_depth: int = 4) -> List[str]:
+    """
+    Recursively discovers meaningful event folders under root_folder.
+    Handles structures like:
+    - Root / Event / files
+    - Root / Month / Event / files
+    - Root / Year / Month / Event / files
+    - Root / Event / Fotolar / files
+    """
+    if not os.path.exists(root_folder) or not os.path.isdir(root_folder):
+        return []
+
+    root_path = os.path.normpath(root_folder)
+    discovered: List[str] = []
+
+    def scan_level(current_path: str, depth: int):
+        if depth > max_depth:
+            return
+
+        try:
+            entries = sorted(os.listdir(current_path))
+        except Exception:
+            return
+
+        direct_media = []
+        subdirs = []
+
+        for e in entries:
+            if e.startswith(".") or e == "__pycache__":
+                continue
+            full_p = os.path.join(current_path, e)
+            if os.path.isdir(full_p):
+                subdirs.append(e)
+            elif os.path.isfile(full_p):
+                ext = os.path.splitext(e)[1].lower()
+                if ext in ALL_SUPPORTED_EXTS:
+                    direct_media.append(full_p)
+
+        # Case 1: The folder contains direct media files
+        if len(direct_media) > 0:
+            discovered.append(current_path)
+            return
+
+        # Case 2: No direct media files, but has subdirectories
+        if len(subdirs) > 0:
+            # If all subdirectories are auxiliary names (e.g. 'Fotolar', 'Belgeler', 'RAW')
+            if all(_is_auxiliary_subfolder(s) for s in subdirs):
+                # Check if there is media in those subdirectories
+                _, _, _, _, mfiles = _collect_all_media_files(current_path)
+                if len(mfiles) > 0:
+                    discovered.append(current_path)
+                    return
+
+            # Otherwise, these subdirectories are category/month/event folders: recurse down
+            for s in subdirs:
+                scan_level(os.path.join(current_path, s), depth + 1)
+
+    # Check if root folder itself directly contains media files
+    root_direct_media = []
+    root_subdirs = []
+    try:
+        for e in sorted(os.listdir(root_path)):
+            if e.startswith(".") or e == "__pycache__":
+                continue
+            full_p = os.path.join(root_path, e)
+            if os.path.isdir(full_p):
+                root_subdirs.append(e)
+            elif os.path.isfile(full_p):
+                if os.path.splitext(e)[1].lower() in ALL_SUPPORTED_EXTS:
+                    root_direct_media.append(full_p)
+    except Exception:
+        pass
+
+    if len(root_direct_media) > 0 and len(root_subdirs) == 0:
+        # User selected a single event folder directly
+        return [root_path]
+
+    for s in root_subdirs:
+        scan_level(os.path.join(root_path, s), depth=1)
+
+    return discovered
+
+
+def scan_subfolders(
+    root_folder: str,
+    template: NamingTemplate = NamingTemplate.YEAR_PREFIX,
+) -> List[ScannedEventFolder]:
+    """
+    Scans subdirectories under root_folder (recursively supporting Year/Month/Event structures)
+    and compiles a list of ScannedEventFolder objects with full media counts.
+    """
+    if not os.path.exists(root_folder) or not os.path.isdir(root_folder):
+        return []
+
+    candidate_folders = find_candidate_event_folders(root_folder)
+    results: List[ScannedEventFolder] = []
+
+    for folder_path in candidate_folders:
+        orig_name = normalize_unicode(os.path.basename(folder_path))
+        parsed_date, clean_title = parse_date_and_name_from_folder(orig_name)
+
+        # Recursively count all media files inside this event folder and its subfolders
+        p_cnt, pdf_cnt, d_cnt, v_cnt, mfiles = _collect_all_media_files(folder_path)
+
+        # If date could not be parsed from folder name, try parent directory name or file dates
         if parsed_date is None:
-            parsed_date = detect_earliest_file_date(sub_path)
+            # Check parent folder name (e.g. '10-EKIM 2023' or '2023')
+            parent_name = os.path.basename(os.path.dirname(folder_path))
+            parent_date, _ = parse_date_and_name_from_folder(parent_name)
+            if parent_date:
+                parsed_date = parent_date
+
+        if parsed_date is None:
+            parsed_date = detect_earliest_file_date(mfiles)
+
         if parsed_date is None:
             parsed_date = datetime.datetime.now()
 
         target_name = format_event_name(orig_name, clean_title, parsed_date, template)
 
         item = ScannedEventFolder(
-            folder_path=sub_path,
+            folder_path=folder_path,
             original_name=orig_name,
             clean_name=clean_title,
             event_date=parsed_date,
             target_name=target_name,
-            photo_count=photo_count,
-            pdf_count=pdf_count,
-            doc_count=doc_count,
-            video_count=video_count,
-            media_files=media_files,
-            is_selected=len(media_files) > 0,
-            status="Hazır" if len(media_files) > 0 else "Boş Klasör",
+            photo_count=p_cnt,
+            pdf_count=pdf_cnt,
+            doc_count=d_cnt,
+            video_count=v_cnt,
+            media_files=mfiles,
+            is_selected=len(mfiles) > 0,
+            status="Hazır" if len(mfiles) > 0 else "Boş Klasör",
         )
         results.append(item)
 
