@@ -604,7 +604,7 @@ class MediaRepository:
 
     def apply_schema_migrations(self) -> None:
         """Apply necessary schema updates (adding columns, enforcing constraints)."""
-        iptc_columns = [
+        columns_to_ensure = [
             ("iptc_headline", "VARCHAR(500)"),
             ("iptc_caption", "TEXT"),
             ("iptc_keywords", "TEXT"),
@@ -624,19 +624,36 @@ class MediaRepository:
             ("title", "VARCHAR(500)"),
             ("tags_en", "TEXT"),
             ("tags_tr", "TEXT"),
+            ("caption_tr", "TEXT"),
+            ("caption_en", "TEXT"),
+            ("ai_caption_tr_orig", "TEXT"),
+            ("ai_tags_tr_orig", "TEXT"),
+            ("face_detected_at", "TIMESTAMPTZ"),
+            ("captioned_at", "TIMESTAMPTZ"),
+            ("star_rating", "SMALLINT NOT NULL DEFAULT 0"),
         ]
         
         with get_db() as db:
-            # 1. Add missing IPTC columns
-            for col_name, col_type in iptc_columns:
+            # 1. Add missing medias columns
+            for col_name, col_type in columns_to_ensure:
                 try:
                     db.execute(text(f"ALTER TABLE medias ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
                 except Exception:
                     pass
-            
-            # 2. Add timestamp_ms to face_detections
+
+            # 2. Add columns to other tables
             try:
                 db.execute(text("ALTER TABLE face_detections ADD COLUMN IF NOT EXISTS timestamp_ms FLOAT"))
+            except Exception:
+                pass
+
+            try:
+                db.execute(text("ALTER TABLE face_detections ADD COLUMN IF NOT EXISTS person_cleared BOOLEAN NOT NULL DEFAULT FALSE"))
+            except Exception:
+                pass
+
+            try:
+                db.execute(text("ALTER TABLE persons ADD COLUMN IF NOT EXISTS reference_embedding vector(512)"))
             except Exception:
                 pass
                 
