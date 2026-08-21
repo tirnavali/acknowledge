@@ -1,7 +1,7 @@
 {
     "auto_captioning_enabled": false,
     "language": "tr",
-    "caption_backend": "gemma",
     "grammar_correction_enabled": false,
-    "grammar_correction_model": "gemma3:1b"
+    "grammar_correction_model": "gemma3:1b",
+    "caption_backend": "gemma"
 }

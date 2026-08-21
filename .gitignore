@@ -44,4 +44,4 @@ env/
 Thumbs.db
 
 # Models
-models/
+/models/
